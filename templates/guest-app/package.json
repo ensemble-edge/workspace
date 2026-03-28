@@ -1,0 +1,19 @@
+{
+  "name": "my-guest-app",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@ensemble-edge/guest": "^0.0.1",
+    "@ensemble-edge/guest-cloudflare": "^0.0.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "typescript": "^5.4.0",
+    "wrangler": "^3.60.0"
+  }
+}

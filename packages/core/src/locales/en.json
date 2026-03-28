@@ -1,0 +1,41 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "success": "Success"
+  },
+  "shell": {
+    "sidebar": {
+      "apps": "Apps",
+      "settings": "Settings",
+      "help": "Help"
+    },
+    "toolbar": {
+      "search": "Search...",
+      "notifications": "Notifications",
+      "profile": "Profile"
+    },
+    "ai_panel": {
+      "title": "AI Assistant",
+      "placeholder": "Ask anything...",
+      "thinking": "Thinking..."
+    }
+  },
+  "apps": {
+    "home": {
+      "title": "Home",
+      "welcome": "Welcome to your workspace"
+    },
+    "settings": {
+      "title": "Settings",
+      "general": "General",
+      "appearance": "Appearance",
+      "security": "Security"
+    }
+  }
+}

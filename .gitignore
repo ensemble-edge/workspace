@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.wrangler/
+.turbo/
+.DS_Store
+*.log
+.dev.vars
+package-lock.json
+*.tsbuildinfo
+worker-configuration.d.ts
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.d.ts.map
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map

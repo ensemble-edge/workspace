@@ -1,0 +1,9 @@
+# Default owners for everything
+* @ensemble-ai/core
+
+# Package-specific owners
+/packages/core/ @ensemble-ai/core
+/packages/sdk/ @ensemble-ai/core
+/packages/ui/ @ensemble-ai/core
+/packages/cli/ @ensemble-ai/core
+/packages/guest/ @ensemble-ai/core

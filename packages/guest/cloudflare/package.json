@@ -1,0 +1,35 @@
+{
+  "name": "@ensemble-edge/guest-cloudflare",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Cloudflare Workers adapter for Ensemble guest apps",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "tsc --watch",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "peerDependencies": {
+    "@ensemble-edge/guest": "^0.0.1",
+    "@cloudflare/workers-types": "^4.0.0"
+  },
+  "devDependencies": {
+    "@ensemble-edge/guest": "*",
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "typescript": "^5.4.0"
+  },
+  "license": "MIT"
+}

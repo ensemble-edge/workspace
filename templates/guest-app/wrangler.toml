@@ -1,0 +1,6 @@
+name = "my-guest-app"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[vars]
+APP_NAME = "My App"

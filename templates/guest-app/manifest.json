@@ -1,0 +1,11 @@
+{
+  "id": "my-app",
+  "name": "My App",
+  "version": "1.0.0",
+  "description": "A guest app for Ensemble Workspace",
+  "icon": "/icon.svg",
+  "permissions": [
+    "read:user"
+  ],
+  "entry": "/"
+}

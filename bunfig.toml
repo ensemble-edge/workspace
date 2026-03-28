@@ -1,0 +1,7 @@
+[install]
+# Use exact versions for reproducibility
+exact = true
+
+[test]
+# Enable coverage by default
+coverage = true
