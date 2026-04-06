@@ -579,6 +579,7 @@ function generateShellHtml(workspaceName: string, accentColor: string): string {
  */
 function generateLoginHtml(workspaceName: string, accentColor: string): string {
   const inputClass = 'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
+  const inputErrorClass = 'border-destructive focus-visible:ring-destructive';
 
   return `<!DOCTYPE html>
 <html lang="en" class="dark">
@@ -603,10 +604,10 @@ function generateLoginHtml(workspaceName: string, accentColor: string): string {
       <p class="text-sm text-muted-foreground">Sign in to your workspace</p>
     </div>
 
-    <!-- Error Message -->
+    <!-- Global Error Message -->
     <div class="hidden text-sm text-destructive bg-destructive/10 p-3 rounded-md" id="errorMessage"></div>
 
-    <form class="space-y-4" id="loginForm">
+    <form class="space-y-4" id="loginForm" novalidate>
       <!-- Email -->
       <div class="space-y-2">
         <label class="text-sm font-medium text-foreground" for="email">Email</label>
@@ -616,9 +617,9 @@ function generateLoginHtml(workspaceName: string, accentColor: string): string {
           name="email"
           class="${inputClass}"
           placeholder="you@example.com"
-          required
           autocomplete="email"
         >
+        <p class="hidden text-xs text-destructive" id="emailError"></p>
       </div>
 
       <!-- Password -->
@@ -633,9 +634,9 @@ function generateLoginHtml(workspaceName: string, accentColor: string): string {
           name="password"
           class="${inputClass}"
           placeholder="••••••••"
-          required
           autocomplete="current-password"
         >
+        <p class="hidden text-xs text-destructive" id="passwordError"></p>
       </div>
 
       <!-- Submit -->
@@ -658,16 +659,60 @@ function generateLoginHtml(workspaceName: string, accentColor: string): string {
     const form = document.getElementById('loginForm');
     const submitBtn = document.getElementById('submitBtn');
     const errorMessage = document.getElementById('errorMessage');
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const emailError = document.getElementById('emailError');
+    const passwordError = document.getElementById('passwordError');
+
+    const inputErrorClass = '${inputErrorClass}';
+
+    // Clear field error on input
+    emailInput.addEventListener('input', () => {
+      emailInput.classList.remove(...inputErrorClass.split(' '));
+      emailError.classList.add('hidden');
+    });
+    passwordInput.addEventListener('input', () => {
+      passwordInput.classList.remove(...inputErrorClass.split(' '));
+      passwordError.classList.add('hidden');
+    });
+
+    function showFieldError(input, errorEl, message) {
+      input.classList.add(...inputErrorClass.split(' '));
+      errorEl.textContent = message;
+      errorEl.classList.remove('hidden');
+      input.focus();
+    }
+
+    function clearErrors() {
+      errorMessage.classList.add('hidden');
+      errorMessage.textContent = '';
+      emailInput.classList.remove(...inputErrorClass.split(' '));
+      passwordInput.classList.remove(...inputErrorClass.split(' '));
+      emailError.classList.add('hidden');
+      passwordError.classList.add('hidden');
+    }
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      clearErrors();
 
-      const email = document.getElementById('email').value;
-      const password = document.getElementById('password').value;
+      const email = emailInput.value.trim();
+      const password = passwordInput.value;
 
-      // Clear previous errors
-      errorMessage.classList.add('hidden');
-      errorMessage.textContent = '';
+      // Custom validation
+      if (!email) {
+        showFieldError(emailInput, emailError, 'Email is required');
+        return;
+      }
+      if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+        showFieldError(emailInput, emailError, 'Please enter a valid email address');
+        return;
+      }
+      if (!password) {
+        showFieldError(passwordInput, passwordError, 'Password is required');
+        return;
+      }
+
       submitBtn.disabled = true;
       submitBtn.textContent = 'Signing in...';
 
