@@ -1,5 +1,9 @@
 ## 11. The Identity & Authentication Model
 
+> **Note (March 2026):** This document describes a **future** central identity model with global handles and cross-workspace identity. For the **current implementation**, see [`02-shell-shift.md`](./02-shell-shift.md) which covers the edge-served shell architecture, network identity with automatic cross-device sync, and the workspace switcher. The model below may be implemented later as an opt-in layer on top of the current system.
+
+---
+
 This is the hardest design problem in AIUX. The requirements pull in opposite directions:
 
 - **Simplicity:** A user should be able to sign in and start working in seconds

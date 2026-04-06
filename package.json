@@ -5,14 +5,21 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "packages/guest/*"
+    "packages/guest/*",
+    "demos/*"
   ],
   "scripts": {
     "dev": "turbo run dev",
+    "dev:demo": "npm run dev --workspace=ensemble-demo",
     "build": "tsc --build",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
     "typecheck": "tsc --build",
-    "lint": "turbo run lint",
+    "lint": "oxlint --deny=correctness --deny=perf",
+    "lint:quick": "oxlint --fix",
+    "knip": "knip",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
     "changeset": "changeset",
@@ -20,10 +27,15 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
+    "@playwright/test": "^1.42.0",
+    "@types/node": "^25.5.2",
+    "knip": "^6.3.0",
+    "oxlint": "^1.58.0",
     "prettier": "^3.2.5",
     "turbo": "^2.0.0",
-    "typescript": "^5.4.0",
-    "vitest": "^4.1.2"
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2",
+    "wrangler": "^4.80.0"
   },
   "license": "MIT"
 }

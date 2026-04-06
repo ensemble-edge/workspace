@@ -15,6 +15,7 @@ describe('@ensemble-edge/guest-cloudflare', () => {
         id: 'test-app',
         name: 'Test App',
         version: '1.0.0',
+        category: 'tool' as const,
         permissions: [],
         entry: '/',
       },

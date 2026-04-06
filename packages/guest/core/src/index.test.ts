@@ -17,6 +17,7 @@ describe('@ensemble-edge/guest', () => {
           id: 'test-app',
           name: 'Test App',
           version: '1.0.0',
+          category: 'tool',
           permissions: ['read:user'],
           entry: '/app',
         },
@@ -27,6 +28,7 @@ describe('@ensemble-edge/guest', () => {
         id: 'test-app',
         name: 'Test App',
         version: '1.0.0',
+        category: 'tool',
         permissions: ['read:user'],
         entry: '/app',
       });
@@ -44,6 +46,7 @@ describe('@ensemble-edge/guest', () => {
           id: 'lifecycle-app',
           name: 'Lifecycle App',
           version: '1.0.0',
+          category: 'tool',
           permissions: [],
           entry: '/',
         },

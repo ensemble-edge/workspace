@@ -1,0 +1,20 @@
+{
+  "name": "@ensemble-demos/simple",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cd ../.. && npm run build -w @ensemble-edge/core && cd demos/simple && wrangler dev --local",
+    "build": "npm run build -w @ensemble-edge/core --prefix ../..",
+    "deploy": "wrangler deploy",
+    "seed": "npx tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "@ensemble-edge/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "tsx": "^4.7.0",
+    "wrangler": "^4.0.0"
+  }
+}

@@ -2,9 +2,11 @@
 
 > The visual chrome that wraps everything — workspace switcher, sidebar, toolbar, viewport, panels.
 
+> **⚠️ Architecture Update (March 2026):** The shell is now **edge-served by Ensemble** — it's deployed to R2/KV and served by the edge proxy, NOT bundled in workspace Workers. This workstream is for **Ensemble's internal shell development**, not for workspace developers. Workspace developers don't build or deploy the shell. See [`02-shell-shift.md`](../reference/02-shell-shift.md).
+
 ## Scope
 
-This workstream builds the Preact shell that provides consistent navigation:
+This workstream builds the Preact shell that is **deployed globally by Ensemble**:
 
 - Workspace switcher (left edge, always dark)
 - Sidebar with Slack-inspired sections (Apps, Agents, People, Docs, Quick Links, Workspace)
@@ -23,12 +25,14 @@ This workstream builds the Preact shell that provides consistent navigation:
 
 ## Dependencies
 
-**Blocked by:** Workstream 1 (Foundation) — needs theme engine, auth
+**Blocked by:** Edge proxy infrastructure — shell needs to be served from R2/KV
 
 **Blocks:**
 - Workstream 3 (Core Apps) — apps render in the viewport
 - Workstream 4 (Bundled Apps) — panels need shell integration
 - Workstream 5 (Guest Platform) — guest apps render in viewport
+
+**Note:** This is Ensemble's internal workstream. The shell is deployed by Ensemble, not by workspace developers. Workspace Workers only provide API endpoints that the shell calls.
 
 ## Deliverables
 

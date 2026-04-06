@@ -1,6 +1,8 @@
 ## 5. The Three-Tier App Architecture
 
-This is AIUX's most important architectural decision. **The shell has no features. Apps have all the features.** The shell is pure chrome: a workspace switcher, a sidebar, a toolbar, a viewport, and panel slots. That's it.
+> **⚠️ Architecture Update (March 2026):** The shell is now edge-served by Ensemble. Core and bundled apps have UI in the shell + API routes in `@ensemble-edge/core`. Auth is handled by `app.ensemble.ai` + edge proxy. See [`02-shell-shift.md`](./02-shell-shift.md).
+
+This is AIUX's most important architectural decision. **The shell has no features. Apps have all the features.** The shell is pure chrome: a workspace switcher, a sidebar, a toolbar, a viewport, and panel slots. Auth is handled by the edge proxy, not the shell.
 
 Every app — whether it manages users, defines the brand, or tracks loans — follows the same architecture: manifest, SDK hooks, themed components, scoped storage, permissioned access. The difference between tiers is **where the code lives and how it's deployed**, not how it's built.
 
@@ -11,10 +13,10 @@ Every app — whether it manages users, defines the brand, or tracks loans — f
 │                                                                     │
 │  ┌─── CORE ─────────────────────────────────────────────────────┐   │
 │  │                                                              │   │
-│  │  Compiled into the Worker binary. Ships with every AIUX      │   │
-│  │  deployment. Cannot be uninstalled — only enabled/disabled    │   │
-│  │  per workspace. Handles "operating system" concerns.          │   │
-│  │  Upgrades atomically with the shell.                         │   │
+│  │  Part of Ensemble's platform (UI in shell, API in core SDK).  │   │
+│  │  Ships with every workspace. Cannot be uninstalled — only     │   │
+│  │  enabled/disabled per workspace. Handles "operating system"   │   │
+│  │  concerns. Upgrades automatically when Ensemble deploys.      │   │
 │  │                                                              │   │
 │  │  Examples: Workspace Admin, Brand Manager, People & Teams,   │   │
 │  │  Auth & Security, Knowledge Editor, App Manager, Audit Log,  
@@ -24,10 +26,10 @@ Every app — whether it manages users, defines the brand, or tracks loans — f
 │                                                                     │
 │  ┌─── BUNDLED ──────────────────────────────────────────────────┐   │
 │  │                                                              │   │
-│  │  Also compiled into the Worker binary. Ships with every      │   │
-│  │  AIUX deployment. Can be enabled/disabled per workspace.     │   │
-│  │  Represents common functionality most workspaces want.       │   │
-│  │  Upgrades atomically with the shell.                         │   │
+│  │  Part of Ensemble's platform (UI in shell, API in core SDK).  │   │
+│  │  Can be enabled/disabled per workspace. Represents common     │   │
+│  │  functionality most workspaces want. Upgrades automatically   │   │
+│  │  when Ensemble deploys.                                       │   │
 │  │                                                              │   │
 │  │  Examples: Dashboard, AI Assistant, File Manager,            │   │
 │  │  Notifications, Activity Feed                    │   │
@@ -66,8 +68,8 @@ Every app, regardless of tier:
 
 | Aspect | Core | Bundled | Guest |
 |---|---|---|---|
-| **Where code lives** | `packages/core/src/apps/` | `packages/core/src/apps/` | `apps/` directory or loaded from registry |
-| **Compiled into Worker** | Yes | Yes | No (loaded at runtime) |
+| **Where code lives** | Shell (UI) + `@ensemble-edge/core` (API) | Shell (UI) + `@ensemble-edge/core` (API) | Separate Workers or external services |
+| **Part of workspace Worker** | API routes only | API routes only | No (separate service) |
 | **Can be uninstalled** | No (only disabled) | No (only disabled) | Yes |
 | **Versioning** | Matches shell version | Matches shell version | Independent semver |
 | **Upgrade path** | Automatic with `git pull` | Automatic with `git pull` | Manual or registry-managed |

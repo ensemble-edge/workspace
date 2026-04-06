@@ -1,0 +1,60 @@
+# Ensemble Workspace — Wrangler Configuration
+#
+# For local development: wrangler dev --local
+# For deployment: wrangler deploy
+#
+# Local data is stored in .wrangler/ directory (gitignored)
+
+name = "ensemble-workspace"
+main = "src/worker.ts"
+compatibility_date = "2024-01-01"
+
+# Use NodeJS compatibility for crypto APIs
+compatibility_flags = ["nodejs_compat"]
+
+# ============================================================================
+# D1 Database (SQLite at the edge)
+# ============================================================================
+# Local development uses .wrangler/state/v3/d1/
+# Production: Create with `wrangler d1 create workspace-db`
+[[d1_databases]]
+binding = "DB"
+database_name = "workspace-db"
+database_id = "local"  # Will be replaced with real ID for production
+
+# ============================================================================
+# KV Namespace (Key-Value cache)
+# ============================================================================
+# Local development uses .wrangler/state/v3/kv/
+# Production: Create with `wrangler kv:namespace create WORKSPACE_KV`
+[[kv_namespaces]]
+binding = "KV"
+id = "local"  # Will be replaced with real ID for production
+
+# ============================================================================
+# R2 Bucket (Object storage for assets)
+# ============================================================================
+# Local development uses .wrangler/state/v3/r2/
+# Production: Create with `wrangler r2 bucket create workspace-assets`
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "workspace-assets"
+
+# ============================================================================
+# Environment Variables
+# ============================================================================
+[vars]
+ENVIRONMENT = "development"
+
+# ============================================================================
+# Secrets (set via `wrangler secret put JWT_SECRET`)
+# ============================================================================
+# JWT_SECRET — Required for production, auto-generated for local dev
+
+# ============================================================================
+# Development Server
+# ============================================================================
+[dev]
+port = 8787
+ip = "0.0.0.0"
+local_protocol = "http"

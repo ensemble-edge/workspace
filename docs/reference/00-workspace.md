@@ -11,7 +11,13 @@
 
 ## 1. What Is Ensemble Workspace?
 
-Ensemble Workspace is an open-source, developer-first **workspace operating layer** that runs on Cloudflare Workers. It provides a unified shell for building, deploying, managing, and sharing internal tools, customer-facing portals, and AI-powered applications — all under centralized auth, branding, navigation, and permissions.
+> **⚠️ Architecture Update (March 2026):** This document contains some outdated architectural descriptions. The current architecture is defined in [`02-shell-shift.md`](./02-shell-shift.md). Key changes:
+> - **Shell is edge-served** — The Preact shell is served by Ensemble's edge proxy (R2/KV), NOT bundled in the workspace Worker
+> - **Workspace Worker is pure JSON API** — No frontend code, no auth handling
+> - **Auth is centralized** — Handled by the edge proxy + `app.ensemble.ai`, not the workspace Worker
+> - **Network identity** — Cross-device workspace switching with automatic identity merge
+
+Ensemble Workspace is an open-source, developer-first **workspace operating layer**. It provides a unified shell for building, deploying, managing, and sharing internal tools, customer-facing portals, and AI-powered applications — all under centralized auth, branding, navigation, and permissions.
 
 **AIUX** is the internal engineering codename for the workspace engine — the packages are `@ensemble-edge/core`, `@ensemble-edge/sdk`, `@ensemble-edge/guest`, etc. The product that people download, talk about, and run their companies on is **Ensemble Workspace**, or just **Ensemble**.
 
@@ -49,10 +55,10 @@ A single deployment that gives any organization:
 
 | Principle | What It Means |
 |---|---|
-| **Single Worker** | The entire platform — shell, core apps, bundled apps — runs in one Cloudflare Worker. No origin servers. No containers. Global edge deployment from day one. |
-| **Everything Is an App** | Panels, assistants, email clients, admin tools, brand management — everything is an app. Core apps use the same architecture as custom apps. The shell is just chrome + router + auth. |
-| **Batteries Included** | AIUX ships with a rich set of core and bundled apps that cover workspace management, brand identity, user management, and common utilities. A fresh deployment is immediately useful. |
-| **Identity Is Universal** | A user has one AIUX identity. Workspaces grant scoped access. Switching context is instant. |
+| **Edge-Served Shell** | The shell (Preact SPA) is served by Ensemble's edge proxy — cached globally in R2/KV. Workspace Workers are pure JSON APIs. Developers never bundle or deploy the shell. |
+| **Everything Is an App** | Panels, assistants, email clients, admin tools, brand management — everything is an app. Core apps use the same architecture as custom apps. The shell is pure chrome + router; auth is handled by the edge proxy. |
+| **Batteries Included** | Ensemble ships with a rich set of core and bundled apps that cover workspace management, brand identity, user management, and common utilities. A fresh deployment is immediately useful. |
+| **Network Identity** | Users have a network identity at `app.ensemble.ai` that enables cross-device workspace switching. Identity is automatic — created on first login, merged when workspaces are linked. |
 | **Dual Interface / API Gateway** | Every capability is accessible via UI (for humans) and API (for agents). AIUX is the single endpoint gateway for the entire workspace — one URL, one auth layer, every app's API unified behind it. Same auth, same permissions, same data. |
 | **The Company Is Queryable** | Brand, messaging, standards, org structure — they're not just docs in a folder. They're structured, versioned, and enforceable configuration. |
 | **OSS-First** | MIT licensed. Hosted on Ensemble's GitHub. Cloud-managed version comes later. |
@@ -95,12 +101,14 @@ A single deployment that gives any organization:
 
 ### Auth
 
+> **Note:** Auth is handled by Ensemble's edge layer (`app.ensemble.ai` + proxy), not by individual workspace Workers. See [`02-shell-shift.md`](./02-shell-shift.md) for the full architecture.
+
 | Layer | Choice |
 |---|---|
-| **Session Management** | Stateless JWTs (short-lived) + KV-backed refresh tokens |
-| **Identity Provider** | Built-in email/password + OAuth2 connectors (Google, GitHub, Microsoft) |
-| **MFA** | TOTP (built-in) + WebAuthn/passkeys |
-| **Workspace Auth** | SAML 2.0 / OIDC federation for enterprise workspaces |
+| **Session Management** | Edge proxy validates JWTs, injects user headers. Workspace Workers receive pre-authenticated requests. |
+| **Identity Provider** | Magic link via `app.ensemble.ai` (default) + SSO (OIDC/SAML for enterprise) |
+| **Network Identity** | Cross-device workspace switching. Automatic identity create/discover/merge on successful login. |
+| **Workspace Auth** | SAML 2.0 / OIDC federation for enterprise workspaces (configured via `app.ensemble.ai`) |
 | **Agent Auth** | API keys (workspace-scoped) + short-lived capability tokens |
 
 ---
@@ -162,7 +170,7 @@ A single deployment that gives any organization:
 │  ┌──────────────────── APP TIERS ───────────────────────────────┐   │
 │  │                                                              │   │
 │  │  CORE APPS          BUNDLED APPS         GUEST APPS          │   │
-│  │  (in binary)        (in binary)          (loaded at runtime) │   │
+│  │  (in shell/Worker)  (in shell/Worker)   (separate services)  │   │
 │  │  ─────────          ────────────         ────────────        │   │
 │  │  Workspace Admin    Dashboard            Custom CRM          │   │
 │  │  Brand Manager      AI Assistant         Custom Wiki         │   │
@@ -224,18 +232,28 @@ ENSEMBLE SERVICES — discovery + registry
 └────────┬─────────┘  └──────────────────┘  └──────────────────┘
          │  Resolves to workspace endpoint
          ▼
-WORKSPACE WORKER — the thin core (@ensemble-edge/core)
+ENSEMBLE EDGE LAYER — proxy + shell (served by Ensemble)
 ┌─────────────────────────────────────────────────────────────────┐
 │  ┌─────────────────────────┐  ┌──────────────────────────────┐  │
-│  │ Preact shell (SPA)      │  │ API gateway                  │  │
-│  │ Sidebar, toolbar,       │  │ Unified /_ensemble/* routing.   │  │
-│  │ viewport, panels,       │  │ Auth, permissions, rate      │  │
-│  │ theme engine, cmd-K     │  │ limiting, guest app proxy,   │  │
-│  │                         │  │ audit log, CORS              │  │
+│  │ Preact shell (SPA)      │  │ Edge proxy                   │  │
+│  │ Sidebar, toolbar,       │  │ Session validation, user     │  │
+│  │ viewport, panels,       │  │ header injection, auth       │  │
+│  │ theme engine, cmd-K     │  │ callbacks, CORS, rate limit  │  │
+│  │ (cached in R2/KV)       │  │ Routes /_ensemble/* to Worker│  │
 │  └─────────────────────────┘  └──────────────────────────────┘  │
+└──────┬──────────────────────────────────────────────────────────┘
+       │ Pre-authenticated requests with X-Ensemble-User headers
+       ▼
+WORKSPACE WORKER — pure JSON API (@ensemble-edge/core)
+┌─────────────────────────────────────────────────────────────────┐
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ API routes only: /_ensemble/workspace, /_ensemble/apps/* │   │
+│  │ Receives pre-authenticated requests from edge proxy      │   │
+│  │ Returns JSON — no HTML, no auth, no session handling     │   │
+│  └──────────────────────────────────────────────────────────┘   │
 │                                                                  │
-│  8 core apps: Admin|Brand|People|Auth|Knowledge|Apps|Audit|Nav   │
-│  Bundled apps: Dashboard|AI Assistant|Files|Notifications|Activity│
+│  Core app APIs: Admin|Brand|People|Knowledge|Apps|Audit|Nav      │
+│  Bundled app APIs: Dashboard|AI Assistant|Files|Notifications    │
 └──────┬───────────────────────┬───────────────────────┬──────────┘
        │ service binding       │ service binding       │ HTTP proxy
        │ (0ms latency)        │ (0ms latency)        │ (normal)
@@ -292,10 +310,10 @@ Every app — whether it manages users, defines the brand, or tracks loans — f
 │                                                                     │
 │  ┌─── CORE ─────────────────────────────────────────────────────┐   │
 │  │                                                              │   │
-│  │  Compiled into the Worker binary. Ships with every AIUX      │   │
-│  │  deployment. Cannot be uninstalled — only enabled/disabled    │   │
-│  │  per workspace. Handles "operating system" concerns.          │   │
-│  │  Upgrades atomically with the shell.                         │   │
+│  │  Part of Ensemble's platform. Shell components + API routes   │   │
+│  │  in @ensemble-edge/core. Cannot be uninstalled — only         │   │
+│  │  enabled/disabled per workspace. Handles "operating system"   │   │
+│  │  concerns. Upgrades automatically when Ensemble deploys.      │   │
 │  │                                                              │   │
 │  │  Examples: Workspace Admin, Brand Manager, People & Teams,   │   │
 │  │  Auth & Security, Knowledge Editor, App Manager, Audit Log,  

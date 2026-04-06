@@ -11,7 +11,9 @@
 
 ## 1. What Is Ensemble Workspace?
 
-Ensemble Workspace is an open-source, developer-first **workspace operating layer** that runs on Cloudflare Workers. It provides a unified shell for building, deploying, managing, and sharing internal tools, customer-facing portals, and AI-powered applications — all under centralized auth, branding, navigation, and permissions.
+> **⚠️ Architecture Update (March 2026):** See [`02-shell-shift.md`](./02-shell-shift.md) for the current architecture. Key changes: shell is edge-served (not bundled in workspace Worker), auth is handled by `app.ensemble.ai` + proxy, workspace Workers are pure JSON APIs.
+
+Ensemble Workspace is an open-source, developer-first **workspace operating layer**. It provides a unified shell for building, deploying, managing, and sharing internal tools, customer-facing portals, and AI-powered applications — all under centralized auth, branding, navigation, and permissions.
 
 **AIUX** is the internal engineering codename for the workspace engine — the packages are `@ensemble-edge/core`, `@ensemble-edge/sdk`, `@ensemble-edge/guest`, etc. The product that people download, talk about, and run their companies on is **Ensemble Workspace**, or just **Ensemble**.
 
@@ -49,10 +51,10 @@ A single deployment that gives any organization:
 
 | Principle | What It Means |
 |---|---|
-| **Single Worker** | The entire platform — shell, core apps, bundled apps — runs in one Cloudflare Worker. No origin servers. No containers. Global edge deployment from day one. |
-| **Everything Is an App** | Panels, assistants, email clients, admin tools, brand management — everything is an app. Core apps use the same architecture as custom apps. The shell is just chrome + router + auth. |
-| **Batteries Included** | AIUX ships with a rich set of core and bundled apps that cover workspace management, brand identity, user management, and common utilities. A fresh deployment is immediately useful. |
-| **Identity Is Universal** | A user has one AIUX identity. Workspaces grant scoped access. Switching context is instant. |
+| **Edge-Served Shell** | The shell (Preact SPA) is served by Ensemble's edge proxy — cached globally in R2/KV. Workspace Workers are pure JSON APIs. Developers never bundle or deploy the shell. |
+| **Everything Is an App** | Panels, assistants, email clients, admin tools, brand management — everything is an app. Core apps use the same architecture as custom apps. The shell is pure chrome + router; auth is handled by the edge proxy. |
+| **Batteries Included** | Ensemble ships with a rich set of core and bundled apps that cover workspace management, brand identity, user management, and common utilities. A fresh deployment is immediately useful. |
+| **Network Identity** | Users have a network identity at `app.ensemble.ai` that enables cross-device workspace switching. Identity is automatic — created on first login, merged when workspaces are linked. |
 | **Dual Interface / API Gateway** | Every capability is accessible via UI (for humans) and API (for agents). AIUX is the single endpoint gateway for the entire workspace — one URL, one auth layer, every app's API unified behind it. Same auth, same permissions, same data. |
 | **The Company Is Queryable** | Brand, messaging, standards, org structure — they're not just docs in a folder. They're structured, versioned, and enforceable configuration. |
 | **OSS-First** | MIT licensed. Hosted on Ensemble's GitHub. Cloud-managed version comes later. |
@@ -95,9 +97,11 @@ A single deployment that gives any organization:
 
 ### Auth
 
+> **Note:** Auth is handled by Ensemble's edge layer (`app.ensemble.ai` + proxy). See [`02-shell-shift.md`](./02-shell-shift.md).
+
 | Layer | Choice |
 |---|---|
-| **Session Management** | Stateless JWTs (short-lived) + KV-backed refresh tokens |
+| **Session Management** | Edge proxy validates JWTs, injects user headers. Workspace Workers receive pre-authenticated requests. |
 | **Identity Provider** | Built-in email/password + OAuth2 connectors (Google, GitHub, Microsoft) |
 | **MFA** | TOTP (built-in) + WebAuthn/passkeys |
 | **Workspace Auth** | SAML 2.0 / OIDC federation for enterprise workspaces |

@@ -4,32 +4,48 @@ Guest apps are where the real power of Ensemble lives. They're the company's cus
 
 ### The Architectural Principle: Guest Apps Are Always Separate Services
 
-In prior versions of this spec, guest apps could be compiled into the workspace Worker. We've revised this. **The workspace Worker is thin — it runs the shell, core apps, bundled apps, and the API gateway. Guest apps always run as separate services.** Even "your own" guest apps run on separate Workers in the same Cloudflare zone.
+> **⚠️ Architecture Update (March 2026):** The architecture has shifted further. See [`02-shell-shift.md`](./02-shell-shift.md) for the authoritative model.
+
+**The workspace Worker is a pure JSON API — it does NOT run the shell, core app UIs, or bundled app UIs.** Those are served by Ensemble's edge proxy. The workspace Worker only provides:
+- `/_ensemble/workspace` — workspace config (theme, nav, name)
+- `/_ensemble/apps/*` — API routes for core/bundled apps
+- Guest app proxying via service bindings or HTTP
+
+Guest apps always run as separate services. Even "your own" guest apps run on separate Workers in the same Cloudflare zone.
 
 Why:
 
-- The workspace Worker stays small, fast, and easily upgradeable (it's just `@ensemble-edge/core`)
+- The workspace Worker is truly thin — just JSON API routes
+- The shell is served by Ensemble's edge (R2/KV cached globally) — developers never deploy it
+- Auth is handled by the edge proxy + `app.ensemble.ai` — workspace Workers receive pre-authenticated requests
 - Guest apps have independent deployment lifecycles — deploy your CRM without touching the workspace
 - Guest apps can be built on any platform — Cloudflare Workers, Vercel, AWS Lambda, Node, Deno
 - The same guest app can serve multiple workspaces without being compiled into each one
 - The security boundary is cleaner — guest apps never run in the same execution context as the core
 
-The workspace's API gateway proxies requests between the shell and guest apps. For same-zone Cloudflare Workers, this uses service bindings (effectively zero latency). For remote apps, it's a standard HTTP proxy with auth token injection.
+The edge proxy routes requests to the workspace Worker, which then proxies to guest apps. For same-zone Cloudflare Workers, this uses service bindings (effectively zero latency). For remote apps, it's a standard HTTP proxy with capability token injection.
 
 ```
-┌─── Workspace Worker (thin) ─────────────────────────────┐
+┌─── Ensemble Edge Layer (served by Ensemble) ────────────┐
 │                                                          │
-│  @ensemble-edge/core: shell, core apps, bundled apps, gateway     │
+│  Shell (Preact SPA from R2) + Edge Proxy                 │
+│  - Serves shell to browser                               │
+│  - Validates sessions, injects X-Ensemble-User headers   │
+│  - Routes /_ensemble/* to workspace Worker               │
 │                                                          │
-│  All guest app requests are proxied through the gateway:  │
+└───────────────────────┬──────────────────────────────────┘
+                        │ Pre-authenticated requests
+                        ▼
+┌─── Workspace Worker (pure JSON API) ────────────────────┐
 │                                                          │
+│  @ensemble-edge/core: API routes only                    │
+│  - /_ensemble/workspace → config JSON                    │
+│  - /_ensemble/apps/* → core/bundled app API routes       │
+│                                                          │
+│  Guest app proxying via gateway:                         │
 │  /app/crm/*        → CRM Worker (same CF zone)          │
 │  /app/wiki/*       → Wiki Worker (same CF zone)          │
 │  /app/linear/*     → linear-ensemble.app (remote)        │
-│  /app/stripe/*     → stripe-ensemble.app (remote)        │
-│                                                          │
-│  Gateway handles: auth, permissions, rate limiting,       │
-│  audit logging, theme injection, settings injection       │
 │                                                          │
 └──────────────────────────────────────────────────────────┘
          │                    │                    │

@@ -13,3 +13,15 @@ packages/*/src/**/*.d.ts
 packages/*/src/**/*.d.ts.map
 packages/*/src/**/*.js
 packages/*/src/**/*.js.map
+
+# Playwright compiled artifacts (keep .ts source files)
+playwright.config.js
+playwright.config.d.ts
+playwright.config.js.map
+playwright.config.d.ts.map
+e2e/**/*.js
+e2e/**/*.d.ts
+e2e/**/*.js.map
+e2e/**/*.d.ts.map
+test-results/
+playwright-report/

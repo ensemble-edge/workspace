@@ -1,0 +1,22 @@
+{
+  "name": "@ensemble-edge/connector-notes",
+  "version": "0.1.0",
+  "description": "Notes connector - demonstrates D1 scoped storage for Ensemble Workspace",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev --local --ip 0.0.0.0",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ensemble-edge/guest": "workspace:*",
+    "@ensemble-edge/guest-cloudflare": "workspace:*",
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250327.0",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.80.0"
+  }
+}

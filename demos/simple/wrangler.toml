@@ -1,0 +1,23 @@
+name = "ensemble-demo"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENVIRONMENT = "development"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "ensemble-demo-db"
+database_id = "local-demo-db"
+
+# KV Namespace for caching
+[[kv_namespaces]]
+binding = "KV"
+id = "local-kv"
+
+# R2 Bucket for file storage
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "ensemble-demo-bucket"

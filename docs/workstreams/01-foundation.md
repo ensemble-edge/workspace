@@ -2,15 +2,17 @@
 
 > Core infrastructure that everything else depends on.
 
+> **⚠️ Architecture Update (March 2026):** This workstream has been significantly revised. Auth is now handled by Ensemble's edge layer (`app.ensemble.ai` + proxy), not by the workspace Worker. The shell is edge-served from R2/KV. Workspace Workers are pure JSON APIs. See [`02-shell-shift.md`](../reference/02-shell-shift.md) for the authoritative architecture.
+
 ## Scope
 
-This workstream establishes the fundamental workspace infrastructure:
+This workstream establishes the fundamental workspace **API** infrastructure:
 
 - Hono Worker entry point with `createWorkspace()` factory
-- Middleware pipeline (auth, workspace resolver, permissions, CORS)
+- Middleware pipeline (workspace resolver, request logging — **NOT auth**)
 - D1 database schema and migration system
-- Theme engine (CSS variables injection)
-- Shell i18n system
+- Theme/brand API endpoints (JSON delivery — CSS injection happens at edge)
+- Workspace config API (`/_ensemble/workspace`)
 
 ## Reference Specs
 
@@ -39,11 +41,13 @@ This workstream establishes the fundamental workspace infrastructure:
 - [ ] Workspace resolution (subdomain, custom domain, path prefix)
 - [ ] D1 migration runner
 
-### Phase 1b: Auth Infrastructure
-- [ ] JWT session management (stateless + KV refresh tokens)
-- [ ] Multi-method auth support (password, OAuth, magic link)
-- [ ] @handle system for user identity
-- [ ] Membership model (user ↔ workspace)
+### Phase 1b: Auth Integration (Edge-Handled)
+> **Note:** Auth is implemented in `app.ensemble.ai` and the edge proxy, NOT in the workspace Worker. This phase covers workspace-side integration only.
+
+- [ ] Accept pre-authenticated requests with `X-Ensemble-User` headers from edge proxy
+- [ ] User lookup from header-provided user ID
+- [ ] Membership model (user ↔ workspace) — local D1 tables
+- [ ] Auth confirmation endpoint for `app.ensemble.ai` to call on successful login
 
 ### Phase 1c: Theme Infrastructure
 - [ ] CSS custom properties injection
@@ -52,17 +56,17 @@ This workstream establishes the fundamental workspace infrastructure:
 
 ## Acceptance Criteria
 
-- [ ] Fresh workspace deployment boots and serves shell
-- [ ] User can authenticate via email/password
-- [ ] Workspace theme applies on load
+- [ ] Fresh workspace deployment responds to `/_ensemble/workspace` with config JSON
+- [ ] Edge proxy can serve shell and route API calls to workspace Worker
+- [ ] Workspace accepts pre-authenticated requests with user headers
+- [ ] Workspace theme data returned via API (edge injects as CSS)
 - [ ] D1 migrations run on deploy
 - [ ] `ensemble init` creates working project scaffold
 
 ## Open Questions
 
-1. **Session duration**: What's the default JWT expiry? (Proposal: 15 minutes access, 7 days refresh)
-2. **Password requirements**: Enforce complexity? (Proposal: Min 8 chars, no complexity rules)
-3. **Default workspace template**: Which bundled apps enabled by default?
+1. **Default workspace template**: Which bundled apps enabled by default?
+2. **User header format**: Exact shape of `X-Ensemble-User`, `X-Ensemble-Roles` headers?
 
 ## Estimated Effort
 

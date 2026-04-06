@@ -1,0 +1,22 @@
+{
+  "name": "@ensemble-edge/connector-echo",
+  "version": "0.1.0",
+  "description": "Echo connector - simplest test app for Ensemble Workspace",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev --local --ip 0.0.0.0",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ensemble-edge/guest": "workspace:*",
+    "@ensemble-edge/guest-cloudflare": "workspace:*",
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250327.0",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.80.0"
+  }
+}

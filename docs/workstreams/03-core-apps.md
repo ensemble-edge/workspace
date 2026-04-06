@@ -2,9 +2,11 @@
 
 > The 8 essential apps that ship with every workspace and handle "operating system" concerns.
 
+> **⚠️ Architecture Update (March 2026):** Core apps have two parts: (1) **UI components** in the edge-served shell, and (2) **API routes** in `@ensemble-edge/core` that workspace Workers include. Workspace developers don't build core apps — they're part of Ensemble's platform. See [`02-shell-shift.md`](../reference/02-shell-shift.md).
+
 ## Scope
 
-Core apps are compiled into the Worker binary and cannot be uninstalled. They handle workspace management, identity, and platform concerns:
+Core apps are part of Ensemble's platform. They cannot be uninstalled. They handle workspace management, identity, and platform concerns:
 
 | App | ID | Purpose |
 |-----|-----|---------|

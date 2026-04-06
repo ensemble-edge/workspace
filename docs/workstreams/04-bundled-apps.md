@@ -1,6 +1,8 @@
 # Workstream 4: Bundled Apps
 
-> Optional apps that ship with the workspace binary but can be enabled/disabled per workspace.
+> Optional apps that are part of Ensemble's platform — enabled/disabled per workspace.
+
+> **⚠️ Architecture Update (March 2026):** Bundled apps are part of Ensemble's platform, NOT compiled into individual workspace Workers. They have UI components in the edge-served shell and API routes in `@ensemble-edge/core`. See [`02-shell-shift.md`](../reference/02-shell-shift.md).
 
 ## Scope
 

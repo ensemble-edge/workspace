@@ -16,7 +16,7 @@
     "jsx": "react-jsx",
     "jsxImportSource": "preact"
   },
-  "exclude": ["node_modules", "dist", "templates"],
+  "exclude": ["node_modules", "dist", "templates", "playwright.config.ts", "e2e", "demos"],
   "references": [
     { "path": "packages/core" },
     { "path": "packages/sdk" },

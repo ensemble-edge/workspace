@@ -4,6 +4,27 @@
 
 ---
 
+## ⚠️ Prerequisites: Build the Engine First
+
+**This plan assumes the Ensemble Workspace engine is already built.** Before executing this deployment plan, complete these workstreams in order:
+
+| Workstream | What it delivers | Estimated effort |
+|------------|------------------|------------------|
+| [01-foundation.md](workstreams/01-foundation.md) | `createWorkspace()` factory, middleware pipeline, D1 migrations, auth, theme endpoints | 2-3 weeks |
+| [02-shell-navigation.md](workstreams/02-shell-navigation.md) | Preact shell SPA, sidebar, toolbar, viewport, nav API, command palette | 2-3 weeks |
+
+**Minimum viable engine for this plan:**
+- [ ] `@ensemble-edge/core` package with working `createWorkspace()`
+- [ ] Middleware: auth, workspace resolver, permissions, CORS
+- [ ] Routes: `/_ensemble/auth/*`, `/_ensemble/brand/*`, `/_ensemble/nav`
+- [ ] Shell HTML served at `/` with all 6 zones
+- [ ] D1 migration runner
+- [ ] Theme injection from brand tokens
+
+Once the engine is ready, this plan deploys the first real workspace to validate everything works end-to-end.
+
+---
+
 ## Goal
 
 Deploy the first production Ensemble Workspace — **~nendo** — for Matt Hawkins at HOSS Technologies. This is the internal management system for the Nendo API platform, not the customer-facing SPA (that's `client-hoss-nendo`). This workspace becomes the reference implementation that every future workspace is built from.
@@ -12,6 +33,18 @@ By the end of this plan, you'll have:
 - A branded Nendo workspace shell running on Cloudflare Workers
 - A real guest app (customer manager) calling the existing `iq.ensemble.ai` API
 - The full architecture proven: thin workspace Worker + separate guest app Worker + service binding
+
+---
+
+## Cloudflare Resources (Already Created)
+
+These resources have been provisioned in the **Nendo** Cloudflare account (`f8ae169589007cb58003473e0be630ea`):
+
+| Resource | ID | Status |
+|----------|-----|--------|
+| D1 Database | `f6b92484-c9f2-4110-8716-95f1be4b28b2` | ✅ Created |
+| KV Namespace | `a517b04d142f4d5a86880bccfd22b94a` | ✅ Created |
+| R2 Bucket | `nendo-workspace-assets` | ⏳ Pending (enable R2 in dashboard first) |
 
 ---
 
@@ -29,25 +62,39 @@ Phase 1 focuses on `workspace.nendo.ai` — a Worker deployed directly to Cloudf
 
 ## Prerequisites (Day 0)
 
-Before writing any code, set up the Cloudflare infrastructure:
+Before writing any code, verify the Cloudflare infrastructure is ready.
 
 ### Cloudflare Account Setup
 
-- [ ] Cloudflare account with Workers Paid plan ($5/month) — required for D1, R2, service bindings
+- [x] Cloudflare account with Workers Paid plan ($5/month) — required for D1, R2, service bindings
 - [ ] `nendo.ai` domain added to Cloudflare (if not already)
 
-### Create Resources
+### Resources (Already Created)
+
+The following resources exist in the **Nendo** Cloudflare account:
+
+```toml
+# Copy these IDs into wrangler.toml
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nendo-workspace"
+database_id = "f6b92484-c9f2-4110-8716-95f1be4b28b2"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "a517b04d142f4d5a86880bccfd22b94a"
+
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "nendo-workspace-assets"
+# Note: R2 must be enabled in Cloudflare Dashboard before bucket can be created
+```
+
+### Remaining Setup
 
 ```bash
-# Create D1 database
-wrangler d1 create nendo-workspace
-# → Note the database_id for wrangler.toml
-
-# Create KV namespace
-wrangler kv:namespace create KV
-# → Note the id for wrangler.toml
-
-# Create R2 bucket
+# Enable R2 in Cloudflare Dashboard (if not already), then:
 wrangler r2 bucket create nendo-workspace-assets
 ```
 
@@ -70,19 +117,10 @@ wrangler secret put INITIAL_ADMIN_PASSWORD
 # → Paste Matt's initial password
 ```
 
-### Verify Setup
-
-```bash
-# List resources to confirm
-wrangler d1 list
-wrangler kv:namespace list
-wrangler r2 bucket list
-```
-
 **Deliverables:**
-- [ ] D1 database created, ID noted
-- [ ] KV namespace created, ID noted
-- [ ] R2 bucket created
+- [x] D1 database created, ID noted
+- [x] KV namespace created, ID noted
+- [ ] R2 bucket created (enable R2 first)
 - [ ] Custom domain configured with SSL
 - [ ] JWT_SECRET set as Worker secret
 - [ ] INITIAL_ADMIN_PASSWORD set as Worker secret

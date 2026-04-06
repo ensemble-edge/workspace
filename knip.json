@@ -1,0 +1,46 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    "packages/core": {
+      "entry": ["src/index.ts", "src/worker.ts"],
+      "project": ["src/**/*.ts", "src/**/*.tsx"],
+      "ignore": ["src/**/*.test.ts", "build.js"]
+    },
+    "packages/shell": {
+      "entry": ["src/index.ts", "src/index.tsx"],
+      "project": ["src/**/*.ts", "src/**/*.tsx"]
+    },
+    "packages/auth": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/ui": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts", "src/**/*.tsx"]
+    },
+    "packages/sdk": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/cli": {
+      "entry": ["src/index.ts", "src/cli.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/guest/core": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/guest/cloudflare": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts"]
+    }
+  },
+  "ignore": [
+    "**/*.d.ts",
+    "**/dist/**",
+    "**/node_modules/**"
+  ],
+  "ignoreDependencies": [
+    "@cloudflare/workers-types"
+  ]
+}

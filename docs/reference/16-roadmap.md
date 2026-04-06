@@ -1,17 +1,21 @@
 ## 26. Roadmap
 
+> **Documentation Reminder:** When completing any phase, update `/workspace/ensemble/workspace/docs/reference/18-documentation.md` to reflect what was built vs what's still planned.
+
 ### Phase 1 — Foundation (Weeks 1-8)
 
 **Workspace Worker (`@ensemble-edge/core`):**
-- [ ] Hono Worker entry + `createWorkspace()` factory
-- [ ] Middleware pipeline (auth, workspace resolver, permissions, CORS, gateway)
-- [ ] Preact shell (workspace switcher, sidebar, toolbar, viewport, panel manager)
-- [ ] Theme engine (CSS variables injection from brand config)
+- [x] Hono Worker entry + `createWorkspace()` factory ✅
+- [x] Middleware pipeline (auth, workspace resolver, permissions, CORS, bootstrap) ✅
+- [x] Preact shell (workspace switcher, sidebar, toolbar, viewport, AI panel, bookmark bar) ✅
+- [x] Theme engine (CSS variables injection from brand config) ✅
+- [x] D1 migration system ✅
+- [x] Bootstrap flow (first-time setup, owner creation) ✅
+- [x] Auth system (login, logout, register, refresh, me) ✅
 - [ ] Shell i18n: `t()` function, locale resolver, `en.json` base locale file
 - [ ] API gateway with guest app proxy (service bindings + HTTP fallback)
 - [ ] Extension system (middleware, route, scheduled, event-handler, auth-provider, app-hook)
 - [ ] Command palette (`⌘K`)
-- [ ] D1 migration system
 
 **Core Apps (8):**
 - [ ] `core:admin` — workspace settings including locale/region config (base language, timezone, date format)
