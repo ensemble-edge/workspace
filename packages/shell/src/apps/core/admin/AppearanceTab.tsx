@@ -221,7 +221,7 @@ export function AppearanceTab() {
     autoSave({ ...allTokens(), [key]: value });
   };
 
-  // Selection style — uses primary (button color) for selected state
+  // Selection style — uses primary color for selected state
   const selClass = (selected: boolean) =>
     selected
       ? 'border-2 bg-primary text-primary-foreground'
@@ -284,14 +284,14 @@ export function AppearanceTab() {
           </CardContent>
         </Card>
 
-        {/* Button Color — above Accent */}
+        {/* Primary Color — above Accent */}
         <ColorPresetCard
-          title="Button Color"
-          description="Primary button background (text auto-adjusts)"
+          title="Primary Color"
+          description="Buttons, badges, checkboxes, links, and focus rings"
           value={buttonColor}
           presets={COLOR_PRESETS}
           onChange={(v) => update('buttonColor', v, setButtonColor)}
-          fallbackLabel="Using accent color"
+          fallbackLabel="Using accent color as default"
           onReset={() => update('buttonColor', '', setButtonColor)}
           fallbackValue={accentColor}
         />
