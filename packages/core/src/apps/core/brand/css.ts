@@ -73,6 +73,7 @@ async function generateShellCss(
 ): Promise<string> {
   let accent = defaultAccent;
   const customTokens: Record<string, string> = {};
+  const brandTokens: Record<string, string> = {};
 
   try {
     const result = await db.prepare(
@@ -82,6 +83,7 @@ async function generateShellCss(
 
     for (const row of result.results || []) {
       if (row.category === 'colors' && row.key === 'accent') accent = row.value;
+      if (row.category === 'colors') brandTokens[row.key] = row.value;
       if (row.category === 'custom') customTokens[row.key] = row.value;
     }
     // Workspace accent color overrides brand accent
@@ -106,6 +108,25 @@ async function generateShellCss(
   const preset = getThemePreset(themePresetId === 'brand' ? 'default' : themePresetId) || getThemePreset('default')!;
   const lightScale: Record<string, string> = { ...preset.light };
   const darkScale: Record<string, string> = { ...preset.dark };
+
+  // For "brand" preset, read colors directly from brand_tokens (live)
+  // This means changing brand colors auto-updates the workspace appearance
+  if (themePresetId === 'brand') {
+    const bp = brandTokens['brand-primary'];
+    const bs = brandTokens['brand-secondary'];
+    const ba = brandTokens['brand-accent'];
+
+    if (bp && !customTokens.buttonColor) customTokens.buttonColor = bp;
+    if (ba && !customTokens.accentColor) customTokens.accentColor = ba;
+    if (bs && !customTokens.sidebarColor) customTokens.sidebarColor = bs;
+
+    // Pull brand semantic colors into workspace if not overridden
+    for (const key of ['semantic.success', 'semantic.warning', 'semantic.error', 'semantic.info']) {
+      const val = brandTokens[key];
+      const wsKey = key.replace('semantic.', '') + 'Color';
+      if (val && !customTokens[wsKey]) customTokens[wsKey] = val;
+    }
+  }
 
   // Apply user overrides on top of the preset
 
