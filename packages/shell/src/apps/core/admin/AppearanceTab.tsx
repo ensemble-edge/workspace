@@ -254,11 +254,54 @@ export function AppearanceTab() {
 
   const update = (key: string, value: string, setter: (v: string) => void) => {
     setter(value);
-    autoSave({ ...allTokens(), [key]: value });
+    if (value === '') {
+      // Resetting — clear inline styles and do immediate save+reload
+      resetInlineStyles();
+      saveAndReload({ ...allTokens(), [key]: value });
+    } else {
+      autoSave({ ...allTokens(), [key]: value });
+    }
   };
 
-  // Apply a theme preset — clears overrides so the preset's light/dark scales work.
-  // The pickers show preset defaults via getDisplayValue().
+  // Clear all inline style overrides and force CSS reload
+  const resetInlineStyles = () => {
+    const el = document.documentElement;
+    const props = [
+      '--primary', '--primary-foreground', '--ring',
+      '--sidebar-primary', '--sidebar-primary-foreground',
+      '--sidebar-background', '--sidebar-foreground',
+      '--background', '--foreground',
+      '--card', '--card-foreground', '--popover', '--popover-foreground',
+      '--muted-foreground',
+    ];
+    props.forEach((p) => el.style.removeProperty(p));
+  };
+
+  // Save immediately (no debounce) and reload CSS
+  const saveAndReload = async (tokens: Record<string, string>) => {
+    if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    try {
+      const res = await fetch('/_ensemble/brand/tokens', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: 'custom', tokens }),
+      });
+      if (!res.ok) throw new Error('Save failed');
+      const newHref = `/_ensemble/brand/css?t=${Date.now()}`;
+      const preload = document.createElement('link');
+      preload.rel = 'stylesheet';
+      preload.href = newHref;
+      preload.onload = () => {
+        const old = document.querySelector('link[href*="/_ensemble/brand/css"]:not([href="' + newHref + '"])') as HTMLLinkElement | null;
+        if (old) old.remove();
+      };
+      document.head.appendChild(preload);
+    } catch {
+      toast.error('Failed to save');
+    }
+  };
+
+  // Apply a theme preset — clears overrides, removes inline styles, reloads CSS
   const applyPreset = (presetId: string) => {
     setThemePreset(presetId);
     setButtonColor('');
@@ -266,7 +309,8 @@ export function AppearanceTab() {
     setCanvasColor('');
     setSidebarColor('');
     setCardColor('');
-    autoSave({
+    resetInlineStyles();
+    saveAndReload({
       ...allTokens(),
       themePreset: presetId,
       buttonColor: '', accentColor: '',
