@@ -1,69 +1,35 @@
 /**
  * Theme State
  *
- * Preact Signals for theme management and CSS variable injection.
+ * Theme is now fully handled by the CSS endpoint (/_ensemble/brand/css).
+ * This module only provides the theme signal for components that need
+ * to read theme data (like the Brand app's Overview tab).
+ *
+ * NO CSS manipulation here — brand/css handles all variables on page load.
  */
 
-import { signal, computed } from '@preact/signals-react';
-import type { Theme } from '../../types';
+import { signal } from '@preact/signals-react';
+
+interface ThemeData {
+  colors: Record<string, string>;
+  typography: Record<string, string>;
+  spatial: Record<string, string>;
+  identity: Record<string, string | null>;
+}
 
 /**
- * Current theme data.
+ * Current theme data (from /_ensemble/brand/theme JSON endpoint).
+ * Used for reading theme values, NOT for applying CSS.
  */
-export const theme = signal<Theme | null>(null);
+export const theme = signal<ThemeData | null>(null);
 
-/**
- * Theme loading state.
- */
 export const themeLoading = signal(true);
-
-/**
- * Theme error.
- */
 export const themeError = signal<string | null>(null);
-
-/**
- * Dark mode preference.
- */
 export const darkMode = signal(false);
+export const accentColor = signal('#3B82F6');
 
 /**
- * Initialize dark mode from system preference or localStorage.
- */
-export function initDarkMode(): void {
-  if (typeof window === 'undefined') return;
-
-  // Check localStorage first
-  const stored = localStorage.getItem('ensemble:darkMode');
-  if (stored !== null) {
-    darkMode.value = stored === 'true';
-    return;
-  }
-
-  // Fall back to system preference
-  if (window.matchMedia) {
-    darkMode.value = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  }
-}
-
-/**
- * Toggle dark mode.
- */
-export function toggleDarkMode(): void {
-  if (typeof window === 'undefined') return;
-
-  darkMode.value = !darkMode.value;
-  localStorage.setItem('ensemble:darkMode', String(darkMode.value));
-  applyTheme();
-}
-
-/**
- * Computed: Accent color.
- */
-export const accentColor = computed(() => theme.value?.colors.accent ?? '#3B82F6');
-
-/**
- * Fetch theme from API.
+ * Fetch theme data from API (read-only, no CSS side effects).
  */
 export async function fetchTheme(): Promise<void> {
   themeLoading.value = true;
@@ -71,13 +37,11 @@ export async function fetchTheme(): Promise<void> {
 
   try {
     const response = await fetch('/_ensemble/brand/theme');
-    if (!response.ok) {
-      throw new Error('Failed to load theme');
-    }
+    if (!response.ok) throw new Error('Failed to load theme');
 
-    const data = (await response.json()) as Theme;
+    const data = await response.json() as ThemeData;
     theme.value = data;
-    applyTheme();
+    if (data.colors?.accent) accentColor.value = data.colors.accent;
   } catch (error) {
     themeError.value = error instanceof Error ? error.message : 'Unknown error';
   } finally {
@@ -86,38 +50,18 @@ export async function fetchTheme(): Promise<void> {
 }
 
 /**
- * Apply theme to document CSS variables.
+ * No-op — CSS is handled by /_ensemble/brand/css endpoint.
+ * Kept for backwards compatibility with any code that calls it.
  */
 export function applyTheme(): void {
-  if (typeof document === 'undefined') return;
+  // Intentionally empty. Brand/css handles all theming.
+}
 
-  const t = theme.value;
-  if (!t) return;
+export function initDarkMode(): void {
+  // Dark mode is set by the server via class="dark" on <html>.
+  // No client-side initialization needed.
+}
 
-  const root = document.documentElement;
-  const isDark = darkMode.value;
-
-  // Colors (swap surface/background in dark mode)
-  root.style.setProperty('--color-accent', t.colors.accent);
-  root.style.setProperty('--color-primary', t.colors.primary);
-  root.style.setProperty('--color-surface', isDark ? '#1a1a2e' : t.colors.surface);
-  root.style.setProperty('--color-background', isDark ? '#0d0d1a' : t.colors.background);
-  root.style.setProperty('--color-foreground', isDark ? '#ffffff' : t.colors.foreground);
-  root.style.setProperty('--color-muted', isDark ? '#a0a0b0' : t.colors.muted);
-  root.style.setProperty('--color-border', isDark ? '#2a2a3e' : t.colors.border);
-
-  // Typography
-  root.style.setProperty('--font-heading', `'${t.typography.headingFont}', sans-serif`);
-  root.style.setProperty('--font-body', `'${t.typography.bodyFont}', sans-serif`);
-  root.style.setProperty('--font-mono', `'${t.typography.monoFont}', monospace`);
-
-  // Spatial
-  root.style.setProperty('--radius', t.spatial.radius);
-
-  // Set density class
-  document.body.classList.remove('density-compact', 'density-normal', 'density-comfortable');
-  document.body.classList.add(`density-${t.spatial.density}`);
-
-  // Set dark mode class
-  document.body.classList.toggle('dark', isDark);
+export function toggleDarkMode(): void {
+  // Handled by Appearance tab, not this module.
 }
