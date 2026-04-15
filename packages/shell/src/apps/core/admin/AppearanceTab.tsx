@@ -127,15 +127,25 @@ export function AppearanceTab() {
     document.documentElement.style.setProperty('--content-padding', `${contentPadding}rem`);
     document.documentElement.style.setProperty('--card-padding', `${cardPadding}rem`);
 
-    // Accent color → sets --primary (buttons, badges) and --sidebar-primary
+    // Accent color → sets both HSL vars AND resolved color vars
     if (accentColor) {
       const hsl = hexToHsl(accentColor);
       if (hsl) {
+        const isLight = isLightColor(accentColor);
+        const fg = isLight ? '0 0% 9%' : '0 0% 98%';
+        const fgColor = isLight ? 'hsl(0 0% 9%)' : 'hsl(0 0% 98%)';
+        // Set the HSL triplet vars (for brand/css compat)
         document.documentElement.style.setProperty('--primary', hsl);
-        document.documentElement.style.setProperty('--primary-foreground', isLightColor(accentColor) ? '0 0% 9%' : '0 0% 98%');
+        document.documentElement.style.setProperty('--primary-foreground', fg);
         document.documentElement.style.setProperty('--sidebar-primary', hsl);
-        document.documentElement.style.setProperty('--sidebar-primary-foreground', isLightColor(accentColor) ? '0 0% 9%' : '0 0% 98%');
+        document.documentElement.style.setProperty('--sidebar-primary-foreground', fg);
         document.documentElement.style.setProperty('--ring', hsl);
+        // Also set the resolved Tailwind v4 color vars directly
+        document.documentElement.style.setProperty('--color-primary', `hsl(${hsl})`);
+        document.documentElement.style.setProperty('--color-primary-foreground', fgColor);
+        document.documentElement.style.setProperty('--color-sidebar-primary', `hsl(${hsl})`);
+        document.documentElement.style.setProperty('--color-sidebar-primary-foreground', fgColor);
+        document.documentElement.style.setProperty('--color-ring', `hsl(${hsl})`);
         document.documentElement.style.setProperty('--color-accent', accentColor);
       }
     }

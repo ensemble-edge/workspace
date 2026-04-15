@@ -159,9 +159,15 @@ async function generateShellCss(
   const chart = chartColors[chartColor] || chartColors.blue;
 
   // Emit BOTH :root (light) and .dark (dark) blocks — the shadcn/ui way.
-  // Toggle between them happens via adding/removing the 'dark' class on <html>.
-  const lightVars = Object.entries(lightScale).map(([k, v]) => `  --${k}: ${v};`).join('\n');
-  const darkVars = Object.entries(darkScale).map(([k, v]) => `  --${k}: ${v};`).join('\n');
+  // For each scale, emit both the HSL triplet (--primary) AND the resolved
+  // Tailwind v4 color (--color-primary) to ensure utilities like bg-primary work.
+  const emitVars = (scale: Record<string, string>) =>
+    Object.entries(scale).map(([k, v]) =>
+      `  --${k}: ${v};\n  --color-${k}: hsl(${v});`
+    ).join('\n');
+
+  const lightVars = emitVars(lightScale);
+  const darkVars = emitVars(darkScale);
 
   return `
 /* Workspace Shell Theme (${baseColor} base, ${themeMode} default) */
