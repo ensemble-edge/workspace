@@ -158,9 +158,10 @@ async function generateShellCss(
   };
   const chart = chartColors[chartColor] || chartColors.blue;
 
-  // Emit BOTH :root (light) and .dark (dark) blocks — the shadcn/ui way.
-  // Emit HSL triplets only. Tailwind v4's @theme block handles
-  // the hsl() wrapping: --color-primary: hsl(var(--primary))
+  // Emit HSL triplets. Tailwind v4's @theme block wraps them:
+  // --color-primary: hsl(var(--primary)). Since brand/css loads AFTER
+  // shell.css, our :root values for --primary etc. take effect, and
+  // the @theme hsl() wrapper reads them at computed value time.
   const emitVars = (scale: Record<string, string>) =>
     Object.entries(scale).map(([k, v]) => `  --${k}: ${v};`).join('\n');
 
