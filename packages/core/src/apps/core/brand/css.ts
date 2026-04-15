@@ -12,6 +12,7 @@
  */
 
 import { assembleBrandSpec, generateCssFromSpec } from './spec';
+import { getThemePreset } from './themes';
 
 /** Font family map — shared with shell Appearance tab */
 export const FONT_FAMILIES: Record<string, string> = {
@@ -92,61 +93,78 @@ async function generateShellCss(
   const radius = customTokens.radius || '0.5';
   const headingFont = customTokens.headingFont || 'dm-sans';
   const bodyFont = customTokens.bodyFont || 'dm-sans';
-  const baseColor = customTokens.baseColor || 'zinc';
-  const chartColor = customTokens.chartColor || 'blue';
   const themeMode = customTokens.themeMode || 'dark';
   const contentPadding = customTokens.contentPadding || '1.5';
   const cardPadding = customTokens.cardPadding || '1.5';
+  const themePresetId = customTokens.themePreset || 'default';
 
   const resolvedHeadingFont = FONT_FAMILIES[headingFont] || FONT_FAMILIES['dm-sans'];
   const resolvedBodyFont = FONT_FAMILIES[bodyFont] || FONT_FAMILIES['dm-sans'];
 
-  // Full shadcn/ui color scales (dark and light)
-  const darkScales: Record<string, Record<string, string>> = {
-    zinc: { background: '240 10% 3.9%', foreground: '0 0% 98%', card: '240 10% 3.9%', 'card-foreground': '0 0% 98%', popover: '240 10% 3.9%', 'popover-foreground': '0 0% 98%', primary: '0 0% 98%', 'primary-foreground': '240 5.9% 10%', secondary: '240 3.7% 15.9%', 'secondary-foreground': '0 0% 98%', muted: '240 3.7% 15.9%', 'muted-foreground': '240 5% 64.9%', accent: '240 3.7% 15.9%', 'accent-foreground': '0 0% 98%', destructive: '0 62.8% 30.6%', 'destructive-foreground': '0 0% 98%', border: '240 3.7% 15.9%', input: '240 3.7% 15.9%', ring: '240 4.9% 83.9%', 'sidebar-background': '240 5.9% 10%', 'sidebar-foreground': '240 4.8% 95.9%', 'sidebar-primary': '224.3 76.3% 48%', 'sidebar-primary-foreground': '0 0% 100%', 'sidebar-accent': '240 3.7% 15.9%', 'sidebar-accent-foreground': '240 4.8% 95.9%', 'sidebar-border': '240 3.7% 15.9%', 'sidebar-ring': '217.2 91.2% 59.8%' },
-    slate: { background: '222.2 84% 4.9%', foreground: '210 40% 98%', card: '222.2 84% 4.9%', 'card-foreground': '210 40% 98%', popover: '222.2 84% 4.9%', 'popover-foreground': '210 40% 98%', primary: '210 40% 98%', 'primary-foreground': '222.2 47.4% 11.2%', secondary: '217.2 32.6% 17.5%', 'secondary-foreground': '210 40% 98%', muted: '217.2 32.6% 17.5%', 'muted-foreground': '215 20.2% 65.1%', accent: '217.2 32.6% 17.5%', 'accent-foreground': '210 40% 98%', destructive: '0 62.8% 30.6%', 'destructive-foreground': '210 40% 98%', border: '217.2 32.6% 17.5%', input: '217.2 32.6% 17.5%', ring: '212.7 26.8% 83.9%', 'sidebar-background': '222.2 47.4% 11.2%', 'sidebar-foreground': '210 40% 96%', 'sidebar-primary': '217.2 91.2% 59.8%', 'sidebar-primary-foreground': '0 0% 100%', 'sidebar-accent': '217.2 32.6% 17.5%', 'sidebar-accent-foreground': '210 40% 96%', 'sidebar-border': '217.2 32.6% 17.5%', 'sidebar-ring': '217.2 91.2% 59.8%' },
-    stone: { background: '20 14.3% 4.1%', foreground: '60 9.1% 97.8%', card: '20 14.3% 4.1%', 'card-foreground': '60 9.1% 97.8%', popover: '20 14.3% 4.1%', 'popover-foreground': '60 9.1% 97.8%', primary: '60 9.1% 97.8%', 'primary-foreground': '24 9.8% 10%', secondary: '12 6.5% 15.1%', 'secondary-foreground': '60 9.1% 97.8%', muted: '12 6.5% 15.1%', 'muted-foreground': '24 5.4% 63.9%', accent: '12 6.5% 15.1%', 'accent-foreground': '60 9.1% 97.8%', destructive: '0 62.8% 30.6%', 'destructive-foreground': '60 9.1% 97.8%', border: '12 6.5% 15.1%', input: '12 6.5% 15.1%', ring: '24 5.7% 82.9%', 'sidebar-background': '24 9.8% 10%', 'sidebar-foreground': '60 9.1% 96%', 'sidebar-primary': '25 95% 53%', 'sidebar-primary-foreground': '0 0% 100%', 'sidebar-accent': '12 6.5% 15.1%', 'sidebar-accent-foreground': '60 9.1% 96%', 'sidebar-border': '12 6.5% 15.1%', 'sidebar-ring': '25 95% 53%' },
-    gray: { background: '224 71.4% 4.1%', foreground: '210 20% 98%', card: '224 71.4% 4.1%', 'card-foreground': '210 20% 98%', popover: '224 71.4% 4.1%', 'popover-foreground': '210 20% 98%', primary: '210 20% 98%', 'primary-foreground': '220.9 39.3% 11%', secondary: '215 27.9% 16.9%', 'secondary-foreground': '210 20% 98%', muted: '215 27.9% 16.9%', 'muted-foreground': '217.9 10.6% 64.9%', accent: '215 27.9% 16.9%', 'accent-foreground': '210 20% 98%', destructive: '0 62.8% 30.6%', 'destructive-foreground': '210 20% 98%', border: '215 27.9% 16.9%', input: '215 27.9% 16.9%', ring: '216 12.2% 83.9%', 'sidebar-background': '220.9 39.3% 11%', 'sidebar-foreground': '210 20% 96%', 'sidebar-primary': '217.2 91.2% 59.8%', 'sidebar-primary-foreground': '0 0% 100%', 'sidebar-accent': '215 27.9% 16.9%', 'sidebar-accent-foreground': '210 20% 96%', 'sidebar-border': '215 27.9% 16.9%', 'sidebar-ring': '217.2 91.2% 59.8%' },
-    neutral: { background: '0 0% 3.9%', foreground: '0 0% 98%', card: '0 0% 3.9%', 'card-foreground': '0 0% 98%', popover: '0 0% 3.9%', 'popover-foreground': '0 0% 98%', primary: '0 0% 98%', 'primary-foreground': '0 0% 9%', secondary: '0 0% 14.9%', 'secondary-foreground': '0 0% 98%', muted: '0 0% 14.9%', 'muted-foreground': '0 0% 63.9%', accent: '0 0% 14.9%', 'accent-foreground': '0 0% 98%', destructive: '0 62.8% 30.6%', 'destructive-foreground': '0 0% 98%', border: '0 0% 14.9%', input: '0 0% 14.9%', ring: '0 0% 83.1%', 'sidebar-background': '0 0% 9%', 'sidebar-foreground': '0 0% 96%', 'sidebar-primary': '0 0% 98%', 'sidebar-primary-foreground': '0 0% 9%', 'sidebar-accent': '0 0% 14.9%', 'sidebar-accent-foreground': '0 0% 96%', 'sidebar-border': '0 0% 14.9%', 'sidebar-ring': '0 0% 83.1%' },
-  };
+  // Start from the theme preset (provides coordinated light + dark scales)
+  const preset = getThemePreset(themePresetId) || getThemePreset('default')!;
+  const lightScale: Record<string, string> = { ...preset.light };
+  const darkScale: Record<string, string> = { ...preset.dark };
 
-  const lightScales: Record<string, Record<string, string>> = {
-    zinc: { background: '0 0% 100%', foreground: '240 10% 3.9%', card: '0 0% 100%', 'card-foreground': '240 10% 3.9%', popover: '0 0% 100%', 'popover-foreground': '240 10% 3.9%', primary: '240 5.9% 10%', 'primary-foreground': '0 0% 98%', secondary: '240 4.8% 95.9%', 'secondary-foreground': '240 5.9% 10%', muted: '240 4.8% 95.9%', 'muted-foreground': '240 3.8% 46.1%', accent: '240 4.8% 95.9%', 'accent-foreground': '240 5.9% 10%', destructive: '0 84.2% 60.2%', 'destructive-foreground': '0 0% 98%', border: '240 5.9% 90%', input: '240 5.9% 90%', ring: '240 5.9% 10%', 'sidebar-background': '0 0% 98%', 'sidebar-foreground': '240 5.3% 26.1%', 'sidebar-primary': '240 5.9% 10%', 'sidebar-primary-foreground': '0 0% 98%', 'sidebar-accent': '240 4.8% 95.9%', 'sidebar-accent-foreground': '240 5.9% 10%', 'sidebar-border': '220 13% 91%', 'sidebar-ring': '217.2 91.2% 59.8%' },
-    slate: { background: '0 0% 100%', foreground: '222.2 84% 4.9%', card: '0 0% 100%', 'card-foreground': '222.2 84% 4.9%', popover: '0 0% 100%', 'popover-foreground': '222.2 84% 4.9%', primary: '222.2 47.4% 11.2%', 'primary-foreground': '210 40% 98%', secondary: '210 40% 96.1%', 'secondary-foreground': '222.2 47.4% 11.2%', muted: '210 40% 96.1%', 'muted-foreground': '215.4 16.3% 46.9%', accent: '210 40% 96.1%', 'accent-foreground': '222.2 47.4% 11.2%', destructive: '0 84.2% 60.2%', 'destructive-foreground': '210 40% 98%', border: '214.3 31.8% 91.4%', input: '214.3 31.8% 91.4%', ring: '222.2 84% 4.9%', 'sidebar-background': '0 0% 98%', 'sidebar-foreground': '222.2 47.4% 26%', 'sidebar-primary': '222.2 47.4% 11.2%', 'sidebar-primary-foreground': '210 40% 98%', 'sidebar-accent': '210 40% 96.1%', 'sidebar-accent-foreground': '222.2 47.4% 11.2%', 'sidebar-border': '214.3 31.8% 91.4%', 'sidebar-ring': '222.2 84% 4.9%' },
-    stone: { background: '0 0% 100%', foreground: '20 14.3% 4.1%', card: '0 0% 100%', 'card-foreground': '20 14.3% 4.1%', popover: '0 0% 100%', 'popover-foreground': '20 14.3% 4.1%', primary: '24 9.8% 10%', 'primary-foreground': '60 9.1% 97.8%', secondary: '60 4.8% 95.9%', 'secondary-foreground': '24 9.8% 10%', muted: '60 4.8% 95.9%', 'muted-foreground': '25 5.3% 44.7%', accent: '60 4.8% 95.9%', 'accent-foreground': '24 9.8% 10%', destructive: '0 84.2% 60.2%', 'destructive-foreground': '60 9.1% 97.8%', border: '20 5.9% 90%', input: '20 5.9% 90%', ring: '20 14.3% 4.1%', 'sidebar-background': '60 9.1% 97.8%', 'sidebar-foreground': '24 9.8% 26%', 'sidebar-primary': '24 9.8% 10%', 'sidebar-primary-foreground': '60 9.1% 97.8%', 'sidebar-accent': '60 4.8% 95.9%', 'sidebar-accent-foreground': '24 9.8% 10%', 'sidebar-border': '20 5.9% 90%', 'sidebar-ring': '20 14.3% 4.1%' },
-    gray: { background: '0 0% 100%', foreground: '224 71.4% 4.1%', card: '0 0% 100%', 'card-foreground': '224 71.4% 4.1%', popover: '0 0% 100%', 'popover-foreground': '224 71.4% 4.1%', primary: '220.9 39.3% 11%', 'primary-foreground': '210 20% 98%', secondary: '220 14.3% 95.9%', 'secondary-foreground': '220.9 39.3% 11%', muted: '220 14.3% 95.9%', 'muted-foreground': '220 8.9% 46.1%', accent: '220 14.3% 95.9%', 'accent-foreground': '220.9 39.3% 11%', destructive: '0 84.2% 60.2%', 'destructive-foreground': '210 20% 98%', border: '220 13% 91%', input: '220 13% 91%', ring: '224 71.4% 4.1%', 'sidebar-background': '210 20% 98%', 'sidebar-foreground': '220.9 39.3% 26%', 'sidebar-primary': '220.9 39.3% 11%', 'sidebar-primary-foreground': '210 20% 98%', 'sidebar-accent': '220 14.3% 95.9%', 'sidebar-accent-foreground': '220.9 39.3% 11%', 'sidebar-border': '220 13% 91%', 'sidebar-ring': '224 71.4% 4.1%' },
-    neutral: { background: '0 0% 100%', foreground: '0 0% 3.9%', card: '0 0% 100%', 'card-foreground': '0 0% 3.9%', popover: '0 0% 100%', 'popover-foreground': '0 0% 3.9%', primary: '0 0% 9%', 'primary-foreground': '0 0% 98%', secondary: '0 0% 96.1%', 'secondary-foreground': '0 0% 9%', muted: '0 0% 96.1%', 'muted-foreground': '0 0% 45.1%', accent: '0 0% 96.1%', 'accent-foreground': '0 0% 9%', destructive: '0 84.2% 60.2%', 'destructive-foreground': '0 0% 98%', border: '0 0% 89.8%', input: '0 0% 89.8%', ring: '0 0% 3.9%', 'sidebar-background': '0 0% 98%', 'sidebar-foreground': '0 0% 26%', 'sidebar-primary': '0 0% 9%', 'sidebar-primary-foreground': '0 0% 98%', 'sidebar-accent': '0 0% 96.1%', 'sidebar-accent-foreground': '0 0% 9%', 'sidebar-border': '0 0% 89.8%', 'sidebar-ring': '0 0% 3.9%' },
-  };
+  // Apply user overrides on top of the preset
 
+  // Primary color (buttons, badges, checkbox, switch, slider, links, focus ring)
+  const buttonColorHex = customTokens.buttonColor || '';
+  if (buttonColorHex) {
+    const hsl = hexToHslString(buttonColorHex);
+    if (hsl) {
+      const fg = isLightHex(buttonColorHex) ? '0 0% 9%' : '0 0% 98%';
+      lightScale.primary = hsl; lightScale['primary-foreground'] = fg;
+      lightScale.ring = hsl;
+      lightScale['sidebar-primary'] = hsl; lightScale['sidebar-primary-foreground'] = fg;
+      darkScale.primary = hsl; darkScale['primary-foreground'] = fg;
+      darkScale.ring = hsl;
+      darkScale['sidebar-primary'] = hsl; darkScale['sidebar-primary-foreground'] = fg;
+    }
+  }
+
+  // Accent color (sidebar hover/active)
+  const accentColorHex = customTokens.accentColor || '';
+  if (accentColorHex) {
+    const hsl = hexToHslString(accentColorHex);
+    if (hsl) {
+      const fg = isLightHex(accentColorHex) ? '0 0% 9%' : '0 0% 98%';
+      lightScale['sidebar-accent'] = hsl; lightScale['sidebar-accent-foreground'] = fg;
+      darkScale['sidebar-accent'] = hsl; darkScale['sidebar-accent-foreground'] = fg;
+    }
+  }
+
+  // Canvas color (page background)
+  const canvasColorHex = customTokens.canvasColor || '';
+  if (canvasColorHex) {
+    const hsl = hexToHslString(canvasColorHex);
+    if (hsl) {
+      const isLight = isLightHex(canvasColorHex);
+      lightScale.background = hsl;
+      lightScale.foreground = isLight ? '0 0% 9%' : '0 0% 98%';
+      // Auto-generate dark variant from same hue
+      const darkBg = autoDarkVariant(canvasColorHex);
+      if (darkBg) {
+        darkScale.background = darkBg;
+        darkScale.foreground = '0 0% 98%';
+      }
+    }
+  }
+
+  // Sidebar color
+  const sidebarColorHex = customTokens.sidebarColor || '';
+  if (sidebarColorHex) {
+    const hsl = hexToHslString(sidebarColorHex);
+    if (hsl) {
+      const isLight = isLightHex(sidebarColorHex);
+      const fg = isLight ? '0 0% 20%' : '0 0% 90%';
+      lightScale['sidebar-background'] = hsl; lightScale['sidebar-foreground'] = fg;
+      darkScale['sidebar-background'] = hsl; darkScale['sidebar-foreground'] = fg;
+    }
+  }
+
+  // Card color (card/popover surfaces)
   const cardColorHex = customTokens.cardColor || '';
-  const buttonColorHex = customTokens.buttonColor || accent;
-  const accentColorHex = customTokens.accentColor || accent;
-
-  const lightScale = { ...(lightScales[baseColor] || lightScales.zinc) };
-  const darkScale = { ...(darkScales[baseColor] || darkScales.zinc) };
-
-  // Button color → --primary (buttons, badges, checkbox, switch, slider, links, focus ring)
-  const buttonHsl = hexToHslString(buttonColorHex);
-  if (buttonHsl) {
-    const btnFg = isLightHex(buttonColorHex) ? '0 0% 9%' : '0 0% 98%';
-    lightScale.primary = buttonHsl; lightScale['primary-foreground'] = btnFg;
-    lightScale.ring = buttonHsl;
-    lightScale['sidebar-primary'] = buttonHsl; lightScale['sidebar-primary-foreground'] = btnFg;
-    darkScale.primary = buttonHsl; darkScale['primary-foreground'] = btnFg;
-    darkScale.ring = buttonHsl;
-    darkScale['sidebar-primary'] = buttonHsl; darkScale['sidebar-primary-foreground'] = btnFg;
-  }
-
-  // Accent color → --accent (hover states on ghost buttons, dropdown items, select items)
-  const accentHsl = hexToHslString(accentColorHex);
-  if (accentHsl) {
-    const accFg = isLightHex(accentColorHex) ? '0 0% 9%' : '0 0% 98%';
-    // Only override accent if user explicitly set it (not the default base scale accent)
-    lightScale['sidebar-accent'] = accentHsl; lightScale['sidebar-accent-foreground'] = accFg;
-    darkScale['sidebar-accent'] = accentHsl; darkScale['sidebar-accent-foreground'] = accFg;
-  }
-
-  // Card color → --card, --popover (surfaces)
   if (cardColorHex) {
     const hsl = hexToHslString(cardColorHex);
     if (hsl) {
@@ -162,12 +180,6 @@ async function generateShellCss(
     }
   }
 
-  const chartColors: Record<string, string> = {
-    blue: '220 70% 50%', green: '160 60% 45%', orange: '30 80% 55%',
-    rose: '340 75% 55%', violet: '280 65% 60%',
-  };
-  const chart = chartColors[chartColor] || chartColors.blue;
-
   // Emit HSL triplets. Tailwind v4's @theme block wraps them:
   // --color-primary: hsl(var(--primary)). Since brand/css loads AFTER
   // shell.css, our :root values for --primary etc. take effect, and
@@ -179,7 +191,7 @@ async function generateShellCss(
   const darkVars = emitVars(darkScale);
 
   return `
-/* Workspace Shell Theme (${baseColor} base, ${themeMode} default) */
+/* Workspace Shell Theme (${themePresetId} theme, ${themeMode} mode) */
 
 /* Shared tokens */
 :root {
@@ -192,7 +204,7 @@ async function generateShellCss(
   --radius: ${radius}rem;
   --content-padding: ${contentPadding}rem;
   --card-padding: ${cardPadding}rem;
-  --chart-1: ${chart};
+  --chart-1: 220 70% 50%;
 }
 
 /* Light mode (default) */
@@ -258,4 +270,27 @@ function isLightHex(hex: string): boolean {
   const g = parseInt(result[2], 16) / 255;
   const b = parseInt(result[3], 16) / 255;
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5;
+}
+
+/**
+ * Auto-generate a dark mode variant from a hex color.
+ * Preserves the hue, reduces saturation slightly, sets lightness to ~5%.
+ */
+function autoDarkVariant(hex: string): string | null {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!result) return null;
+  const r = parseInt(result[1], 16) / 255;
+  const g = parseInt(result[2], 16) / 255;
+  const b = parseInt(result[3], 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = d / (2 - max - min); // Use the formula for l > 0.5 doesn't matter for hue
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  // Keep hue, reduce saturation to 70% of original, set lightness to 5%
+  return `${(h * 360).toFixed(1)} ${Math.max(5, s * 70).toFixed(1)}% 5%`;
 }
