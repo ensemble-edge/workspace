@@ -83,6 +83,8 @@ async function generateShellCss(
       if (row.category === 'colors' && row.key === 'accent') accent = row.value;
       if (row.category === 'custom') customTokens[row.key] = row.value;
     }
+    // Workspace accent color overrides brand accent
+    if (customTokens.accentColor) accent = customTokens.accentColor;
   } catch {
     // Use defaults
   }
@@ -116,21 +118,38 @@ async function generateShellCss(
     neutral: { background: '0 0% 100%', foreground: '0 0% 3.9%', card: '0 0% 100%', 'card-foreground': '0 0% 3.9%', popover: '0 0% 100%', 'popover-foreground': '0 0% 3.9%', primary: '0 0% 9%', 'primary-foreground': '0 0% 98%', secondary: '0 0% 96.1%', 'secondary-foreground': '0 0% 9%', muted: '0 0% 96.1%', 'muted-foreground': '0 0% 45.1%', accent: '0 0% 96.1%', 'accent-foreground': '0 0% 9%', destructive: '0 84.2% 60.2%', 'destructive-foreground': '0 0% 98%', border: '0 0% 89.8%', input: '0 0% 89.8%', ring: '0 0% 3.9%', 'sidebar-background': '0 0% 98%', 'sidebar-foreground': '0 0% 26%', 'sidebar-primary': '0 0% 9%', 'sidebar-primary-foreground': '0 0% 98%', 'sidebar-accent': '0 0% 96.1%', 'sidebar-accent-foreground': '0 0% 9%', 'sidebar-border': '0 0% 89.8%', 'sidebar-ring': '0 0% 3.9%' },
   };
 
-  const cardColorLight = customTokens.cardColorLight || '';
-  const cardColorDark = customTokens.cardColorDark || '';
+  const cardColorHex = customTokens.cardColor || '';
 
-  // Get BOTH light and dark scales for the chosen base color
+  // Start with curated scales, then apply card color override if set
   const lightScale = { ...(lightScales[baseColor] || lightScales.zinc) };
   const darkScale = { ...(darkScales[baseColor] || darkScales.zinc) };
 
-  // Apply per-mode card color overrides
-  if (cardColorLight) {
-    const hsl = hexToHslString(cardColorLight);
-    if (hsl) { lightScale.card = hsl; lightScale.popover = hsl; }
+  // Apply accent color as --primary (buttons, badges, focus rings, sidebar active)
+  const accentHsl = hexToHslString(accent);
+  if (accentHsl) {
+    const accentIsLight = isLightHex(accent);
+    const accentFg = accentIsLight ? '0 0% 9%' : '0 0% 98%';
+    lightScale.primary = accentHsl; lightScale['primary-foreground'] = accentFg;
+    lightScale.ring = accentHsl;
+    lightScale['sidebar-primary'] = accentHsl; lightScale['sidebar-primary-foreground'] = accentFg;
+    darkScale.primary = accentHsl; darkScale['primary-foreground'] = accentFg;
+    darkScale.ring = accentHsl;
+    darkScale['sidebar-primary'] = accentHsl; darkScale['sidebar-primary-foreground'] = accentFg;
   }
-  if (cardColorDark) {
-    const hsl = hexToHslString(cardColorDark);
-    if (hsl) { darkScale.card = hsl; darkScale.popover = hsl; }
+
+  if (cardColorHex) {
+    const hsl = hexToHslString(cardColorHex);
+    if (hsl) {
+      const isLight = isLightHex(cardColorHex);
+      const fg = isLight ? '0 0% 9%' : '0 0% 98%';
+      const mutedFg = isLight ? '0 0% 40%' : '0 0% 65%';
+      lightScale.card = hsl; lightScale['card-foreground'] = fg;
+      lightScale.popover = hsl; lightScale['popover-foreground'] = fg;
+      lightScale['muted-foreground'] = mutedFg;
+      darkScale.card = hsl; darkScale['card-foreground'] = fg;
+      darkScale.popover = hsl; darkScale['popover-foreground'] = fg;
+      darkScale['muted-foreground'] = mutedFg;
+    }
   }
 
   const chartColors: Record<string, string> = {
@@ -214,4 +233,14 @@ function hexToHslString(hex: string): string | null {
   }
 
   return `${(h * 360).toFixed(1)} ${(s * 100).toFixed(1)}% ${(l * 100).toFixed(1)}%`;
+}
+
+/** Check if hex color is light (luminance > 0.5) */
+function isLightHex(hex: string): boolean {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!result) return false;
+  const r = parseInt(result[1], 16) / 255;
+  const g = parseInt(result[2], 16) / 255;
+  const b = parseInt(result[3], 16) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5;
 }
