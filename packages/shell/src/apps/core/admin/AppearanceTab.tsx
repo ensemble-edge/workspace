@@ -34,6 +34,8 @@ import {
 
 // Theme preset data (shared with CSS endpoint)
 const THEME_PRESETS = [
+  { id: 'brand', label: 'Brand', description: 'Your brand colors', swatch: 'brand',
+    primary: '', accent: '', canvas: '', sidebar: '', card: '' },
   { id: 'default', label: 'Default', description: 'Clean and neutral', swatch: '#71717a',
     primary: '#18181b', accent: '', canvas: '#ffffff', sidebar: '#f9f9f9', card: '#ffffff' },
   { id: 'warm', label: 'Warm', description: 'Cream canvas, linen cards', swatch: '#92400e',
@@ -130,11 +132,26 @@ export function AppearanceTab() {
   const [bodyFont, setBodyFont] = useState('system');
   const [contentPadding, setContentPadding] = useState('1.5');
   const [cardPadding, setCardPadding] = useState('1.5');
+  const [brandColors, setBrandColors] = useState({ primary: '#3b82f6', secondary: '#1e293b', accent: '#ef4444' });
   const [loaded, setLoaded] = useState(false);
   const saveTimeout = useRef<ReturnType<typeof setTimeout>>();
 
-  // Load saved settings
+  // Load saved settings + brand colors
   useEffect(() => {
+    // Load brand colors for the "Brand" preset
+    fetch('/_ensemble/core/brand/tokens/colors')
+      .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
+      .then((result) => {
+        const bc = { ...brandColors };
+        for (const t of result.data || []) {
+          if (t.key === 'brand-primary') bc.primary = t.value;
+          if (t.key === 'brand-secondary') bc.secondary = t.value;
+          if (t.key === 'brand-accent') bc.accent = t.value;
+        }
+        setBrandColors(bc);
+      })
+      .catch(() => {});
+
     fetch('/_ensemble/core/brand/tokens/custom')
       .then((res) => res.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
       .then((result) => {
@@ -333,20 +350,40 @@ export function AppearanceTab() {
     }
   };
 
-  // Apply a theme preset — clears overrides, removes inline styles, reloads CSS
+  // Apply a theme preset
   const applyPreset = (presetId: string) => {
     setThemePreset(presetId);
-    setButtonColor(''); setAccentColor('');
-    setCanvasColor(''); setSidebarColor(''); setCardColor('');
     setSuccessColor(''); setWarningColor(''); setErrorColor(''); setInfoColor('');
-    resetInlineStyles();
-    saveAndReload({
-      ...allTokens(),
-      themePreset: presetId,
-      buttonColor: '', accentColor: '',
-      canvasColor: '', sidebarColor: '', cardColor: '',
-      successColor: '', warningColor: '', errorColor: '', infoColor: '',
-    });
+
+    if (presetId === 'brand') {
+      // Brand preset: populate from brand colors
+      setButtonColor(brandColors.primary);
+      setAccentColor(brandColors.accent);
+      setCanvasColor('');
+      setSidebarColor(brandColors.secondary);
+      setCardColor('');
+      resetInlineStyles();
+      saveAndReload({
+        ...allTokens(),
+        themePreset: 'brand',
+        buttonColor: brandColors.primary,
+        accentColor: brandColors.accent,
+        canvasColor: '', sidebarColor: brandColors.secondary, cardColor: '',
+        successColor: '', warningColor: '', errorColor: '', infoColor: '',
+      });
+    } else {
+      // Standard preset: clear overrides
+      setButtonColor(''); setAccentColor('');
+      setCanvasColor(''); setSidebarColor(''); setCardColor('');
+      resetInlineStyles();
+      saveAndReload({
+        ...allTokens(),
+        themePreset: presetId,
+        buttonColor: '', accentColor: '',
+        canvasColor: '', sidebarColor: '', cardColor: '',
+        successColor: '', warningColor: '', errorColor: '', infoColor: '',
+      });
+    }
   };
 
   // Get the display value for a color picker — shows the preset default if no override
@@ -378,7 +415,11 @@ export function AppearanceTab() {
                   themePreset === t.id ? 'border-blue-500 ring-2 ring-blue-500/30' : 'border-input hover:border-blue-300'
                 }`}
               >
-                <div className="h-8 w-8 rounded-lg ring-1 ring-inset ring-black/10" style={{ backgroundColor: t.swatch }} />
+                <div className="h-8 w-8 rounded-lg ring-1 ring-inset ring-black/10 overflow-hidden"
+                  style={t.swatch === 'brand'
+                    ? { background: `linear-gradient(135deg, ${brandColors.primary} 33%, ${brandColors.secondary} 66%, ${brandColors.accent})` }
+                    : { backgroundColor: t.swatch }
+                  } />
                 <div className="min-w-0">
                   <p className="text-sm font-medium">
                     {t.label}

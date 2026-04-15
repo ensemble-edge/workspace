@@ -102,7 +102,8 @@ async function generateShellCss(
   const resolvedBodyFont = FONT_FAMILIES[bodyFont] || FONT_FAMILIES['dm-sans'];
 
   // Start from the theme preset (provides coordinated light + dark scales)
-  const preset = getThemePreset(themePresetId) || getThemePreset('default')!;
+  // "brand" preset uses "default" as base — brand colors are applied via individual overrides
+  const preset = getThemePreset(themePresetId === 'brand' ? 'default' : themePresetId) || getThemePreset('default')!;
   const lightScale: Record<string, string> = { ...preset.light };
   const darkScale: Record<string, string> = { ...preset.dark };
 

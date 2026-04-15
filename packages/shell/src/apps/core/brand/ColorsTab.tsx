@@ -43,6 +43,11 @@ interface SavedToken {
 }
 
 export function ColorsTab() {
+  // Brand core colors (required — auto-generate palettes)
+  const [brandPrimary, setBrandPrimary] = useState('#3b82f6');
+  const [brandSecondary, setBrandSecondary] = useState('#1e293b');
+  const [brandAccent, setBrandAccent] = useState('#ef4444');
+
   const [groups, setGroups] = useState<ColorGroup[]>([]);
   const [semanticColors, setSemanticColors] = useState({
     success: '#5B8A72',
@@ -74,7 +79,6 @@ export function ColorsTab() {
 
       for (const token of savedTokens) {
         if (token.group_slug && groupMap.has(token.group_slug)) {
-          // Key format: "group.shade" e.g. "slate.700"
           const shade = token.key.split('.').slice(1).join('.');
           if (shade) {
             groupMap.get(token.group_slug)!.colors[shade] = token.value;
@@ -82,6 +86,12 @@ export function ColorsTab() {
         } else if (token.key.startsWith('semantic.')) {
           const semanticKey = token.key.replace('semantic.', '');
           setSemanticColors((prev) => ({ ...prev, [semanticKey]: token.value }));
+        } else if (token.key === 'brand-primary') {
+          setBrandPrimary(token.value);
+        } else if (token.key === 'brand-secondary') {
+          setBrandSecondary(token.value);
+        } else if (token.key === 'brand-accent') {
+          setBrandAccent(token.value);
         }
       }
 
@@ -93,6 +103,41 @@ export function ColorsTab() {
       setLoaded(true);
     });
   }, []);
+
+  // Save a brand core color + auto-generate its palette as a color group
+  const updateBrandColor = async (key: string, value: string, setter: (v: string) => void) => {
+    setter(value);
+    try {
+      // Save the token
+      await fetch('/_ensemble/brand/tokens', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: 'colors', tokens: { [key]: value } }),
+      });
+      // Auto-generate palette and save as color group
+      const palette = generatePalette(value);
+      const slug = key.replace('brand-', '');
+      const label = slug.charAt(0).toUpperCase() + slug.slice(1);
+      await fetch('/_ensemble/core/brand/colors', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group: slug, label, colors: palette }),
+      });
+      // Update local groups state
+      setGroups((prev) => {
+        const existing = prev.findIndex((g) => g.slug === slug);
+        const newGroup: ColorGroup = { slug, label, colors: palette };
+        if (existing >= 0) {
+          const updated = [...prev];
+          updated[existing] = newGroup;
+          return updated;
+        }
+        return [newGroup, ...prev];
+      });
+    } catch {
+      toast.error('Failed to save brand color');
+    }
+  };
 
   const addGroup = () => {
     const slug = `color-${Date.now()}`;
@@ -184,7 +229,25 @@ export function ColorsTab() {
 
   return (
     <div className="space-y-6">
-      {/* Color Groups */}
+      {/* Brand Core Colors — required */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Brand Colors</CardTitle>
+          <CardDescription>Your brand's core identity — palettes are auto-generated from each pick</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-6 lg:grid-cols-3">
+            <BrandColorPicker label="Primary" description="Main brand color" value={brandPrimary}
+              onChange={(v) => updateBrandColor('brand-primary', v, setBrandPrimary)} />
+            <BrandColorPicker label="Secondary" description="Supporting color" value={brandSecondary}
+              onChange={(v) => updateBrandColor('brand-secondary', v, setBrandSecondary)} />
+            <BrandColorPicker label="Accent" description="Action / highlight" value={brandAccent}
+              onChange={(v) => updateBrandColor('brand-accent', v, setBrandAccent)} />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Color Groups (auto-generated + custom) */}
       {groups.map((group) => (
         <Card key={group.slug}>
           <CardHeader>
@@ -317,6 +380,48 @@ function ColorInput({ value, onChange }: { value: string; onChange: (v: string) 
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function BrandColorPicker({ label, description, value, onChange }: {
+  label: string; description: string; value: string; onChange: (v: string) => void;
+}) {
+  const palette = generatePalette(value);
+  const shades = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900] as const;
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <Label className="text-base font-semibold">{label}</Label>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <Popover>
+        <PopoverTrigger asChild>
+          <button className="flex h-10 w-full items-center gap-3 rounded-lg border border-input bg-card px-3 text-sm hover:bg-primary/10">
+            <div className="h-6 w-6 rounded ring-1 ring-inset ring-black/10" style={{ backgroundColor: value }} />
+            <span className="font-mono">{value}</span>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-64">
+          <div className="space-y-3">
+            <input type="color" value={value} onChange={(e) => onChange(e.target.value)} className="h-32 w-full cursor-pointer rounded-md border-0" />
+            <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder="#000000" className="font-mono text-sm" />
+          </div>
+        </PopoverContent>
+      </Popover>
+      <div className="flex gap-0.5 overflow-hidden rounded-md">
+        {shades.map((shade) => {
+          const hex = palette[shade];
+          const lum = getRelativeLuminance(hex);
+          return (
+            <div key={shade} className="flex h-8 flex-1 items-end justify-center pb-0.5 text-[8px] font-medium"
+              style={{ backgroundColor: hex, color: lum < 0.5 ? '#fff' : '#000' }} title={`${shade}: ${hex}`}>
+              {shade}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
