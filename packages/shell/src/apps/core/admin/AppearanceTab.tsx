@@ -33,6 +33,17 @@ import {
 
 import { useHashTab } from '../../../hooks/useHashTab';
 
+const COLOR_PRESETS = [
+  { value: '#2563eb', label: 'Blue' },
+  { value: '#7c3aed', label: 'Violet' },
+  { value: '#db2777', label: 'Pink' },
+  { value: '#ea580c', label: 'Orange' },
+  { value: '#16a34a', label: 'Green' },
+  { value: '#dc2626', label: 'Red' },
+  { value: '#ca8a04', label: 'Yellow' },
+  { value: '#0891b2', label: 'Cyan' },
+];
+
 const FONT_OPTIONS = [
   { value: 'system', label: 'System Default' },
   { value: 'inter', label: 'Inter' },
@@ -52,6 +63,7 @@ export function AppearanceTab() {
   const [cardPadding, setCardPadding] = useState('1.5');
   const [cardColor, setCardColor] = useState('');
   const [accentColor, setAccentColor] = useState('#2563eb');
+  const [buttonColor, setButtonColor] = useState('');
   const [loaded, setLoaded] = useState(false);
   const saveTimeout = useRef<ReturnType<typeof setTimeout>>();
 
@@ -71,6 +83,7 @@ export function AppearanceTab() {
             case 'cardPadding': setCardPadding(token.value); break;
             case 'cardColor': setCardColor(token.value); break;
             case 'accentColor': setAccentColor(token.value); break;
+            case 'buttonColor': setButtonColor(token.value); break;
           }
         }
         setLoaded(true);
@@ -170,7 +183,11 @@ export function AppearanceTab() {
       document.documentElement.style.removeProperty('--popover-foreground');
       document.documentElement.style.removeProperty('--muted-foreground');
     }
-  }, [radius, contentPadding, cardPadding, cardColor, accentColor]);
+    // Button color (falls back to accent if not set)
+    const btnColor = buttonColor || accentColor;
+    document.documentElement.style.setProperty('--button-bg', btnColor);
+    document.documentElement.style.setProperty('--button-fg', isLightColor(btnColor) ? 'hsl(0 0% 9%)' : 'hsl(0 0% 98%)');
+  }, [radius, contentPadding, cardPadding, cardColor, accentColor, buttonColor]);
 
   // Dynamic Google Font loading
   useEffect(() => {
@@ -197,17 +214,21 @@ export function AppearanceTab() {
     }
   }, [headingFont, bodyFont]);
 
-  const allTokens = () => ({ baseColor, themeMode, headingFont, bodyFont, radius, contentPadding, cardPadding, cardColor, accentColor });
+  const allTokens = () => ({ baseColor, themeMode, headingFont, bodyFont, radius, contentPadding, cardPadding, cardColor, accentColor, buttonColor });
   const update = (key: string, value: string, setter: (v: string) => void) => {
     setter(value);
     autoSave({ ...allTokens(), [key]: value });
   };
 
-  // Selection style — uses fixed blue that works on ANY background
-  const sel = (selected: boolean) =>
+  // Selection style — uses button color (or accent) for selected state
+  const btnBg = buttonColor || accentColor;
+  const btnFg = isLightColor(btnBg) ? '#000' : '#fff';
+  const selStyle = (selected: boolean): React.CSSProperties | undefined =>
+    selected ? { backgroundColor: btnBg, color: btnFg, borderColor: btnBg } : undefined;
+  const selClass = (selected: boolean) =>
     selected
-      ? 'border-blue-500 bg-blue-500 text-white'
-      : 'border-input bg-card hover:bg-accent hover:text-accent-foreground';
+      ? 'border-2'
+      : 'border-input bg-card hover:bg-accent hover:text-accent-foreground border-2';
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
@@ -228,7 +249,8 @@ export function AppearanceTab() {
                 <button
                   key={mode.value}
                   onClick={() => update('themeMode', mode.value, setThemeMode as (v: string) => void)}
-                  className={`flex-1 flex items-center justify-center gap-2 rounded-lg border-2 p-3 text-sm font-medium transition-all ${sel(themeMode === mode.value)}`}
+                  className={`flex-1 flex items-center justify-center gap-2 rounded-lg border-2 p-3 text-sm font-medium transition-all ${selClass(themeMode === mode.value)}`}
+                  style={selStyle(themeMode === mode.value)}
                 >
                   {mode.icon}
                   <span>{mode.label}</span>
@@ -256,7 +278,8 @@ export function AppearanceTab() {
                 <button
                   key={c.value}
                   onClick={() => update('baseColor', c.value, setBaseColor)}
-                  className={`flex items-center gap-2 rounded-lg border-2 px-4 py-2.5 text-sm font-medium transition-all ${sel(baseColor === c.value)}`}
+                  className={`flex items-center gap-2 rounded-lg border-2 px-4 py-2.5 text-sm font-medium transition-all ${selClass(baseColor === c.value)}`}
+                  style={selStyle(baseColor === c.value)}
                 >
                   <div className={`h-4 w-4 rounded-full ${c.swatch}`} />
                   <span>{c.label}</span>
@@ -266,49 +289,26 @@ export function AppearanceTab() {
           </CardContent>
         </Card>
 
+        {/* Button Color — above Accent */}
+        <ColorPresetCard
+          title="Button Color"
+          description="Primary button background (text auto-adjusts)"
+          value={buttonColor}
+          presets={COLOR_PRESETS}
+          onChange={(v) => update('buttonColor', v, setButtonColor)}
+          fallbackLabel="Using accent color"
+          onReset={() => update('buttonColor', '', setButtonColor)}
+          fallbackValue={accentColor}
+        />
+
         {/* Accent Color */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Accent Color</CardTitle>
-            <CardDescription>Buttons, links, and active states</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {([
-                { value: '#2563eb', label: 'Blue' },
-                { value: '#7c3aed', label: 'Violet' },
-                { value: '#db2777', label: 'Pink' },
-                { value: '#ea580c', label: 'Orange' },
-                { value: '#16a34a', label: 'Green' },
-                { value: '#dc2626', label: 'Red' },
-                { value: '#ca8a04', label: 'Yellow' },
-                { value: '#0891b2', label: 'Cyan' },
-              ]).map((c) => (
-                <button
-                  key={c.value}
-                  onClick={() => update('accentColor', c.value, setAccentColor)}
-                  className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-sm font-medium transition-all ${
-                    accentColor === c.value ? 'border-blue-500 ring-2 ring-blue-500/30' : 'border-input hover:border-blue-300'
-                  }`}
-                >
-                  <div className="h-4 w-4 rounded-full" style={{ backgroundColor: c.value }} />
-                  <span>{c.label}</span>
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-3 mt-3">
-              <label className="h-8 w-8 rounded-lg border border-input shrink-0 cursor-pointer overflow-hidden">
-                <input
-                  type="color"
-                  value={accentColor}
-                  onChange={(e) => update('accentColor', e.target.value, setAccentColor)}
-                  className="h-12 w-12 -mt-1 -ml-1 cursor-pointer border-0"
-                />
-              </label>
-              <span className="text-xs font-mono text-muted-foreground">{accentColor}</span>
-            </div>
-          </CardContent>
-        </Card>
+        <ColorPresetCard
+          title="Accent Color"
+          description="Badge, tabs, slider, hover states, focus rings"
+          value={accentColor}
+          presets={COLOR_PRESETS}
+          onChange={(v) => update('accentColor', v, setAccentColor)}
+        />
 
         {/* Radius */}
         <Card>
@@ -322,7 +322,8 @@ export function AppearanceTab() {
                 <button
                   key={r}
                   onClick={() => update('radius', r, setRadius)}
-                  className={`flex-1 rounded-lg border-2 px-3 py-2.5 text-sm font-medium transition-all ${sel(radius === r)}`}
+                  className={`flex-1 rounded-lg border-2 px-3 py-2.5 text-sm font-medium transition-all ${selClass(radius === r)}`}
+                  style={selStyle(radius === r)}
                 >
                   {r}
                 </button>
@@ -397,24 +398,17 @@ export function AppearanceTab() {
         <Card>
           <CardHeader>
             <CardTitle>Card Color</CardTitle>
-            <CardDescription>Override card/surface background (text color auto-adjusts)</CardDescription>
+            <CardDescription>Card/surface background (text auto-adjusts)</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-3">
               <label className="h-10 w-10 rounded-lg border border-input shrink-0 cursor-pointer overflow-hidden">
-                <input
-                  type="color"
-                  value={cardColor || '#ffffff'}
-                  onChange={(e) => update('cardColor', e.target.value, setCardColor)}
-                  className="h-14 w-14 -mt-1 -ml-1 cursor-pointer border-0"
-                />
+                <input type="color" value={cardColor || '#ffffff'} onChange={(e) => update('cardColor', e.target.value, setCardColor)} className="h-14 w-14 -mt-1 -ml-1 cursor-pointer border-0" />
               </label>
               <div className="flex-1">
                 <p className="text-sm font-mono">{cardColor || 'Using base color default'}</p>
                 {cardColor && (
-                  <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => update('cardColor', '', setCardColor)}>
-                    Reset to default
-                  </button>
+                  <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => update('cardColor', '', setCardColor)}>Reset to default</button>
                 )}
               </div>
             </div>
@@ -424,6 +418,47 @@ export function AppearanceTab() {
         <p className="text-xs text-muted-foreground text-center">Changes save automatically</p>
       </div>
     </div>
+  );
+}
+
+function ColorPresetCard({ title, description, value, presets, onChange, fallbackLabel, onReset, fallbackValue }: {
+  title: string; description: string; value: string;
+  presets: Array<{ value: string; label: string }>;
+  onChange: (v: string) => void;
+  fallbackLabel?: string; onReset?: () => void; fallbackValue?: string;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap gap-2">
+          {presets.map((c) => (
+            <button
+              key={c.value}
+              onClick={() => onChange(c.value)}
+              className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-sm font-medium transition-all ${
+                value === c.value ? 'border-blue-500 ring-2 ring-blue-500/30' : 'border-input hover:border-blue-300'
+              }`}
+            >
+              <div className="h-4 w-4 rounded-full" style={{ backgroundColor: c.value }} />
+              <span>{c.label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3 mt-3">
+          <label className="h-8 w-8 rounded-lg border border-input shrink-0 cursor-pointer overflow-hidden">
+            <input type="color" value={value || fallbackValue || '#000000'} onChange={(e) => onChange(e.target.value)} className="h-12 w-12 -mt-1 -ml-1 cursor-pointer border-0" />
+          </label>
+          <span className="text-xs font-mono text-muted-foreground">{value || fallbackLabel || ''}</span>
+          {onReset && value && (
+            <button className="text-xs text-muted-foreground hover:text-foreground ml-auto" onClick={onReset}>Reset</button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

@@ -159,12 +159,10 @@ async function generateShellCss(
   const chart = chartColors[chartColor] || chartColors.blue;
 
   // Emit BOTH :root (light) and .dark (dark) blocks — the shadcn/ui way.
-  // For each scale, emit both the HSL triplet (--primary) AND the resolved
-  // Tailwind v4 color (--color-primary) to ensure utilities like bg-primary work.
+  // Emit HSL triplets only. Tailwind v4's @theme block handles
+  // the hsl() wrapping: --color-primary: hsl(var(--primary))
   const emitVars = (scale: Record<string, string>) =>
-    Object.entries(scale).map(([k, v]) =>
-      `  --${k}: ${v};\n  --color-${k}: hsl(${v});`
-    ).join('\n');
+    Object.entries(scale).map(([k, v]) => `  --${k}: ${v};`).join('\n');
 
   const lightVars = emitVars(lightScale);
   const darkVars = emitVars(darkScale);
@@ -184,6 +182,8 @@ async function generateShellCss(
   --content-padding: ${contentPadding}rem;
   --card-padding: ${cardPadding}rem;
   --chart-1: ${chart};
+  --button-bg: ${customTokens.buttonColor || accent};
+  --button-fg: ${isLightHex(customTokens.buttonColor || accent) ? 'hsl(0 0% 9%)' : 'hsl(0 0% 98%)'};
 }
 
 /* Light mode (default) */
