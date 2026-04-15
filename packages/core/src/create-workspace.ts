@@ -441,8 +441,8 @@ function generateShellHtml(workspaceName: string, accentColor: string, themeMode
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/_ensemble/brand/css">
   <link rel="stylesheet" href="/_ensemble/shell/shell.css">
+  <link rel="stylesheet" href="/_ensemble/brand/css">
   <style>
     /* Minimal critical CSS — full theme loads from /_ensemble/brand/css */
     * { box-sizing: border-box; }
@@ -517,8 +517,8 @@ function generateLoginHtml(workspaceName: string, accentColor: string, themeMode
   <meta name="theme-color" content="${accentColor}">
   <title>Login — ${workspaceName}</title>
   ${systemScript}
-  <link rel="stylesheet" href="/_ensemble/brand/css">
   <link rel="stylesheet" href="/_ensemble/shell/shell.css">
+  <link rel="stylesheet" href="/_ensemble/brand/css">
 </head>
 <body class="min-h-svh flex items-center justify-center p-4 bg-muted">
   <div class="w-full max-w-sm bg-card rounded-lg shadow-lg border p-6 space-y-6">
