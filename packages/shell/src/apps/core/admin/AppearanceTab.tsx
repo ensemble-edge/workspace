@@ -34,12 +34,18 @@ import {
 
 // Theme preset data (shared with CSS endpoint)
 const THEME_PRESETS = [
-  { id: 'default', label: 'Default', description: 'Clean and neutral', swatch: '#71717a' },
-  { id: 'warm', label: 'Warm', description: 'Cream canvas, linen cards', swatch: '#92400e' },
-  { id: 'ocean', label: 'Ocean', description: 'Blue-tinted, navy sidebar', swatch: '#1e40af' },
-  { id: 'forest', label: 'Forest', description: 'Sage greens, natural tones', swatch: '#166534' },
-  { id: 'sunset', label: 'Sunset', description: 'Warm amber, terracotta', swatch: '#c2410c' },
-  { id: 'midnight', label: 'Midnight', description: 'Deep purple, lavender accents', swatch: '#7c3aed' },
+  { id: 'default', label: 'Default', description: 'Clean and neutral', swatch: '#71717a',
+    primary: '#18181b', accent: '', canvas: '#ffffff', sidebar: '#f9f9f9', card: '#ffffff' },
+  { id: 'warm', label: 'Warm', description: 'Cream canvas, linen cards', swatch: '#92400e',
+    primary: '#92400e', accent: '#b45309', canvas: '#faf8f5', sidebar: '#f0ebe4', card: '#f5f0ea' },
+  { id: 'ocean', label: 'Ocean', description: 'Blue-tinted, navy sidebar', swatch: '#1e40af',
+    primary: '#2563eb', accent: '#2563eb', canvas: '#f0f7ff', sidebar: '#1a2744', card: '#eaf2fc' },
+  { id: 'forest', label: 'Forest', description: 'Sage greens, natural tones', swatch: '#166534',
+    primary: '#166534', accent: '#16a34a', canvas: '#f2f5f0', sidebar: '#1a2e22', card: '#ebf0e8' },
+  { id: 'sunset', label: 'Sunset', description: 'Warm amber, terracotta', swatch: '#c2410c',
+    primary: '#c2410c', accent: '#ea580c', canvas: '#fff8f0', sidebar: '#2d1f1a', card: '#fef0e4' },
+  { id: 'midnight', label: 'Midnight', description: 'Deep purple, lavender accents', swatch: '#7c3aed',
+    primary: '#7c3aed', accent: '#8b5cf6', canvas: '#f5f3ff', sidebar: '#1a1530', card: '#eeebf8' },
 ];
 
 const COLOR_PRESETS = [
@@ -251,19 +257,26 @@ export function AppearanceTab() {
     autoSave({ ...allTokens(), [key]: value });
   };
 
-  // Apply a theme preset — sets themePreset and clears overrides
+  // Apply a theme preset — populates all color fields with preset values
   const applyPreset = (presetId: string) => {
+    const preset = THEME_PRESETS.find((t) => t.id === presetId);
+    if (!preset) return;
+
     setThemePreset(presetId);
-    setButtonColor('');
-    setAccentColor('');
-    setCanvasColor('');
-    setSidebarColor('');
-    setCardColor('');
+    setButtonColor(preset.primary);
+    setAccentColor(preset.accent);
+    setCanvasColor(preset.canvas);
+    setSidebarColor(preset.sidebar);
+    setCardColor(preset.card);
+
     autoSave({
       ...allTokens(),
       themePreset: presetId,
-      buttonColor: '', accentColor: '',
-      canvasColor: '', sidebarColor: '', cardColor: '',
+      buttonColor: preset.primary,
+      accentColor: preset.accent,
+      canvasColor: preset.canvas,
+      sidebarColor: preset.sidebar,
+      cardColor: preset.card,
     });
   };
 
