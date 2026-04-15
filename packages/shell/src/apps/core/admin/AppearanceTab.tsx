@@ -44,6 +44,17 @@ const COLOR_PRESETS = [
   { value: '#0891b2', label: 'Cyan' },
 ];
 
+const CARD_COLOR_PRESETS = [
+  { value: '#ffffff', label: 'White' },
+  { value: '#f5f5f4', label: 'Warm' },
+  { value: '#e2e8f0', label: 'Silver' },
+  { value: '#cbd5e1', label: 'Mist' },
+  { value: '#334155', label: 'Slate' },
+  { value: '#1e293b', label: 'Navy' },
+  { value: '#18181b', label: 'Zinc' },
+  { value: '#09090b', label: 'Black' },
+];
+
 const FONT_OPTIONS = [
   { value: 'system', label: 'System Default' },
   { value: 'inter', label: 'Inter' },
@@ -134,60 +145,50 @@ export function AppearanceTab() {
     }
   }, [themeMode]);
 
-  // Live-preview for non-color settings
+  // Live-preview: set HSL triplets that @theme wraps in hsl().
+  // No --color-* overrides, no inline style hacks.
+  // The CSS reload (after debounced save) provides the permanent values.
   useEffect(() => {
-    document.documentElement.style.setProperty('--radius', `${radius}rem`);
-    document.documentElement.style.setProperty('--content-padding', `${contentPadding}rem`);
-    document.documentElement.style.setProperty('--card-padding', `${cardPadding}rem`);
+    const el = document.documentElement;
 
-    // Accent color → sets both HSL vars AND resolved color vars
-    if (accentColor) {
-      const hsl = hexToHsl(accentColor);
-      if (hsl) {
-        const isLight = isLightColor(accentColor);
-        const fg = isLight ? '0 0% 9%' : '0 0% 98%';
-        const fgColor = isLight ? 'hsl(0 0% 9%)' : 'hsl(0 0% 98%)';
-        // Set the HSL triplet vars (for brand/css compat)
-        document.documentElement.style.setProperty('--primary', hsl);
-        document.documentElement.style.setProperty('--primary-foreground', fg);
-        document.documentElement.style.setProperty('--sidebar-primary', hsl);
-        document.documentElement.style.setProperty('--sidebar-primary-foreground', fg);
-        document.documentElement.style.setProperty('--ring', hsl);
-        // Also set the resolved Tailwind v4 color vars directly
-        document.documentElement.style.setProperty('--color-primary', `hsl(${hsl})`);
-        document.documentElement.style.setProperty('--color-primary-foreground', fgColor);
-        document.documentElement.style.setProperty('--color-sidebar-primary', `hsl(${hsl})`);
-        document.documentElement.style.setProperty('--color-sidebar-primary-foreground', fgColor);
-        document.documentElement.style.setProperty('--color-ring', `hsl(${hsl})`);
-        document.documentElement.style.setProperty('--color-accent', accentColor);
-      }
+    // Spatial
+    el.style.setProperty('--radius', `${radius}rem`);
+    el.style.setProperty('--content-padding', `${contentPadding}rem`);
+    el.style.setProperty('--card-padding', `${cardPadding}rem`);
+
+    // Button color → --primary (buttons, badges, checkbox, switch, slider, links)
+    const btnHex = buttonColor || accentColor;
+    const btnHsl = hexToHsl(btnHex);
+    if (btnHsl) {
+      const fg = isLightColor(btnHex) ? '0 0% 9%' : '0 0% 98%';
+      el.style.setProperty('--primary', btnHsl);
+      el.style.setProperty('--primary-foreground', fg);
+      el.style.setProperty('--ring', btnHsl);
+      el.style.setProperty('--sidebar-primary', btnHsl);
+      el.style.setProperty('--sidebar-primary-foreground', fg);
     }
 
-    // Card color override with auto foreground
+    // Card color → --card, --popover
     if (cardColor) {
       const hsl = hexToHsl(cardColor);
       if (hsl) {
         const isLight = isLightColor(cardColor);
         const fg = isLight ? '0 0% 9%' : '0 0% 98%';
         const mutedFg = isLight ? '0 0% 40%' : '0 0% 65%';
-        document.documentElement.style.setProperty('--card', hsl);
-        document.documentElement.style.setProperty('--card-foreground', fg);
-        document.documentElement.style.setProperty('--popover', hsl);
-        document.documentElement.style.setProperty('--popover-foreground', fg);
-        document.documentElement.style.setProperty('--muted-foreground', mutedFg);
+        el.style.setProperty('--card', hsl);
+        el.style.setProperty('--card-foreground', fg);
+        el.style.setProperty('--popover', hsl);
+        el.style.setProperty('--popover-foreground', fg);
+        el.style.setProperty('--muted-foreground', mutedFg);
       }
     } else {
-      document.documentElement.style.removeProperty('--card');
-      document.documentElement.style.removeProperty('--card-foreground');
-      document.documentElement.style.removeProperty('--popover');
-      document.documentElement.style.removeProperty('--popover-foreground');
-      document.documentElement.style.removeProperty('--muted-foreground');
+      el.style.removeProperty('--card');
+      el.style.removeProperty('--card-foreground');
+      el.style.removeProperty('--popover');
+      el.style.removeProperty('--popover-foreground');
+      el.style.removeProperty('--muted-foreground');
     }
-    // Button color (falls back to accent if not set)
-    const btnColor = buttonColor || accentColor;
-    document.documentElement.style.setProperty('--button-bg', btnColor);
-    document.documentElement.style.setProperty('--button-fg', isLightColor(btnColor) ? 'hsl(0 0% 9%)' : 'hsl(0 0% 98%)');
-  }, [radius, contentPadding, cardPadding, cardColor, accentColor, buttonColor]);
+  }, [radius, contentPadding, cardPadding, cardColor, buttonColor, accentColor]);
 
   // Dynamic Google Font loading
   useEffect(() => {
@@ -220,14 +221,10 @@ export function AppearanceTab() {
     autoSave({ ...allTokens(), [key]: value });
   };
 
-  // Selection style — uses button color (or accent) for selected state
-  const btnBg = buttonColor || accentColor;
-  const btnFg = isLightColor(btnBg) ? '#000' : '#fff';
-  const selStyle = (selected: boolean): React.CSSProperties | undefined =>
-    selected ? { backgroundColor: btnBg, color: btnFg, borderColor: btnBg } : undefined;
+  // Selection style — uses primary (button color) for selected state
   const selClass = (selected: boolean) =>
     selected
-      ? 'border-2'
+      ? 'border-2 bg-primary text-primary-foreground'
       : 'border-input bg-card hover:bg-accent hover:text-accent-foreground border-2';
 
   return (
@@ -250,7 +247,6 @@ export function AppearanceTab() {
                   key={mode.value}
                   onClick={() => update('themeMode', mode.value, setThemeMode as (v: string) => void)}
                   className={`flex-1 flex items-center justify-center gap-2 rounded-lg border-2 p-3 text-sm font-medium transition-all ${selClass(themeMode === mode.value)}`}
-                  style={selStyle(themeMode === mode.value)}
                 >
                   {mode.icon}
                   <span>{mode.label}</span>
@@ -279,7 +275,6 @@ export function AppearanceTab() {
                   key={c.value}
                   onClick={() => update('baseColor', c.value, setBaseColor)}
                   className={`flex items-center gap-2 rounded-lg border-2 px-4 py-2.5 text-sm font-medium transition-all ${selClass(baseColor === c.value)}`}
-                  style={selStyle(baseColor === c.value)}
                 >
                   <div className={`h-4 w-4 rounded-full ${c.swatch}`} />
                   <span>{c.label}</span>
@@ -323,7 +318,6 @@ export function AppearanceTab() {
                   key={r}
                   onClick={() => update('radius', r, setRadius)}
                   className={`flex-1 rounded-lg border-2 px-3 py-2.5 text-sm font-medium transition-all ${selClass(radius === r)}`}
-                  style={selStyle(radius === r)}
                 >
                   {r}
                 </button>
@@ -395,25 +389,16 @@ export function AppearanceTab() {
         </Card>
 
         {/* Card Color */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Card Color</CardTitle>
-            <CardDescription>Card/surface background (text auto-adjusts)</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-3">
-              <label className="h-10 w-10 rounded-lg border border-input shrink-0 cursor-pointer overflow-hidden">
-                <input type="color" value={cardColor || '#ffffff'} onChange={(e) => update('cardColor', e.target.value, setCardColor)} className="h-14 w-14 -mt-1 -ml-1 cursor-pointer border-0" />
-              </label>
-              <div className="flex-1">
-                <p className="text-sm font-mono">{cardColor || 'Using base color default'}</p>
-                {cardColor && (
-                  <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => update('cardColor', '', setCardColor)}>Reset to default</button>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <ColorPresetCard
+          title="Card Color"
+          description="Card/surface background (text auto-adjusts)"
+          value={cardColor}
+          presets={CARD_COLOR_PRESETS}
+          onChange={(v) => update('cardColor', v, setCardColor)}
+          fallbackLabel="Using base color default"
+          onReset={() => update('cardColor', '', setCardColor)}
+          fallbackValue="#1a1a2e"
+        />
 
         <p className="text-xs text-muted-foreground text-center">Changes save automatically</p>
       </div>
@@ -443,7 +428,7 @@ function ColorPresetCard({ title, description, value, presets, onChange, fallbac
                 value === c.value ? 'border-blue-500 ring-2 ring-blue-500/30' : 'border-input hover:border-blue-300'
               }`}
             >
-              <div className="h-4 w-4 rounded-full" style={{ backgroundColor: c.value }} />
+              <div className="h-4 w-4 rounded-full ring-1 ring-inset ring-black/10" style={{ backgroundColor: c.value }} />
               <span>{c.label}</span>
             </button>
           ))}

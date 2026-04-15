@@ -119,24 +119,34 @@ async function generateShellCss(
   };
 
   const cardColorHex = customTokens.cardColor || '';
+  const buttonColorHex = customTokens.buttonColor || accent;
+  const accentColorHex = customTokens.accentColor || accent;
 
-  // Start with curated scales, then apply card color override if set
   const lightScale = { ...(lightScales[baseColor] || lightScales.zinc) };
   const darkScale = { ...(darkScales[baseColor] || darkScales.zinc) };
 
-  // Apply accent color as --primary (buttons, badges, focus rings, sidebar active)
-  const accentHsl = hexToHslString(accent);
-  if (accentHsl) {
-    const accentIsLight = isLightHex(accent);
-    const accentFg = accentIsLight ? '0 0% 9%' : '0 0% 98%';
-    lightScale.primary = accentHsl; lightScale['primary-foreground'] = accentFg;
-    lightScale.ring = accentHsl;
-    lightScale['sidebar-primary'] = accentHsl; lightScale['sidebar-primary-foreground'] = accentFg;
-    darkScale.primary = accentHsl; darkScale['primary-foreground'] = accentFg;
-    darkScale.ring = accentHsl;
-    darkScale['sidebar-primary'] = accentHsl; darkScale['sidebar-primary-foreground'] = accentFg;
+  // Button color → --primary (buttons, badges, checkbox, switch, slider, links, focus ring)
+  const buttonHsl = hexToHslString(buttonColorHex);
+  if (buttonHsl) {
+    const btnFg = isLightHex(buttonColorHex) ? '0 0% 9%' : '0 0% 98%';
+    lightScale.primary = buttonHsl; lightScale['primary-foreground'] = btnFg;
+    lightScale.ring = buttonHsl;
+    lightScale['sidebar-primary'] = buttonHsl; lightScale['sidebar-primary-foreground'] = btnFg;
+    darkScale.primary = buttonHsl; darkScale['primary-foreground'] = btnFg;
+    darkScale.ring = buttonHsl;
+    darkScale['sidebar-primary'] = buttonHsl; darkScale['sidebar-primary-foreground'] = btnFg;
   }
 
+  // Accent color → --accent (hover states on ghost buttons, dropdown items, select items)
+  const accentHsl = hexToHslString(accentColorHex);
+  if (accentHsl) {
+    const accFg = isLightHex(accentColorHex) ? '0 0% 9%' : '0 0% 98%';
+    // Only override accent if user explicitly set it (not the default base scale accent)
+    lightScale['sidebar-accent'] = accentHsl; lightScale['sidebar-accent-foreground'] = accFg;
+    darkScale['sidebar-accent'] = accentHsl; darkScale['sidebar-accent-foreground'] = accFg;
+  }
+
+  // Card color → --card, --popover (surfaces)
   if (cardColorHex) {
     const hsl = hexToHslString(cardColorHex);
     if (hsl) {
@@ -183,8 +193,6 @@ async function generateShellCss(
   --content-padding: ${contentPadding}rem;
   --card-padding: ${cardPadding}rem;
   --chart-1: ${chart};
-  --button-bg: ${customTokens.buttonColor || accent};
-  --button-fg: ${isLightHex(customTokens.buttonColor || accent) ? 'hsl(0 0% 9%)' : 'hsl(0 0% 98%)'};
 }
 
 /* Light mode (default) */

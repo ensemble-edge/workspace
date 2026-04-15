@@ -9,7 +9,8 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "shadow-xs hover:opacity-90",
+        default:
+          "bg-primary text-primary-foreground shadow-xs hover:bg-primary/90",
         destructive:
           "bg-destructive text-destructive-foreground shadow-2xs hover:bg-destructive/90",
         outline:
@@ -40,20 +41,11 @@ export interface ButtonProps
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, style, asChild = false, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button"
-    // Default variant gets button color from CSS variable with inline style
-    const buttonStyle = variant === 'default' || variant === undefined
-      ? {
-          backgroundColor: 'var(--button-bg, hsl(var(--primary)))',
-          color: 'var(--button-fg, hsl(var(--primary-foreground)))',
-          ...style,
-        }
-      : style;
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
-        style={buttonStyle}
         ref={ref}
         {...props}
       />
