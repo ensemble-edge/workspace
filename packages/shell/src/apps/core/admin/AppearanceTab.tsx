@@ -257,28 +257,27 @@ export function AppearanceTab() {
     autoSave({ ...allTokens(), [key]: value });
   };
 
-  // Apply a theme preset — populates all color fields with preset values
+  // Apply a theme preset — clears overrides so the preset's light/dark scales work.
+  // The pickers show preset defaults via getDisplayValue().
   const applyPreset = (presetId: string) => {
-    const preset = THEME_PRESETS.find((t) => t.id === presetId);
-    if (!preset) return;
-
     setThemePreset(presetId);
-    setButtonColor(preset.primary);
-    setAccentColor(preset.accent);
-    setCanvasColor(preset.canvas);
-    setSidebarColor(preset.sidebar);
-    setCardColor(preset.card);
-
+    setButtonColor('');
+    setAccentColor('');
+    setCanvasColor('');
+    setSidebarColor('');
+    setCardColor('');
     autoSave({
       ...allTokens(),
       themePreset: presetId,
-      buttonColor: preset.primary,
-      accentColor: preset.accent,
-      canvasColor: preset.canvas,
-      sidebarColor: preset.sidebar,
-      cardColor: preset.card,
+      buttonColor: '', accentColor: '',
+      canvasColor: '', sidebarColor: '', cardColor: '',
     });
   };
+
+  // Get the display value for a color picker — shows the preset default if no override
+  const activePreset = THEME_PRESETS.find((t) => t.id === themePreset);
+  const displayValue = (override: string, presetKey: keyof typeof THEME_PRESETS[0]) =>
+    override || (activePreset ? (activePreset as Record<string, string>)[presetKey as string] : '') || '';
 
   const selClass = (selected: boolean) =>
     selected
@@ -347,9 +346,10 @@ export function AppearanceTab() {
             title="Primary Color"
             description="Buttons, badges, checkboxes, links, and focus rings"
             value={buttonColor}
+            displayValue={displayValue(buttonColor, 'primary')}
             presets={COLOR_PRESETS}
             onChange={(v) => update('buttonColor', v, setButtonColor)}
-            fallbackLabel="Using theme default"
+            fallbackLabel={activePreset ? `${activePreset.label} default` : ''}
             onReset={() => update('buttonColor', '', setButtonColor)}
           />
 
@@ -358,9 +358,10 @@ export function AppearanceTab() {
             title="Accent Color"
             description="Sidebar highlights and hover states"
             value={accentColor}
+            displayValue={displayValue(accentColor, 'accent')}
             presets={COLOR_PRESETS}
             onChange={(v) => update('accentColor', v, setAccentColor)}
-            fallbackLabel="Using theme default"
+            fallbackLabel={activePreset ? `${activePreset.label} default` : ''}
             onReset={() => update('accentColor', '', setAccentColor)}
           />
 
@@ -416,9 +417,10 @@ export function AppearanceTab() {
             title="Card Color"
             description="Card and surface backgrounds"
             value={cardColor}
+            displayValue={displayValue(cardColor, 'card')}
             presets={CARD_PRESETS}
             onChange={(v) => update('cardColor', v, setCardColor)}
-            fallbackLabel="Using theme default"
+            fallbackLabel={activePreset ? `${activePreset.label} default` : ''}
             onReset={() => update('cardColor', '', setCardColor)}
           />
 
@@ -487,12 +489,13 @@ export function AppearanceTab() {
 // Sub-components
 // ============================================================================
 
-function ColorPresetCard({ title, description, value, presets, onChange, fallbackLabel, onReset }: {
-  title: string; description: string; value: string;
+function ColorPresetCard({ title, description, value, displayValue, presets, onChange, fallbackLabel, onReset }: {
+  title: string; description: string; value: string; displayValue?: string;
   presets: Array<{ value: string; label: string }>;
   onChange: (v: string) => void;
   fallbackLabel?: string; onReset?: () => void;
 }) {
+  const shown = displayValue || value;
   return (
     <Card>
       <CardHeader>
@@ -504,7 +507,7 @@ function ColorPresetCard({ title, description, value, presets, onChange, fallbac
           {presets.map((c) => (
             <button key={c.value} onClick={() => onChange(c.value)}
               className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-sm font-medium transition-all ${
-                value === c.value ? 'border-blue-500 ring-2 ring-blue-500/30' : 'border-input hover:border-blue-300'
+                (value || shown) === c.value ? 'border-blue-500 ring-2 ring-blue-500/30' : 'border-input hover:border-blue-300'
               }`}>
               <div className="h-4 w-4 rounded-full ring-1 ring-inset ring-black/10" style={{ backgroundColor: c.value }} />
               <span>{c.label}</span>
@@ -513,9 +516,11 @@ function ColorPresetCard({ title, description, value, presets, onChange, fallbac
         </div>
         <div className="flex items-center gap-3 mt-3">
           <label className="h-8 w-8 rounded-lg border border-input shrink-0 cursor-pointer overflow-hidden">
-            <input type="color" value={value || '#000000'} onChange={(e) => onChange(e.target.value)} className="h-12 w-12 -mt-1 -ml-1 cursor-pointer border-0" />
+            <input type="color" value={shown || '#000000'} onChange={(e) => onChange(e.target.value)} className="h-12 w-12 -mt-1 -ml-1 cursor-pointer border-0" />
           </label>
-          <span className="text-xs font-mono text-muted-foreground">{value || fallbackLabel || ''}</span>
+          <span className="text-xs font-mono text-muted-foreground">
+            {value ? value : (shown ? `${shown} (${fallbackLabel || 'default'})` : fallbackLabel || '')}
+          </span>
           {onReset && value && (
             <button className="text-xs text-muted-foreground hover:text-foreground ml-auto" onClick={onReset}>Reset</button>
           )}
