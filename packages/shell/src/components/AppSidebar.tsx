@@ -15,6 +15,11 @@ import {
   ChevronUp,
   LogOut,
   Boxes,
+  Grid3X3,
+  Shield,
+  ScrollText,
+  BookOpen,
+  PanelLeft,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -59,6 +64,11 @@ const iconMap: Record<string, LucideIcon> = {
   palette: Palette,
   settings: Settings,
   boxes: Boxes,
+  'grid-3x3': Grid3X3,
+  shield: Shield,
+  'scroll-text': ScrollText,
+  'book-open': BookOpen,
+  'panel-left': PanelLeft,
 };
 
 export function AppSidebar() {

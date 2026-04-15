@@ -51,7 +51,7 @@ import {
   bootstrapCheck,
   createCloudAuthMiddleware,
 } from './middleware';
-import { runMigrations, hasMigrations, migrations } from './db';
+import { runMigrations, migrations } from './db';
 import { createAuthRoutes, createBootstrapRoutes } from './routes';
 import { registerCoreApps } from './apps';
 import { generateBrandCss } from './apps/core/brand/css';
@@ -138,11 +138,11 @@ function createStandaloneWorkspace(
     additionalOrigins: config.cors.brandOrigins,
   }));
 
-  // 2. Run migrations on first request (if needed)
+  // 2. Run migrations on first request (checks for new migrations each cold start)
+  let migrationsChecked = false;
   app.use('*', async (c, next) => {
-    const hasRun = await hasMigrations(c.env.DB);
-    if (!hasRun) {
-      console.log('[standalone] Running initial migrations...');
+    if (!migrationsChecked) {
+      migrationsChecked = true;
       await runMigrations(c.env.DB, migrations);
     }
     await next();
@@ -272,11 +272,11 @@ function createCloudWorkspace(
     additionalOrigins: config.cors.brandOrigins,
   }));
 
-  // 2. Run migrations on first request (if needed)
+  // 2. Run migrations on first request (checks for new migrations each cold start)
+  let cloudMigrationsChecked = false;
   app.use('*', async (c, next) => {
-    const hasRun = await hasMigrations(c.env.DB);
-    if (!hasRun) {
-      console.log('[cloud] Running initial migrations...');
+    if (!cloudMigrationsChecked) {
+      cloudMigrationsChecked = true;
       await runMigrations(c.env.DB, migrations);
     }
     await next();

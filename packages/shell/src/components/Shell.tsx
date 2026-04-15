@@ -83,7 +83,7 @@ export function Shell() {
         </header>
 
         {/* Main content - scrollable */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto" style={{ padding: 'var(--content-padding, 1.5rem)' }}>
           <Viewport />
         </div>
       </SidebarInset>

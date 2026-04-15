@@ -1,16 +1,19 @@
 /**
  * Appearance Tab — Workspace UI configuration
  *
- * Controls how THIS workspace's shell looks:
- * Style, Base Color, Theme, Chart Color, Typography,
- * Icon Library, Radius, Menu styles.
+ * Every change auto-saves and reloads the CSS endpoint so the
+ * full theme (both light and dark scales) updates immediately.
  *
- * All changes apply in REAL-TIME. Saved to 'custom' brand_tokens category.
- * Loaded optimistically via /_ensemble/brand/css (in HTML <head>).
+ * How theming works:
+ * - /_ensemble/brand/css emits :root {} (light) and .dark {} (dark) CSS blocks
+ * - Adding/removing the 'dark' class on <html> switches between them
+ * - This tab toggles the class and saves the preference
+ * - Base color, radius, fonts, chart color, card color are all in the CSS endpoint
+ * - On save, we reload the CSS <link> to pick up new values instantly
  */
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 import {
   Card,
@@ -18,50 +21,73 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-  Button,
   Label,
-  RadioGroup,
-  RadioGroupItem,
+  Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   toast,
 } from '@ensemble-edge/ui';
 
+const CHART_COLORS: Record<string, string> = {
+  blue: '220 70% 50%', green: '160 60% 45%', orange: '30 80% 55%',
+  rose: '340 75% 55%', violet: '280 65% 60%',
+};
+
+const FONT_OPTIONS = [
+  { value: 'system', label: 'System Default' },
+  { value: 'inter', label: 'Inter' },
+  { value: 'dm-sans', label: 'DM Sans' },
+  { value: 'manrope', label: 'Manrope' },
+  { value: 'geist', label: 'Geist' },
+  { value: 'roboto', label: 'Roboto' },
+];
+
+const FONT_CSS: Record<string, string> = {
+  system: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  inter: '"Inter", system-ui, sans-serif',
+  'dm-sans': '"DM Sans", system-ui, sans-serif',
+  manrope: '"Manrope", system-ui, sans-serif',
+  geist: '"Geist", system-ui, sans-serif',
+  roboto: '"Roboto", system-ui, sans-serif',
+};
+
 export function AppearanceTab() {
-  const [style, setStyle] = useState('default');
   const [baseColor, setBaseColor] = useState('zinc');
-  const [themeMode, setThemeMode] = useState<'light' | 'dark'>('dark');
+  const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('dark');
   const [chartColor, setChartColor] = useState('blue');
   const [headingFont, setHeadingFont] = useState('system');
   const [bodyFont, setBodyFont] = useState('system');
-  const [iconLibrary, setIconLibrary] = useState('lucide');
   const [radius, setRadius] = useState('0.5');
-  const [menuStyle, setMenuStyle] = useState('default');
-  const [menuAccent, setMenuAccent] = useState('primary');
-  const [saving, setSaving] = useState(false);
+  const [cardColorLight, setCardColorLight] = useState('');
+  const [cardColorDark, setCardColorDark] = useState('');
+  const [contentPadding, setContentPadding] = useState('1.5');
+  const [cardPadding, setCardPadding] = useState('1.5');
   const [loaded, setLoaded] = useState(false);
+  const saveTimeout = useRef<ReturnType<typeof setTimeout>>();
 
-  // Load saved custom tokens from DB on mount
+  // Load saved settings
   useEffect(() => {
     fetch('/_ensemble/core/brand/tokens/custom')
       .then((res) => res.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
       .then((result) => {
-        const tokens = result.data || [];
-        for (const token of tokens) {
+        for (const token of result.data || []) {
           switch (token.key) {
-            case 'style': setStyle(token.value); break;
             case 'baseColor': setBaseColor(token.value); break;
-            case 'themeMode': setThemeMode(token.value as 'light' | 'dark'); break;
+            case 'themeMode': setThemeMode(token.value as 'light' | 'dark' | 'system'); break;
             case 'chartColor': setChartColor(token.value); break;
             case 'headingFont': setHeadingFont(token.value); break;
             case 'bodyFont': setBodyFont(token.value); break;
-            case 'iconLibrary': setIconLibrary(token.value); break;
             case 'radius': setRadius(token.value); break;
-            case 'menuStyle': setMenuStyle(token.value); break;
-            case 'menuAccent': setMenuAccent(token.value); break;
+            case 'cardColorLight': setCardColorLight(token.value); break;
+            case 'cardColorDark': setCardColorDark(token.value); break;
+            case 'contentPadding': setContentPadding(token.value); break;
+            case 'cardPadding': setCardPadding(token.value); break;
           }
         }
         setLoaded(true);
@@ -69,90 +95,101 @@ export function AppearanceTab() {
       .catch(() => setLoaded(true));
   }, []);
 
-  // Apply theme mode in real-time
+  // Auto-save with debounce, then reload CSS to pick up new theme
+  const autoSave = useCallback((tokens: Record<string, string>) => {
+    if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    saveTimeout.current = setTimeout(async () => {
+      try {
+        const res = await fetch('/_ensemble/brand/tokens', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category: 'custom', tokens }),
+        });
+        if (!res.ok) throw new Error('Save failed');
+
+        // Preload new CSS in background, then swap (no flash)
+        const newHref = `/_ensemble/brand/css?t=${Date.now()}`;
+        const preload = document.createElement('link');
+        preload.rel = 'stylesheet';
+        preload.href = newHref;
+        preload.onload = () => {
+          // New CSS is loaded — remove old one
+          const oldLink = document.querySelector('link[href*="/_ensemble/brand/css"]:not([href="' + newHref + '"])') as HTMLLinkElement | null;
+          if (oldLink) oldLink.remove();
+        };
+        document.head.appendChild(preload);
+      } catch (err) {
+        console.error('[Appearance] Save error:', err);
+        toast.error('Failed to save setting');
+      }
+    }, 500);
+  }, []);
+
+  // Toggle dark class when theme mode changes
   useEffect(() => {
-    if (themeMode === 'dark') {
+    let resolved: 'light' | 'dark' = 'dark';
+    if (themeMode === 'system') {
+      resolved = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    } else {
+      resolved = themeMode;
+    }
+
+    if (resolved === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
     }
   }, [themeMode]);
 
-  // Apply radius in real-time
+  // Apply live-preview for settings that need instant feedback
+  // (the CSS reload handles the full theme, but these kick in before the reload completes)
   useEffect(() => {
     document.documentElement.style.setProperty('--radius', `${radius}rem`);
-  }, [radius]);
+    document.documentElement.style.setProperty('--content-padding', `${contentPadding}rem`);
+    document.documentElement.style.setProperty('--card-padding', `${cardPadding}rem`);
+    document.documentElement.style.setProperty('--chart-1', CHART_COLORS[chartColor] || CHART_COLORS.blue);
+    document.documentElement.style.setProperty('--font-heading', FONT_CSS[headingFont] || FONT_CSS.system);
+    document.documentElement.style.setProperty('--font-body', FONT_CSS[bodyFont] || FONT_CSS.system);
 
-  // Apply base color in real-time
-  useEffect(() => {
-    const colors: Record<string, { bg: string; fg: string; border: string }> = {
-      zinc: { bg: '240 10% 3.9%', fg: '0 0% 98%', border: '240 3.7% 15.9%' },
-      slate: { bg: '222.2 84% 4.9%', fg: '210 40% 98%', border: '217.2 32.6% 17.5%' },
-      stone: { bg: '20 14.3% 4.1%', fg: '60 9.1% 97.8%', border: '12 6.5% 15.1%' },
-      gray: { bg: '224 71.4% 4.1%', fg: '210 20% 98%', border: '215 27.9% 16.9%' },
-      neutral: { bg: '0 0% 3.9%', fg: '0 0% 98%', border: '0 0% 14.9%' },
-    };
-    const c = colors[baseColor] || colors.zinc;
-    document.documentElement.style.setProperty('--background', c.bg);
-    document.documentElement.style.setProperty('--foreground', c.fg);
-    document.documentElement.style.setProperty('--border', c.border);
-    document.documentElement.style.setProperty('--muted', c.border);
-  }, [baseColor]);
-
-  // Apply chart color in real-time
-  useEffect(() => {
-    const chartHsl: Record<string, string> = {
-      blue: '220 70% 50%',
-      green: '160 60% 45%',
-      orange: '30 80% 55%',
-      rose: '340 75% 55%',
-      violet: '280 65% 60%',
-    };
-    document.documentElement.style.setProperty('--chart-1', chartHsl[chartColor] || chartHsl.blue);
-  }, [chartColor]);
-
-  // Apply font changes in real-time
-  useEffect(() => {
-    const fonts: Record<string, string> = {
-      system: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-      inter: '"Inter", system-ui, sans-serif',
-      manrope: '"Manrope", system-ui, sans-serif',
-      geist: '"Geist", system-ui, sans-serif',
-      'cal-sans': '"Cal Sans", system-ui, sans-serif',
-      roboto: '"Roboto", system-ui, sans-serif',
-    };
-    document.documentElement.style.setProperty('--font-heading', fonts[headingFont] || fonts.system);
-    document.documentElement.style.setProperty('--font-body', fonts[bodyFont] || fonts.system);
-    document.body.style.fontFamily = fonts[bodyFont] || fonts.system;
-  }, [headingFont, bodyFont]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const response = await fetch('/_ensemble/brand/tokens', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          category: 'custom',
-          tokens: {
-            style, baseColor, themeMode, chartColor,
-            headingFont, bodyFont, iconLibrary, radius,
-            menuStyle, menuAccent,
-          },
-        }),
-      });
-
-      if (!response.ok) throw new Error('Failed to save');
-      toast.success('Workspace settings saved', {
-        description: 'Your UI preferences have been applied.',
-      });
-    } catch {
-      toast.error('Failed to save', {
-        description: 'Could not save workspace settings. Please try again.',
-      });
-    } finally {
-      setSaving(false);
+    // Card color override — apply the one matching current theme
+    const isDark = document.documentElement.classList.contains('dark');
+    const activeCardColor = isDark ? cardColorDark : cardColorLight;
+    if (activeCardColor) {
+      const hsl = hexToHsl(activeCardColor);
+      if (hsl) {
+        document.documentElement.style.setProperty('--card', hsl);
+        document.documentElement.style.setProperty('--popover', hsl);
+      }
+    } else {
+      document.documentElement.style.removeProperty('--card');
+      document.documentElement.style.removeProperty('--popover');
     }
+
+    // Load Google Fonts dynamically
+    const fontsToLoad = [headingFont, bodyFont]
+      .filter((f) => f !== 'system')
+      .map((f) => FONT_OPTIONS.find((o) => o.value === f)?.label)
+      .filter((f): f is string => !!f);
+
+    if (fontsToLoad.length > 0) {
+      const uniqueFonts = [...new Set(fontsToLoad)];
+      const linkId = 'ensemble-dynamic-fonts';
+      let link = document.getElementById(linkId) as HTMLLinkElement | null;
+      if (!link) {
+        link = document.createElement('link');
+        link.id = linkId;
+        link.rel = 'stylesheet';
+        document.head.appendChild(link);
+      }
+      link.href = `https://fonts.googleapis.com/css2?${uniqueFonts.map((f) => `family=${f.replace(/ /g, '+')}:wght@300;400;500;600;700`).join('&')}&display=swap`;
+    }
+  }, [radius, contentPadding, cardPadding, chartColor, headingFont, bodyFont, cardColorLight, cardColorDark, themeMode]);
+
+  // Update helper — sets state + auto-saves all current values
+  const allTokens = () => ({ baseColor, themeMode, chartColor, headingFont, bodyFont, radius, cardColorLight, cardColorDark, contentPadding, cardPadding });
+  const update = (key: string, value: string, setter: (v: string) => void) => {
+    setter(value);
+    autoSave({ ...allTokens(), [key]: value });
   };
 
   const baseColors = [
@@ -163,7 +200,7 @@ export function AppearanceTab() {
     { value: 'neutral', label: 'Neutral', color: '#737373' },
   ];
 
-  const chartColors = [
+  const chartColorOptions = [
     { value: 'blue', label: 'Blue', color: '#3b82f6' },
     { value: 'green', label: 'Green', color: '#22c55e' },
     { value: 'orange', label: 'Orange', color: '#f97316' },
@@ -171,44 +208,36 @@ export function AppearanceTab() {
     { value: 'violet', label: 'Violet', color: '#8b5cf6' },
   ];
 
-  const radiusOptions = [
-    { value: '0', label: '0' },
-    { value: '0.3', label: '0.3' },
-    { value: '0.5', label: '0.5' },
-    { value: '0.75', label: '0.75' },
-    { value: '1', label: '1.0' },
-  ];
+  const radiusOptions = ['0', '0.3', '0.5', '0.75', '1'];
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <div className="space-y-6">
-        {/* Style */}
+        {/* Theme Mode */}
         <Card>
           <CardHeader>
-            <CardTitle>Style</CardTitle>
-            <CardDescription>Choose the overall visual style</CardDescription>
+            <CardTitle>Theme</CardTitle>
+            <CardDescription>Light, dark, or follow system preference</CardDescription>
           </CardHeader>
           <CardContent>
-            <RadioGroup value={style} onValueChange={setStyle} className="grid grid-cols-2 gap-4">
-              <div>
-                <RadioGroupItem value="default" id="style-default" className="peer sr-only" />
-                <Label
-                  htmlFor="style-default"
-                  className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
+            <div className="flex items-center gap-3">
+              {([
+                { value: 'light', label: 'Light', icon: <SunIcon /> },
+                { value: 'dark', label: 'Dark', icon: <MoonIcon /> },
+                { value: 'system', label: 'System', icon: <MonitorIcon /> },
+              ] as const).map((mode) => (
+                <button
+                  key={mode.value}
+                  onClick={() => update('themeMode', mode.value, setThemeMode as (v: string) => void)}
+                  className={`flex-1 flex items-center justify-center gap-2 rounded-md border-2 p-3 text-sm font-medium transition-colors ${
+                    themeMode === mode.value ? 'border-primary bg-primary/10' : 'border-muted hover:border-primary/50'
+                  }`}
                 >
-                  <span className="text-sm font-medium">Default</span>
-                </Label>
-              </div>
-              <div>
-                <RadioGroupItem value="new-york" id="style-newyork" className="peer sr-only" />
-                <Label
-                  htmlFor="style-newyork"
-                  className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
-                >
-                  <span className="text-sm font-medium">New York</span>
-                </Label>
-              </div>
-            </RadioGroup>
+                  {mode.icon}
+                  <span>{mode.label}</span>
+                </button>
+              ))}
+            </div>
           </CardContent>
         </Card>
 
@@ -216,18 +245,16 @@ export function AppearanceTab() {
         <Card>
           <CardHeader>
             <CardTitle>Base Color</CardTitle>
-            <CardDescription>The neutral color scale for backgrounds and borders</CardDescription>
+            <CardDescription>Neutral scale — affects backgrounds, cards, borders, and text in both light and dark modes</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
               {baseColors.map((c) => (
                 <button
                   key={c.value}
-                  onClick={() => setBaseColor(c.value)}
+                  onClick={() => update('baseColor', c.value, setBaseColor)}
                   className={`flex items-center gap-2 rounded-md border-2 px-3 py-2 text-sm transition-colors ${
-                    baseColor === c.value
-                      ? 'border-primary bg-primary/10'
-                      : 'border-muted hover:border-primary/50'
+                    baseColor === c.value ? 'border-primary bg-primary/10' : 'border-muted hover:border-primary/50'
                   }`}
                 >
                   <div className="h-4 w-4 rounded-full" style={{ backgroundColor: c.color }} />
@@ -238,35 +265,125 @@ export function AppearanceTab() {
           </CardContent>
         </Card>
 
-        {/* Theme Mode */}
+        {/* Radius */}
         <Card>
           <CardHeader>
-            <CardTitle>Theme</CardTitle>
-            <CardDescription>Light or dark mode</CardDescription>
+            <CardTitle>Radius</CardTitle>
+            <CardDescription>Corner rounding for cards, buttons, inputs</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-4">
-              <Button
-                variant={themeMode === 'light' ? 'default' : 'outline'}
-                onClick={() => setThemeMode('light')}
-                className="flex-1"
-              >
-                <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="4" />
-                  <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-                </svg>
-                Light
-              </Button>
-              <Button
-                variant={themeMode === 'dark' ? 'default' : 'outline'}
-                onClick={() => setThemeMode('dark')}
-                className="flex-1"
-              >
-                <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                </svg>
-                Dark
-              </Button>
+            <div className="flex gap-2">
+              {radiusOptions.map((r) => (
+                <button
+                  key={r}
+                  onClick={() => update('radius', r, setRadius)}
+                  className={`flex-1 rounded-md border-2 px-3 py-2 text-sm font-medium transition-colors ${
+                    radius === r ? 'border-primary bg-primary text-primary-foreground' : 'border-muted hover:border-primary/50'
+                  }`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Spacing */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Spacing</CardTitle>
+            <CardDescription>Content and card padding</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Content Padding</Label>
+                <span className="text-xs font-mono text-muted-foreground">{contentPadding}rem</span>
+              </div>
+              <input
+                type="range"
+                min="0.5"
+                max="3"
+                step="0.25"
+                value={contentPadding}
+                onChange={(e) => update('contentPadding', e.target.value, setContentPadding)}
+                className="w-full accent-primary"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground">
+                <span>Tight</span><span>Spacious</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Card Padding</Label>
+                <span className="text-xs font-mono text-muted-foreground">{cardPadding}rem</span>
+              </div>
+              <input
+                type="range"
+                min="0.5"
+                max="3"
+                step="0.25"
+                value={cardPadding}
+                onChange={(e) => update('cardPadding', e.target.value, setCardPadding)}
+                className="w-full accent-primary"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground">
+                <span>Compact</span><span>Roomy</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="space-y-6">
+        {/* Card Background */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Card Background</CardTitle>
+            <CardDescription>Override card color for light and dark modes (optional)</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <CardColorPicker
+              label="Light mode"
+              value={cardColorLight}
+              defaultPlaceholder="#ffffff"
+              onChange={(v) => update('cardColorLight', v, setCardColorLight)}
+              onReset={() => update('cardColorLight', '', setCardColorLight)}
+            />
+            <CardColorPicker
+              label="Dark mode"
+              value={cardColorDark}
+              defaultPlaceholder="#1a1a1e"
+              onChange={(v) => update('cardColorDark', v, setCardColorDark)}
+              onReset={() => update('cardColorDark', '', setCardColorDark)}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Typography */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Typography</CardTitle>
+            <CardDescription>Font families for the workspace UI</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>Heading Font</Label>
+              <Select value={headingFont} onValueChange={(v) => update('headingFont', v, setHeadingFont)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {FONT_OPTIONS.map((f) => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Body Font</Label>
+              <Select value={bodyFont} onValueChange={(v) => update('bodyFont', v, setBodyFont)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {FONT_OPTIONS.map((f) => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
           </CardContent>
         </Card>
@@ -275,18 +392,16 @@ export function AppearanceTab() {
         <Card>
           <CardHeader>
             <CardTitle>Chart Color</CardTitle>
-            <CardDescription>Primary color for charts and data visualizations</CardDescription>
+            <CardDescription>Primary color for data visualizations</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
-              {chartColors.map((c) => (
+              {chartColorOptions.map((c) => (
                 <button
                   key={c.value}
-                  onClick={() => setChartColor(c.value)}
+                  onClick={() => update('chartColor', c.value, setChartColor)}
                   className={`flex items-center gap-2 rounded-md border-2 px-3 py-2 text-sm transition-colors ${
-                    chartColor === c.value
-                      ? 'border-primary bg-primary/10'
-                      : 'border-muted hover:border-primary/50'
+                    chartColor === c.value ? 'border-primary bg-primary/10' : 'border-muted hover:border-primary/50'
                   }`}
                 >
                   <div className="h-4 w-4 rounded-full" style={{ backgroundColor: c.color }} />
@@ -296,134 +411,64 @@ export function AppearanceTab() {
             </div>
           </CardContent>
         </Card>
-      </div>
 
-      <div className="space-y-6">
-        {/* Typography */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Typography</CardTitle>
-            <CardDescription>Font settings for headings and body text</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Heading Font</Label>
-              <Select value={headingFont} onValueChange={setHeadingFont}>
-                <SelectTrigger><SelectValue placeholder="Select font" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="system">System Default</SelectItem>
-                  <SelectItem value="inter">Inter</SelectItem>
-                  <SelectItem value="manrope">Manrope</SelectItem>
-                  <SelectItem value="geist">Geist</SelectItem>
-                  <SelectItem value="cal-sans">Cal Sans</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Body Font</Label>
-              <Select value={bodyFont} onValueChange={setBodyFont}>
-                <SelectTrigger><SelectValue placeholder="Select font" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="system">System Default</SelectItem>
-                  <SelectItem value="inter">Inter</SelectItem>
-                  <SelectItem value="geist">Geist</SelectItem>
-                  <SelectItem value="roboto">Roboto</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Icon Library */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Icon Library</CardTitle>
-            <CardDescription>Choose the icon set used throughout the UI</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Select value={iconLibrary} onValueChange={setIconLibrary}>
-              <SelectTrigger><SelectValue placeholder="Select icon library" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="lucide">Lucide Icons</SelectItem>
-                <SelectItem value="heroicons">Heroicons</SelectItem>
-                <SelectItem value="phosphor">Phosphor Icons</SelectItem>
-                <SelectItem value="tabler">Tabler Icons</SelectItem>
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
-
-        {/* Radius */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Radius</CardTitle>
-            <CardDescription>Border radius for buttons and cards</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-2">
-              {radiusOptions.map((r) => (
-                <button
-                  key={r.value}
-                  onClick={() => setRadius(r.value)}
-                  className={`flex-1 rounded-md border-2 px-3 py-2 text-sm font-medium transition-colors ${
-                    radius === r.value
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-muted hover:border-primary/50'
-                  }`}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-            <div className="mt-4 flex gap-4">
-              <div
-                className="h-12 w-12 border-2 border-primary bg-primary/20"
-                style={{ borderRadius: `${radius}rem` }}
-              />
-              <div
-                className="h-12 flex-1 border-2 border-primary bg-primary/20"
-                style={{ borderRadius: `${radius}rem` }}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Menu Styles */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Menu</CardTitle>
-            <CardDescription>Sidebar and navigation menu appearance</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Menu Style</Label>
-              <Select value={menuStyle} onValueChange={setMenuStyle}>
-                <SelectTrigger><SelectValue placeholder="Select style" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="default">Default</SelectItem>
-                  <SelectItem value="floating">Floating</SelectItem>
-                  <SelectItem value="inset">Inset</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Menu Accent</Label>
-              <Select value={menuAccent} onValueChange={setMenuAccent}>
-                <SelectTrigger><SelectValue placeholder="Select accent" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="primary">Primary</SelectItem>
-                  <SelectItem value="secondary">Secondary</SelectItem>
-                  <SelectItem value="muted">Muted</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Button onClick={handleSave} disabled={saving} className="w-full">
-          {saving ? 'Saving...' : 'Save Workspace Settings'}
-        </Button>
+        <p className="text-xs text-muted-foreground text-center">Changes save automatically</p>
       </div>
     </div>
   );
+}
+
+function CardColorPicker({ label, value, defaultPlaceholder, onChange, onReset }: {
+  label: string; value: string; defaultPlaceholder: string;
+  onChange: (v: string) => void; onReset: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <Popover>
+        <PopoverTrigger asChild>
+          <button className="h-10 w-10 rounded-md border border-border shrink-0" style={{ backgroundColor: value || 'hsl(var(--card))' }} />
+        </PopoverTrigger>
+        <PopoverContent className="w-56">
+          <div className="space-y-2">
+            <input type="color" value={value || defaultPlaceholder} onChange={(e) => onChange(e.target.value)} className="h-24 w-full cursor-pointer rounded border-0" />
+            <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={defaultPlaceholder} className="font-mono text-sm" />
+          </div>
+        </PopoverContent>
+      </Popover>
+      <div className="flex-1">
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground">{value || 'Base color default'}</p>
+        {value && (
+          <button className="text-xs text-muted-foreground hover:text-foreground" onClick={onReset}>Reset</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Inline SVG icons (small, no import needed)
+const SunIcon = () => <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></svg>;
+const MoonIcon = () => <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>;
+const MonitorIcon = () => <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg>;
+
+/** Convert hex to HSL string for CSS (e.g., "240 10% 3.9%") */
+function hexToHsl(hex: string): string | null {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!result) return null;
+  const r = parseInt(result[1], 16) / 255;
+  const g = parseInt(result[2], 16) / 255;
+  const b = parseInt(result[3], 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+      case g: h = ((b - r) / d + 2) / 6; break;
+      case b: h = ((r - g) / d + 4) / 6; break;
+    }
+  }
+  return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
 }

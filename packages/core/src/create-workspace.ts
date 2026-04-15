@@ -27,7 +27,7 @@ import { cors, workspaceResolver, bootstrapCheck, auth } from './middleware';
 import { runMigrations, hasMigrations, migrations } from './db';
 import { createAuthRoutes, createBootstrapRoutes, createGuestGatewayRoutes } from './routes';
 import { registerCoreApps } from './apps';
-import { generateBrandCss } from './apps/core/brand/css';
+import { generateBrandCss, getSavedThemeMode } from './apps/core/brand/css';
 // Shell assets are built by @ensemble-edge/shell and exported as strings
 import { SHELL_JS, SHELL_CSS } from '@ensemble-edge/shell/assets';
 
@@ -64,11 +64,11 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
     additionalOrigins: resolvedConfig.cors.brandOrigins,
   }));
 
-  // 2. Run migrations on first request (if needed)
+  // 2. Run migrations on first request (checks for new migrations each cold start)
+  let migrationsChecked = false;
   app.use('*', async (c, next) => {
-    const hasRun = await hasMigrations(c.env.DB);
-    if (!hasRun) {
-      console.log('Running initial migrations...');
+    if (!migrationsChecked) {
+      migrationsChecked = true;
       await runMigrations(c.env.DB, migrations);
     }
     await next();
@@ -94,20 +94,24 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   });
 
   // Shell HTML (SPA entry point)
-  app.get('/', (c) => {
+  app.get('/', async (c) => {
     const workspace = c.get('workspace');
+    const themeMode = await getSavedThemeMode(c.env.DB, workspace?.id || '');
     return c.html(generateShellHtml(
       workspace?.name ?? resolvedConfig.workspace.name,
-      resolvedConfig.brand.accent
+      resolvedConfig.brand.accent,
+      themeMode
     ));
   });
 
-  // Login page
-  app.get('/login', (c) => {
+  // Login page — uses workspace appearance (brand/css)
+  app.get('/login', async (c) => {
     const workspace = c.get('workspace');
+    const themeMode = await getSavedThemeMode(c.env.DB, workspace?.id || '');
     return c.html(generateLoginHtml(
       workspace?.name ?? resolvedConfig.workspace.name,
-      resolvedConfig.brand.accent
+      resolvedConfig.brand.accent,
+      themeMode
     ));
   });
 
@@ -222,7 +226,7 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
 
     return c.text(css, 200, {
       'Content-Type': 'text/css',
-      'Cache-Control': 'public, max-age=300',
+      'Cache-Control': 'no-store, must-revalidate',
     });
   });
 
@@ -365,12 +369,14 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   // Catch-all for SPA routing
   // ============================================================================
 
-  app.get('*', (c) => {
+  app.get('*', async (c) => {
     // Return shell HTML for client-side routing
     const workspace = c.get('workspace');
+    const themeMode = await getSavedThemeMode(c.env.DB, workspace?.id || '');
     return c.html(generateShellHtml(
       workspace?.name ?? resolvedConfig.workspace.name,
-      resolvedConfig.brand.accent
+      resolvedConfig.brand.accent,
+      themeMode
     ));
   });
 
@@ -417,14 +423,19 @@ function resolveConfig(config: WorkspaceConfig): ResolvedConfig {
  * CSS is loaded from /_ensemble/shell/shell.css (bundled) and
  * /_ensemble/brand/css (dynamic theme).
  */
-function generateShellHtml(workspaceName: string, accentColor: string): string {
+function generateShellHtml(workspaceName: string, accentColor: string, themeMode: 'light' | 'dark' | 'system' = 'dark'): string {
+  // For 'system' mode, default to dark and let the script below fix it
+  const initialClass = themeMode === 'light' ? '' : 'dark';
+  const systemScript = themeMode === 'system' ? `<script>if(window.matchMedia('(prefers-color-scheme:light)').matches)document.documentElement.classList.remove('dark')</script>` : '';
+
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="${initialClass}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="${accentColor}">
-  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  ${systemScript}
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>${workspaceName}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -433,41 +444,14 @@ function generateShellHtml(workspaceName: string, accentColor: string): string {
   <link rel="stylesheet" href="/_ensemble/brand/css">
   <link rel="stylesheet" href="/_ensemble/shell/shell.css">
   <style>
-    /* Critical CSS for initial load - Ensemble design tokens */
-    /* Note: Canvas uses light warm beige default; /_ensemble/brand/css will override with saved value */
-    :root {
-      /* Accent (configurable) */
-      --color-accent: ${accentColor};
-      --color-accent-hover: color-mix(in srgb, ${accentColor} 85%, white);
-      --color-accent-dim: color-mix(in srgb, ${accentColor} 20%, transparent);
-
-      /* Warm canvas background (light beige - Ensemble style) */
-      --canvas: #BDB7B0;
-
-      /* Floating dark card surfaces */
-      --card: #1e1e22;
-      --card-hover: #252529;
-      --card-border: rgba(255, 255, 255, 0.06);
-
-      /* Always-dark chrome */
-      --sidebar-bg: #141316;
-
-      /* Typography (warm whites) */
-      --text-primary: #f0ede8;
-      --text-secondary: #9a938a;
-      --text-tertiary: #6b655c;
-
-      /* Spatial */
-      --radius: 12px;
-      --radius-sm: 8px;
-    }
+    /* Minimal critical CSS — full theme loads from /_ensemble/brand/css */
     * { box-sizing: border-box; }
     body {
       margin: 0;
       padding: 0;
-      font-family: 'DM Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: var(--canvas);
-      color: var(--text-primary);
+      font-family: var(--font-body, 'DM Sans', system-ui, sans-serif);
+      background: hsl(var(--background));
+      color: hsl(var(--foreground));
       overflow: hidden;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
@@ -519,17 +503,21 @@ function generateShellHtml(workspaceName: string, accentColor: string): string {
  * Uses JavaScript to submit form as JSON instead of URL-encoded.
  * Styled to match the shadcn/ui design system loaded from shell.css.
  */
-function generateLoginHtml(workspaceName: string, accentColor: string): string {
+function generateLoginHtml(workspaceName: string, accentColor: string, themeMode: 'light' | 'dark' | 'system' = 'dark'): string {
+  const initialClass = themeMode === 'light' ? '' : 'dark';
+  const systemScript = themeMode === 'system' ? `<script>if(window.matchMedia('(prefers-color-scheme:light)').matches)document.documentElement.classList.remove('dark')</script>` : '';
   const inputClass = 'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
   const inputErrorClass = 'border-destructive focus-visible:ring-destructive';
 
   return `<!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en" class="${initialClass}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="${accentColor}">
   <title>Login — ${workspaceName}</title>
+  ${systemScript}
+  <link rel="stylesheet" href="/_ensemble/brand/css">
   <link rel="stylesheet" href="/_ensemble/shell/shell.css">
 </head>
 <body class="min-h-svh flex items-center justify-center p-4 bg-muted">
