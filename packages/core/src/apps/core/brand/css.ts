@@ -93,7 +93,8 @@ async function generateShellCss(
   const baseColor = customTokens.baseColor || 'zinc';
   const chartColor = customTokens.chartColor || 'blue';
   const themeMode = customTokens.themeMode || 'dark';
-  const spacing = customTokens.spacing || '0.25';
+  const contentPadding = customTokens.contentPadding || '1.5';
+  const cardPadding = customTokens.cardPadding || '1.5';
 
   const resolvedHeadingFont = FONT_FAMILIES[headingFont] || FONT_FAMILIES['dm-sans'];
   const resolvedBodyFont = FONT_FAMILIES[bodyFont] || FONT_FAMILIES['dm-sans'];
@@ -155,7 +156,8 @@ async function generateShellCss(
   --font-body: ${resolvedBodyFont};
   --font-mono: 'JetBrains Mono', monospace;
   --radius: ${radius}rem;
-  --spacing: ${spacing}rem;
+  --content-padding: ${contentPadding}rem;
+  --card-padding: ${cardPadding}rem;
   --chart-1: ${chart};
 }
 

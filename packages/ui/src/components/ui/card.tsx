@@ -2,6 +2,9 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+const cardPaddingStyle = { padding: 'var(--card-padding, 1.5rem)' } as const;
+const cardPaddingNoTopStyle = { padding: 'var(--card-padding, 1.5rem)', paddingTop: 0 } as const;
+
 const Card = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
@@ -20,10 +23,11 @@ Card.displayName = "Card"
 const CardHeader = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
+>(({ className, style, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("flex flex-col space-y-1.5 p-6", className)}
+    className={cn("flex flex-col space-y-1.5", className)}
+    style={{ ...cardPaddingStyle, ...style }}
     {...props}
   />
 ))
@@ -56,18 +60,24 @@ CardDescription.displayName = "CardDescription"
 const CardContent = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("p-6 pt-0", className)} {...props} />
+>(({ className, style, ...props }, ref) => (
+  <div
+    ref={ref}
+    className={cn("", className)}
+    style={{ ...cardPaddingNoTopStyle, ...style }}
+    {...props}
+  />
 ))
 CardContent.displayName = "CardContent"
 
 const CardFooter = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
+>(({ className, style, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("flex items-center p-6 pt-0", className)}
+    className={cn("flex items-center", className)}
+    style={{ ...cardPaddingNoTopStyle, ...style }}
     {...props}
   />
 ))
