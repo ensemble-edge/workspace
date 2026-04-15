@@ -13,6 +13,7 @@ import { brandApp } from './brand';
 import { adminApp } from './admin';
 import { peopleApp } from './people';
 import { appsApp } from './apps';
+import { auditApp } from './audit';
 
 /** All registered core apps */
 export const coreApps: CoreAppDefinition[] = [
@@ -20,6 +21,7 @@ export const coreApps: CoreAppDefinition[] = [
   adminApp,
   peopleApp,
   appsApp,
+  auditApp,
 ];
 
 /**

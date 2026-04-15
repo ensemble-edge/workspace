@@ -1,4 +1,5 @@
 import type { CoreAppDefinition } from '../../types';
+import { registerPeopleRoutes } from './routes';
 
 export const peopleApp: CoreAppDefinition = {
   manifest: {
@@ -14,7 +15,5 @@ export const peopleApp: CoreAppDefinition = {
       path: '/people',
     },
   },
-  registerRoutes: () => {
-    // TODO: Phase 2 — member directory, invite flow, role management
-  },
+  registerRoutes: registerPeopleRoutes,
 };

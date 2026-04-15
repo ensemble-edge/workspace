@@ -25,6 +25,10 @@ import '../apps/core/brand';
 import '../apps/core/people';
 import '../apps/core/admin';
 import '../apps/core/apps';
+import '../apps/core/audit';
+import '../apps/core/auth';
+import '../apps/core/nav';
+import '../apps/core/knowledge';
 
 export function Viewport() {
   useSignals();

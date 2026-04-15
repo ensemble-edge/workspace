@@ -34,10 +34,14 @@ import {
 // Map paths to breadcrumb labels
 const pathLabels: Record<string, string> = {
   '/': 'Home',
-  '/people': 'People',
   '/brand': 'Brand',
+  '/people': 'People',
   '/settings': 'Settings',
   '/apps': 'Apps',
+  '/auth': 'Auth & Security',
+  '/audit': 'Audit Log',
+  '/nav': 'Navigation',
+  '/knowledge': 'Knowledge',
 };
 
 export function Shell() {
