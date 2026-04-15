@@ -134,6 +134,16 @@ export function ColorsTab() {
         }
         return [newGroup, ...prev];
       });
+
+      // If workspace theme is "brand", reload CSS so changes propagate
+      const newLink = document.createElement('link');
+      newLink.rel = 'stylesheet';
+      newLink.href = `/_ensemble/brand/css?t=${Date.now()}`;
+      newLink.onload = () => {
+        const old = document.querySelector('link[href*="/_ensemble/brand/css"]:not([href="' + newLink.href + '"])') as HTMLLinkElement | null;
+        if (old) old.remove();
+      };
+      document.head.appendChild(newLink);
     } catch {
       toast.error('Failed to save brand color');
     }
