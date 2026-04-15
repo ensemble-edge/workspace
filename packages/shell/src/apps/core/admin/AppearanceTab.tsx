@@ -320,6 +320,7 @@ export function AppearanceTab() {
 
   // Get the display value for a color picker — shows the preset default if no override
   const activePreset = THEME_PRESETS.find((t) => t.id === themePreset);
+  const hasOverrides = !!(buttonColor || accentColor || canvasColor || sidebarColor || cardColor);
   const displayValue = (override: string, presetKey: keyof typeof THEME_PRESETS[0]) =>
     override || (activePreset ? (activePreset as Record<string, string>)[presetKey as string] : '') || '';
 
@@ -348,7 +349,12 @@ export function AppearanceTab() {
               >
                 <div className="h-8 w-8 rounded-lg ring-1 ring-inset ring-black/10" style={{ backgroundColor: t.swatch }} />
                 <div className="min-w-0">
-                  <p className="text-sm font-medium">{t.label}</p>
+                  <p className="text-sm font-medium">
+                    {t.label}
+                    {themePreset === t.id && hasOverrides && (
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">(customized)</span>
+                    )}
+                  </p>
                   <p className="text-xs text-muted-foreground truncate">{t.description}</p>
                 </div>
               </button>
