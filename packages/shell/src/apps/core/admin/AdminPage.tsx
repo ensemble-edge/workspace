@@ -1,10 +1,7 @@
 /**
  * Admin Page — Workspace Settings
  *
- * Three tabs:
- * - General: workspace name, slug, locale, timezone
- * - Appearance: UI theme (base color, radius, fonts, etc.)
- * - Danger Zone: delete workspace, transfer ownership
+ * Hash-based tab routing: /settings#general, /settings#appearance, /settings#danger
  */
 
 import * as React from 'react';
@@ -16,11 +13,16 @@ import {
   TabsTrigger,
 } from '@ensemble-edge/ui';
 
+import { useHashTab } from '../../../hooks/useHashTab';
 import { GeneralTab } from './GeneralTab';
 import { AppearanceTab } from './AppearanceTab';
 import { DangerZoneTab } from './DangerZoneTab';
 
+const TABS = ['general', 'appearance', 'danger'] as const;
+
 export function AdminPage() {
+  const [tab, setTab] = useHashTab('general', TABS);
+
   return (
     <div className="space-y-6">
       <div>
@@ -30,24 +32,16 @@ export function AdminPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="general" className="w-full">
+      <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList variant="line" className="mb-6">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
           <TabsTrigger value="danger">Danger Zone</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="general">
-          <GeneralTab />
-        </TabsContent>
-
-        <TabsContent value="appearance">
-          <AppearanceTab />
-        </TabsContent>
-
-        <TabsContent value="danger">
-          <DangerZoneTab />
-        </TabsContent>
+        <TabsContent value="general"><GeneralTab /></TabsContent>
+        <TabsContent value="appearance"><AppearanceTab /></TabsContent>
+        <TabsContent value="danger"><DangerZoneTab /></TabsContent>
       </Tabs>
     </div>
   );

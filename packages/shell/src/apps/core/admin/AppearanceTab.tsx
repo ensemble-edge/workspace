@@ -31,6 +31,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Slider,
   toast,
 } from '@ensemble-edge/ui';
 
@@ -66,8 +67,7 @@ export function AppearanceTab() {
   const [radius, setRadius] = useState('0.5');
   const [cardColorLight, setCardColorLight] = useState('');
   const [cardColorDark, setCardColorDark] = useState('');
-  const [contentPadding, setContentPadding] = useState('1.5');
-  const [cardPadding, setCardPadding] = useState('1.5');
+  const [spacing, setSpacing] = useState('0.25');
   const [loaded, setLoaded] = useState(false);
   const saveTimeout = useRef<ReturnType<typeof setTimeout>>();
 
@@ -86,8 +86,7 @@ export function AppearanceTab() {
             case 'radius': setRadius(token.value); break;
             case 'cardColorLight': setCardColorLight(token.value); break;
             case 'cardColorDark': setCardColorDark(token.value); break;
-            case 'contentPadding': setContentPadding(token.value); break;
-            case 'cardPadding': setCardPadding(token.value); break;
+            case 'spacing': setSpacing(token.value); break;
           }
         }
         setLoaded(true);
@@ -145,8 +144,7 @@ export function AppearanceTab() {
   // (the CSS reload handles the full theme, but these kick in before the reload completes)
   useEffect(() => {
     document.documentElement.style.setProperty('--radius', `${radius}rem`);
-    document.documentElement.style.setProperty('--content-padding', `${contentPadding}rem`);
-    document.documentElement.style.setProperty('--card-padding', `${cardPadding}rem`);
+    document.documentElement.style.setProperty('--spacing', `${spacing}rem`);
     document.documentElement.style.setProperty('--chart-1', CHART_COLORS[chartColor] || CHART_COLORS.blue);
     document.documentElement.style.setProperty('--font-heading', FONT_CSS[headingFont] || FONT_CSS.system);
     document.documentElement.style.setProperty('--font-body', FONT_CSS[bodyFont] || FONT_CSS.system);
@@ -183,10 +181,10 @@ export function AppearanceTab() {
       }
       link.href = `https://fonts.googleapis.com/css2?${uniqueFonts.map((f) => `family=${f.replace(/ /g, '+')}:wght@300;400;500;600;700`).join('&')}&display=swap`;
     }
-  }, [radius, contentPadding, cardPadding, chartColor, headingFont, bodyFont, cardColorLight, cardColorDark, themeMode]);
+  }, [radius, spacing, chartColor, headingFont, bodyFont, cardColorLight, cardColorDark, themeMode]);
 
   // Update helper — sets state + auto-saves all current values
-  const allTokens = () => ({ baseColor, themeMode, chartColor, headingFont, bodyFont, radius, cardColorLight, cardColorDark, contentPadding, cardPadding });
+  const allTokens = () => ({ baseColor, themeMode, chartColor, headingFont, bodyFont, radius, cardColorLight, cardColorDark, spacing });
   const update = (key: string, value: string, setter: (v: string) => void) => {
     setter(value);
     autoSave({ ...allTokens(), [key]: value });
@@ -288,48 +286,26 @@ export function AppearanceTab() {
           </CardContent>
         </Card>
 
-        {/* Spacing */}
+        {/* Spacing (Tailwind v4 --spacing) */}
         <Card>
           <CardHeader>
             <CardTitle>Spacing</CardTitle>
-            <CardDescription>Content and card padding</CardDescription>
+            <CardDescription>Global spacing scale — affects padding, margins, and gaps</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Content Padding</Label>
-                <span className="text-xs font-mono text-muted-foreground">{contentPadding}rem</span>
-              </div>
-              <input
-                type="range"
-                min="0.5"
-                max="3"
-                step="0.25"
-                value={contentPadding}
-                onChange={(e) => update('contentPadding', e.target.value, setContentPadding)}
-                className="w-full accent-primary"
-              />
-              <div className="flex justify-between text-[10px] text-muted-foreground">
-                <span>Tight</span><span>Spacious</span>
-              </div>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>Base Unit</Label>
+              <span className="text-xs font-mono text-muted-foreground">{spacing}rem</span>
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Card Padding</Label>
-                <span className="text-xs font-mono text-muted-foreground">{cardPadding}rem</span>
-              </div>
-              <input
-                type="range"
-                min="0.5"
-                max="3"
-                step="0.25"
-                value={cardPadding}
-                onChange={(e) => update('cardPadding', e.target.value, setCardPadding)}
-                className="w-full accent-primary"
-              />
-              <div className="flex justify-between text-[10px] text-muted-foreground">
-                <span>Compact</span><span>Roomy</span>
-              </div>
+            <Slider
+              value={[parseFloat(spacing) * 100]}
+              min={15}
+              max={40}
+              step={5}
+              onValueChange={([v]) => update('spacing', (v / 100).toFixed(2), setSpacing)}
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              <span>Compact</span><span>Default (0.25)</span><span>Spacious</span>
             </div>
           </CardContent>
         </Card>

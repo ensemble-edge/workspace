@@ -1,16 +1,7 @@
 /**
  * Brand Page — Company Brand Identity Studio
  *
- * 6 tabs for defining a complete brand system:
- * - Overview: Visual brand summary at a glance + export
- * - Colors: Named color groups with visual swatch editor
- * - Typography: Font picker with live preview
- * - Logos: Upload zones for brand marks
- * - Messaging: Tagline, pitch, mission, value props, tone + custom fields
- * - Identity: Company info, custom fields, import/export
- *
- * The brand spec is canonical at /_ensemble/brand/spec (JSON).
- * CSS, markdown context, and visual pages are derived from it.
+ * Hash-based tab routing: /brand#overview, /brand#colors, /brand#typography, etc.
  */
 
 import * as React from 'react';
@@ -22,6 +13,7 @@ import {
   TabsTrigger,
 } from '@ensemble-edge/ui';
 
+import { useHashTab } from '../../../hooks/useHashTab';
 import { OverviewTab } from './OverviewTab';
 import { ColorsTab } from './ColorsTab';
 import { TypographyTab } from './TypographyTab';
@@ -29,7 +21,11 @@ import { LogosTab } from './LogosTab';
 import { MessagingTab } from './MessagingTab';
 import { IdentityTab } from './IdentityTab';
 
+const TABS = ['overview', 'colors', 'typography', 'logos', 'messaging', 'identity'] as const;
+
 export function BrandPage() {
+  const [tab, setTab] = useHashTab('overview', TABS);
+
   return (
     <div className="space-y-6">
       <div>
@@ -39,7 +35,7 @@ export function BrandPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="overview" className="w-full">
+      <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList variant="line" className="mb-6">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="colors">Colors</TabsTrigger>
@@ -49,29 +45,12 @@ export function BrandPage() {
           <TabsTrigger value="identity">Identity</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview">
-          <OverviewTab />
-        </TabsContent>
-
-        <TabsContent value="colors">
-          <ColorsTab />
-        </TabsContent>
-
-        <TabsContent value="typography">
-          <TypographyTab />
-        </TabsContent>
-
-        <TabsContent value="logos">
-          <LogosTab />
-        </TabsContent>
-
-        <TabsContent value="messaging">
-          <MessagingTab />
-        </TabsContent>
-
-        <TabsContent value="identity">
-          <IdentityTab />
-        </TabsContent>
+        <TabsContent value="overview"><OverviewTab /></TabsContent>
+        <TabsContent value="colors"><ColorsTab /></TabsContent>
+        <TabsContent value="typography"><TypographyTab /></TabsContent>
+        <TabsContent value="logos"><LogosTab /></TabsContent>
+        <TabsContent value="messaging"><MessagingTab /></TabsContent>
+        <TabsContent value="identity"><IdentityTab /></TabsContent>
       </Tabs>
     </div>
   );

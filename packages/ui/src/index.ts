@@ -151,6 +151,9 @@ export { Toaster, toast } from "./components/ui/sonner";
 // Alert (static alert boxes)
 export { Alert, AlertTitle, AlertDescription } from "./components/ui/alert";
 
+// Slider
+export { Slider } from "./components/ui/slider";
+
 // Switch
 export { Switch } from "./components/ui/switch";
 
