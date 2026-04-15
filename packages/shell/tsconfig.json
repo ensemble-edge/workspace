@@ -4,10 +4,12 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "jsx": "react-jsx",
-    "jsxImportSource": "preact",
     "declaration": true,
     "declarationMap": true,
-    "composite": true
+    "composite": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.tsx"]

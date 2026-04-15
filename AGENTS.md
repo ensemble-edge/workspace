@@ -169,30 +169,44 @@ describe('validateManifest', () => {
 
 | File | Purpose |
 |------|---------|
-| `packages/core/src/create-workspace.ts` | Main entry point — creates the Hono app |
+| `packages/core/src/create-workspace.ts` | Main entry point — creates the Hono app (standalone) |
+| `packages/core/src/create-workspace-v2.ts` | Mode-aware factory (standalone + cloud) |
 | `packages/core/src/mode/index.ts` | Standalone vs Cloud mode detection |
-| `packages/shell/src/Shell.tsx` | Main shell layout component |
-| `packages/auth/src/middleware.ts` | Auth middleware for both modes |
-| `demos/simple/ensemble.config.ts` | Example workspace configuration |
+| `packages/core/src/shell/components/Shell.tsx` | Main shell layout component |
+| `packages/core/src/shell/components/Viewport.tsx` | App viewport with client-side routing |
+| `packages/core/src/shell/state/` | Preact Signals state management |
+| `packages/core/src/middleware/` | Auth, CORS, workspace resolver middleware |
+| `demos/simple/src/index.ts` | Example workspace configuration |
 
 ---
 
 ## Documentation
 
-### Reference Docs
+```
+docs/
+├── spec/       # WHAT — Product vision, architecture, domain specs
+├── plan/       # HOW — Active implementation plans (what we're building now)
+├── backlog/    # LATER — Well-spec'd future work, not yet active
+└── archive/    # DONE — Completed or superseded plans
+```
+
+### Key Specs
 
 | Doc | Content |
 |-----|---------|
-| `docs/reference/00-workspace.md` | Complete workspace specification (~6000 lines) |
-| `docs/reference/02-shell-shift.md` | Edge-served shell architecture, deployment modes |
-| `docs/reference/05-guest-sdk.md` | Guest app SDK and manifest format |
+| `docs/spec/00-workspace.md` | Complete workspace specification (~6000 lines) |
+| `docs/spec/02-app-architecture.md` | Three-tier app model (core/bundled/guest) |
+| `docs/spec/05-guest-sdk.md` | Guest app SDK and manifest format |
 
-### Workstream Docs
+### Active Plans
 
 | Doc | Content |
 |-----|---------|
-| `docs/workstreams/00-reorg-and-shell-shift.md` | Current implementation plan |
-| `docs/workstreams/01-foundation.md` | Foundation workstream status |
+| `docs/plan/00-status.md` | Project status — what's built vs. not |
+| `docs/plan/01-app-contract.md` | Phase 1: Core app contract + Viewport refactor |
+| `docs/plan/02-core-apps.md` | Phase 2: Build the 8 core apps |
+| `docs/plan/03-shell-extract.md` | Phase 3: Extract shell as @ensemble-edge/shell |
+| `docs/plan/04-cloud-mode.md` | Phase 4: Edge proxy + cloud mode |
 
 ---
 
@@ -274,10 +288,20 @@ bun run test --reporter=verbose  # See full output
 bun run lint:quick --fix  # Auto-fix what's possible
 ```
 
+### Dev container / remote environment
+
+This project runs in a dev container. When starting wrangler:
+
+```bash
+cd demos/simple && npx wrangler dev --port 8787 --ip 0.0.0.0
+```
+
+Use `--ip 0.0.0.0` to bind to all interfaces. To test from the CLI, use `http://127.0.0.1:8787` (not `localhost`, which may not resolve correctly in all containers). The `package.json` in `packages/core` points to source files (`src/index.ts`) instead of `dist/` so wrangler compiles TypeScript directly — no build step needed during development.
+
 ---
 
 ## Questions?
 
-- Check `docs/reference/` for detailed specs
-- Check `docs/workstreams/` for current implementation status
+- Check `docs/spec/` for detailed specifications
+- Check `docs/plan/` for current implementation status
 - File structure follows domain-based organization

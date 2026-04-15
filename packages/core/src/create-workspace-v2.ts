@@ -53,6 +53,8 @@ import {
 } from './middleware';
 import { runMigrations, hasMigrations, migrations } from './db';
 import { createAuthRoutes, createBootstrapRoutes } from './routes';
+import { registerCoreApps } from './apps';
+import { generateBrandCss } from './apps/core/brand/css';
 
 /**
  * Convert the new mode-aware config to the legacy ResolvedConfig format.
@@ -77,11 +79,12 @@ function toLegacyConfig(config: ResolvedModeConfig): ResolvedConfig {
   };
 }
 
-// Try to import shell assets - may not exist in cloud mode
+// Shell assets are built by @ensemble-edge/shell and exported as strings.
+// In cloud mode, these may not exist (shell served from R2 by proxy).
 let SHELL_JS = '';
 let SHELL_CSS = '';
 try {
-  const assets = await import('./shell/assets.generated');
+  const assets = await import('@ensemble-edge/shell/assets');
   SHELL_JS = assets.SHELL_JS;
   SHELL_CSS = assets.SHELL_CSS;
 } catch {
@@ -212,6 +215,9 @@ function createStandaloneWorkspace(
 
   // Auth routes (login, logout, register, refresh, me)
   app.route('/_ensemble/auth', createAuthRoutes());
+
+  // Core App API Routes (/_ensemble/core/*)
+  registerCoreApps(app);
 
   // Brand endpoints
   mountBrandRoutes(app, config);
@@ -349,6 +355,9 @@ function createCloudWorkspace(
     });
   });
 
+  // Core App API Routes (/_ensemble/core/*)
+  registerCoreApps(app);
+
   // Brand endpoints
   mountBrandRoutes(app, config);
 
@@ -443,59 +452,10 @@ function mountBrandRoutes(
     });
   });
 
-  // GET /_ensemble/brand/css - CSS variables
+  // GET /_ensemble/brand/css - CSS variables (loads ALL tokens including workspace-ui)
   app.get('/_ensemble/brand/css', async (c) => {
-    let accent = config.brand.accent;
-    let canvas = '#BDB7B0';
-
-    try {
-      const workspaceId = c.get('workspace')?.id || '';
-
-      const accentResult = await c.env.DB.prepare(
-        `SELECT value FROM brand_tokens
-         WHERE workspace_id = ? AND category = 'colors' AND key = 'accent' AND locale = ''`
-      ).bind(workspaceId).first<{ value: string }>();
-      if (accentResult?.value) accent = accentResult.value;
-
-      const canvasResult = await c.env.DB.prepare(
-        `SELECT value FROM brand_tokens
-         WHERE workspace_id = ? AND category = 'colors' AND key = 'canvas' AND locale = ''`
-      ).bind(workspaceId).first<{ value: string }>();
-      if (canvasResult?.value) canvas = canvasResult.value;
-    } catch {
-      // Use defaults
-    }
-
-    const css = `
-:root {
-  --color-accent: ${accent};
-  --color-accent-hover: color-mix(in srgb, ${accent} 85%, white);
-  --color-accent-dim: color-mix(in srgb, ${accent} 20%, transparent);
-  --canvas: ${canvas};
-  --card: #1e1e22;
-  --card-hover: #252529;
-  --card-border: rgba(255, 255, 255, 0.06);
-  --sidebar-bg: #141316;
-  --sidebar-hover: #1c1b1f;
-  --sidebar-active: #252429;
-  --text-primary: #f0ede8;
-  --text-secondary: #9a938a;
-  --text-tertiary: #6b655c;
-  --color-error: #f87171;
-  --color-success: #4ade80;
-  --color-warning: #fbbf24;
-  --color-info: #60a5fa;
-  --font-heading: 'DM Sans', system-ui, sans-serif;
-  --font-body: 'DM Sans', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
-  --letter-spacing-label: 0.12em;
-  --radius: 12px;
-  --radius-sm: 8px;
-  --radius-lg: 16px;
-  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.25);
-  --shadow-card-lg: 0 8px 32px rgba(0, 0, 0, 0.35);
-  --shadow-dropdown: 0 12px 40px rgba(0, 0, 0, 0.45);
-}`.trim();
+    const workspaceId = c.get('workspace')?.id || '';
+    const css = await generateBrandCss(c.env.DB, workspaceId, config.brand.accent);
 
     return c.text(css, 200, {
       'Content-Type': 'text/css',
@@ -520,13 +480,20 @@ function mountBrandRoutes(
         return c.json({ error: 'Category and tokens are required' }, 400);
       }
 
+      // Infer token type from category
+      const typeMap: Record<string, string> = {
+        colors: 'color', typography: 'font', spatial: 'text',
+        identity: 'text', messaging: 'text', custom: 'text',
+      };
+      const tokenType = typeMap[body.category] || 'text';
+
       for (const [key, value] of Object.entries(body.tokens)) {
         await c.env.DB.prepare(
           `INSERT INTO brand_tokens (workspace_id, category, key, value, type, locale, updated_at)
-           VALUES (?, ?, ?, ?, 'color', '', datetime('now'))
+           VALUES (?, ?, ?, ?, ?, '', datetime('now'))
            ON CONFLICT (workspace_id, category, key, locale)
            DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
-        ).bind(workspace.id, body.category, key, value).run();
+        ).bind(workspace.id, body.category, key, value, tokenType).run();
       }
 
       return c.json({ success: true });

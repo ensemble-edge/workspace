@@ -11,10 +11,6 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts"
     },
-    "./shell": {
-      "types": "./src/shell/index.tsx",
-      "import": "./src/shell/index.tsx"
-    },
     "./types": {
       "types": "./src/types.ts",
       "import": "./src/types.ts"
@@ -63,16 +59,15 @@
   "scripts": {
     "dev": "npm run build:shell && wrangler dev --local",
     "dev:types": "tsc --watch",
-    "dev:shell": "node build.js --watch",
     "build": "npm run build:shell && tsc",
-    "build:shell": "npm run build:css && node build.js",
-    "build:css": "npx tailwindcss -i ./src/shell/styles/globals.css -o ./dist/shell/shell.css --minify",
-    "build:shell:prod": "npm run build:css && node build.js --prod",
+    "build:shell": "cd ../shell && node build.js",
+    "build:shell:prod": "cd ../shell && node build.js --prod",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "deploy": "npm run build:shell:prod && wrangler deploy"
   },
   "dependencies": {
+    "@ensemble-edge/shell": "workspace:*",
     "@ensemble-edge/ui": "workspace:*",
     "@preact/signals-react": "^2.0.0",
     "better-sqlite3": "^12.8.0",

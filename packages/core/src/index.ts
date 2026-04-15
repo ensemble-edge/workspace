@@ -147,10 +147,6 @@ export * from './ai';
 // Auth service (larger, kept in services/)
 export * from './services/auth';
 
-// Shell (client-side SPA)
-// IMPORTANT: Shell components are browser-only and should NOT be imported in Workers.
-// The shell is served as a pre-bundled JS string via /_ensemble/shell/shell.js.
-// For client-side code, import shell components from '@ensemble-edge/core/shell'.
-//
-// DO NOT export shell functions here - they contain browser APIs (window, document)
-// that will crash Workers at module load time.
+// Shell — now a separate package: @ensemble-edge/shell
+// Shell assets (JS/CSS) are imported from '@ensemble-edge/shell/assets'
+// by create-workspace.ts and served at /_ensemble/shell/*

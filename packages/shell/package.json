@@ -1,28 +1,41 @@
 {
   "name": "@ensemble-edge/shell",
-  "version": "0.0.1",
-  "description": "Ensemble workspace shell - Preact SPA for the workspace UI",
+  "version": "0.1.0",
+  "description": "Ensemble workspace shell — React SPA with shadcn/ui",
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/shell.js",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./assets": "./dist/assets.js",
+    "./dist/*": "./dist/*"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "test": "vitest run",
+    "dev": "node build.js --watch",
+    "build": "node build.js",
+    "build:css": "npx tailwindcss -i ./src/styles/globals.css -o ./dist/shell.css --minify",
+    "build:all": "npm run build:css && npm run build && node scripts/generate-assets.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ensemble-edge/core": "workspace:*"
+    "@ensemble-edge/ui": "workspace:*",
+    "@preact/signals-react": "^2.0.0",
+    "lucide-react": "^0.378.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
   },
   "devDependencies": {
-    "typescript": "^5.9.0",
-    "vitest": "^4.0.0"
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "esbuild": "^0.25.0",
+    "tailwindcss": "^3.4.0",
+    "postcss": "^8.4.38",
+    "autoprefixer": "^10.4.19",
+    "typescript": "^5.9.0"
   },
   "files": [
-    "src"
+    "src",
+    "dist"
   ],
   "license": "MIT"
 }

@@ -1,15 +1,19 @@
 /**
  * @ensemble-edge/shell
  *
- * Re-export shell components from @ensemble-edge/core.
- * This package exists to allow independent versioning and imports.
+ * The Ensemble workspace shell — a React SPA that provides
+ * the sidebar, toolbar, viewport, and core app pages.
  *
- * Usage:
- *   import { Shell, Sidebar, mountShell } from '@ensemble-edge/shell';
+ * Usage in a Worker (standalone mode):
+ *   import { SHELL_JS, SHELL_CSS } from '@ensemble-edge/shell/assets';
+ *   // Serve these strings at /_ensemble/shell/shell.js and shell.css
  *
- * Or directly from core:
- *   import { Shell, Sidebar, mountShell } from '@ensemble-edge/core/shell';
+ * The shell is built separately and outputs:
+ *   dist/shell.js   — Bundled React SPA
+ *   dist/shell.css  — Compiled Tailwind CSS
+ *   dist/assets.js  — Exports both as strings (for Worker inline serving)
  */
 
-// Re-export everything from core's shell module
-export * from '@ensemble-edge/core/shell';
+export { initShell } from './client';
+export { registerPage, findPage, getPages } from './apps/registry';
+export type { AppPageRegistration } from './apps/registry';
