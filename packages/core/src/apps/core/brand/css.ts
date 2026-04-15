@@ -180,6 +180,17 @@ async function generateShellCss(
     }
   }
 
+  // Semantic color overrides (error uses --destructive which is standard shadcn)
+  const errorHex = customTokens.errorColor || '';
+  if (errorHex) {
+    const hsl = hexToHslString(errorHex);
+    if (hsl) {
+      const fg = isLightHex(errorHex) ? '0 0% 9%' : '0 0% 98%';
+      lightScale.destructive = hsl; lightScale['destructive-foreground'] = fg;
+      darkScale.destructive = hsl; darkScale['destructive-foreground'] = fg;
+    }
+  }
+
   // Emit HSL triplets. Tailwind v4's @theme block wraps them:
   // --color-primary: hsl(var(--primary)). Since brand/css loads AFTER
   // shell.css, our :root values for --primary etc. take effect, and
@@ -205,6 +216,10 @@ async function generateShellCss(
   --content-padding: ${contentPadding}rem;
   --card-padding: ${cardPadding}rem;
   --chart-1: 220 70% 50%;
+  --color-success: ${customTokens.successColor || '#16a34a'};
+  --color-warning: ${customTokens.warningColor || '#ca8a04'};
+  --color-error: ${customTokens.errorColor || '#dc2626'};
+  --color-info: ${customTokens.infoColor || '#2563eb'};
 }
 
 /* Light mode (default) */

@@ -81,6 +81,29 @@ const CARD_PRESETS = [
   { value: '#09090b', label: 'Black' },
 ];
 
+const SEMANTIC_PRESETS = {
+  success: [
+    { value: '#16a34a', label: 'Green' }, { value: '#5B8A72', label: 'Sage' },
+    { value: '#15803d', label: 'Forest' }, { value: '#059669', label: 'Emerald' },
+    { value: '#0d9488', label: 'Teal' }, { value: '#10b981', label: 'Mint' },
+  ],
+  warning: [
+    { value: '#ca8a04', label: 'Amber' }, { value: '#d97706', label: 'Gold' },
+    { value: '#ea580c', label: 'Orange' }, { value: '#f59e0b', label: 'Yellow' },
+    { value: '#CB9661', label: 'Sand' }, { value: '#b45309', label: 'Bronze' },
+  ],
+  error: [
+    { value: '#dc2626', label: 'Red' }, { value: '#C62828', label: 'Crimson' },
+    { value: '#e11d48', label: 'Rose' }, { value: '#b91c1c', label: 'Dark' },
+    { value: '#ef4444', label: 'Bright' }, { value: '#f43f5e', label: 'Pink' },
+  ],
+  info: [
+    { value: '#2563eb', label: 'Blue' }, { value: '#6B8FAD', label: 'Steel' },
+    { value: '#0891b2', label: 'Cyan' }, { value: '#3b82f6', label: 'Sky' },
+    { value: '#6366f1', label: 'Indigo' }, { value: '#0284c7', label: 'Ocean' },
+  ],
+};
+
 const FONT_OPTIONS = [
   { value: 'system', label: 'System Default' },
   { value: 'inter', label: 'Inter' },
@@ -98,6 +121,10 @@ export function AppearanceTab() {
   const [canvasColor, setCanvasColor] = useState('');
   const [sidebarColor, setSidebarColor] = useState('');
   const [cardColor, setCardColor] = useState('');
+  const [successColor, setSuccessColor] = useState('');
+  const [warningColor, setWarningColor] = useState('');
+  const [errorColor, setErrorColor] = useState('');
+  const [infoColor, setInfoColor] = useState('');
   const [radius, setRadius] = useState('0.5');
   const [headingFont, setHeadingFont] = useState('system');
   const [bodyFont, setBodyFont] = useState('system');
@@ -120,6 +147,10 @@ export function AppearanceTab() {
             case 'canvasColor': setCanvasColor(token.value); break;
             case 'sidebarColor': setSidebarColor(token.value); break;
             case 'cardColor': setCardColor(token.value); break;
+            case 'successColor': setSuccessColor(token.value); break;
+            case 'warningColor': setWarningColor(token.value); break;
+            case 'errorColor': setErrorColor(token.value); break;
+            case 'infoColor': setInfoColor(token.value); break;
             case 'radius': setRadius(token.value); break;
             case 'headingFont': setHeadingFont(token.value); break;
             case 'bodyFont': setBodyFont(token.value); break;
@@ -249,6 +280,7 @@ export function AppearanceTab() {
   const allTokens = () => ({
     themePreset, themeMode, buttonColor, accentColor,
     canvasColor, sidebarColor, cardColor,
+    successColor, warningColor, errorColor, infoColor,
     radius, headingFont, bodyFont, contentPadding, cardPadding,
   });
 
@@ -304,23 +336,22 @@ export function AppearanceTab() {
   // Apply a theme preset — clears overrides, removes inline styles, reloads CSS
   const applyPreset = (presetId: string) => {
     setThemePreset(presetId);
-    setButtonColor('');
-    setAccentColor('');
-    setCanvasColor('');
-    setSidebarColor('');
-    setCardColor('');
+    setButtonColor(''); setAccentColor('');
+    setCanvasColor(''); setSidebarColor(''); setCardColor('');
+    setSuccessColor(''); setWarningColor(''); setErrorColor(''); setInfoColor('');
     resetInlineStyles();
     saveAndReload({
       ...allTokens(),
       themePreset: presetId,
       buttonColor: '', accentColor: '',
       canvasColor: '', sidebarColor: '', cardColor: '',
+      successColor: '', warningColor: '', errorColor: '', infoColor: '',
     });
   };
 
   // Get the display value for a color picker — shows the preset default if no override
   const activePreset = THEME_PRESETS.find((t) => t.id === themePreset);
-  const hasOverrides = !!(buttonColor || accentColor || canvasColor || sidebarColor || cardColor);
+  const hasOverrides = !!(buttonColor || accentColor || canvasColor || sidebarColor || cardColor || successColor || warningColor || errorColor || infoColor);
   const displayValue = (override: string, presetKey: keyof typeof THEME_PRESETS[0]) =>
     override || (activePreset ? (activePreset as Record<string, string>)[presetKey as string] : '') || '';
 
@@ -473,6 +504,28 @@ export function AppearanceTab() {
             fallbackLabel={activePreset ? `${activePreset.label} default` : ''}
             onReset={() => update('cardColor', '', setCardColor)}
           />
+
+          {/* Semantic Colors */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Semantic Colors</CardTitle>
+              <CardDescription>Status indicators, toasts, and validation</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <ColorRow label="Success" value={successColor} presets={SEMANTIC_PRESETS.success}
+                onChange={(v) => update('successColor', v, setSuccessColor)}
+                onReset={() => update('successColor', '', setSuccessColor)} />
+              <ColorRow label="Warning" value={warningColor} presets={SEMANTIC_PRESETS.warning}
+                onChange={(v) => update('warningColor', v, setWarningColor)}
+                onReset={() => update('warningColor', '', setWarningColor)} />
+              <ColorRow label="Error" value={errorColor} presets={SEMANTIC_PRESETS.error}
+                onChange={(v) => update('errorColor', v, setErrorColor)}
+                onReset={() => update('errorColor', '', setErrorColor)} />
+              <ColorRow label="Info" value={infoColor} presets={SEMANTIC_PRESETS.info}
+                onChange={(v) => update('infoColor', v, setInfoColor)}
+                onReset={() => update('infoColor', '', setInfoColor)} />
+            </CardContent>
+          </Card>
 
           {/* Typography */}
           <Card>
