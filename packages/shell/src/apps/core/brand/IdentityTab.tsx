@@ -315,10 +315,10 @@ function ImportForm({ onSuccess }: { onSuccess: () => void }) {
       </DialogHeader>
       <div className="space-y-4 py-4">
         <div className="flex gap-2">
-          <Button variant={mode === 'file' ? 'default' : 'outline'} size="sm" onClick={() => setMode('file')}>
+          <Button variant={mode === 'file' ? 'default' : 'outline-solid'} size="sm" onClick={() => setMode('file')}>
             From File
           </Button>
-          <Button variant={mode === 'url' ? 'default' : 'outline'} size="sm" onClick={() => setMode('url')}>
+          <Button variant={mode === 'url' ? 'default' : 'outline-solid'} size="sm" onClick={() => setMode('url')}>
             From URL
           </Button>
         </div>

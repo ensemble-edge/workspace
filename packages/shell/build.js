@@ -31,7 +31,7 @@ async function buildCSS() {
 
   try {
     execSync(
-      `npx tailwindcss -i ${inputCss} -o ${outputCss} ${isProd ? '--minify' : ''}`,
+      `npx @tailwindcss/cli -i ${inputCss} -o ${outputCss} ${isProd ? '--minify' : ''}`,
       { cwd: __dirname, stdio: 'inherit' }
     );
     console.log('[shell] CSS built:', outputCss);
