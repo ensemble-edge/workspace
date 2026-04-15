@@ -388,7 +388,16 @@ export function AppearanceTab() {
 
   // Get the display value for a color picker — shows the preset default if no override
   const activePreset = THEME_PRESETS.find((t) => t.id === themePreset);
-  const hasOverrides = !!(buttonColor || accentColor || canvasColor || sidebarColor || cardColor || successColor || warningColor || errorColor || infoColor);
+  // For Brand preset, its expected overrides don't count as "customized"
+  const hasOverrides = themePreset === 'brand'
+    ? !!(
+        (buttonColor && buttonColor !== brandColors.primary) ||
+        (accentColor && accentColor !== brandColors.accent) ||
+        canvasColor || cardColor ||
+        (sidebarColor && sidebarColor !== brandColors.secondary) ||
+        successColor || warningColor || errorColor || infoColor
+      )
+    : !!(buttonColor || accentColor || canvasColor || sidebarColor || cardColor || successColor || warningColor || errorColor || infoColor);
   const displayValue = (override: string, presetKey: keyof typeof THEME_PRESETS[0]) =>
     override || (activePreset ? (activePreset as Record<string, string>)[presetKey as string] : '') || '';
 
