@@ -29,8 +29,10 @@ import {
   SelectTrigger,
   SelectValue,
   Slider,
+  ColorPicker,
   toast,
 } from '@ensemble-edge/ui';
+import type { ColorPreset } from '@ensemble-edge/ui';
 
 // Theme preset data (shared with CSS endpoint)
 const THEME_PRESETS = [
@@ -642,13 +644,13 @@ export function AppearanceTab() {
 // Sub-components
 // ============================================================================
 
+/** Card wrapper for a ColorPicker with presets */
 function ColorPresetCard({ title, description, value, displayValue, presets, onChange, fallbackLabel, onReset }: {
   title: string; description: string; value: string; displayValue?: string;
-  presets: Array<{ value: string; label: string }>;
+  presets: ColorPreset[];
   onChange: (v: string) => void;
   fallbackLabel?: string; onReset?: () => void;
 }) {
-  const shown = displayValue || value;
   return (
     <Card>
       <CardHeader>
@@ -656,59 +658,34 @@ function ColorPresetCard({ title, description, value, displayValue, presets, onC
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-wrap gap-2">
-          {presets.map((c) => (
-            <button key={c.value} onClick={() => onChange(c.value)}
-              className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-sm font-medium transition-all ${
-                (value || shown) === c.value ? 'border-blue-500 ring-2 ring-blue-500/30' : 'border-input hover:border-blue-300'
-              }`}>
-              <div className="h-4 w-4 rounded-full ring-1 ring-inset ring-black/10" style={{ backgroundColor: c.value }} />
-              <span>{c.label}</span>
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-3 mt-3">
-          <label className="h-8 w-8 rounded-lg border border-input shrink-0 cursor-pointer overflow-hidden">
-            <input type="color" value={shown || '#000000'} onChange={(e) => onChange(e.target.value)} className="h-12 w-12 -mt-1 -ml-1 cursor-pointer border-0" />
-          </label>
-          <span className="text-xs font-mono text-muted-foreground">
-            {value ? value : (shown ? `${shown} (${fallbackLabel || 'default'})` : fallbackLabel || '')}
-          </span>
-          {onReset && value && (
-            <button className="text-xs text-muted-foreground hover:text-foreground ml-auto" onClick={onReset}>Reset</button>
-          )}
-        </div>
+        <ColorPicker
+          value={displayValue || value}
+          onChange={onChange}
+          presets={presets}
+          onReset={value ? onReset : undefined}
+          placeholder={fallbackLabel}
+        />
       </CardContent>
     </Card>
   );
 }
 
+/** Compact color picker row for backgrounds/semantics */
 function ColorRow({ label, value, presets, onChange, onReset }: {
   label: string; value: string;
-  presets: Array<{ value: string; label: string }>;
+  presets: ColorPreset[];
   onChange: (v: string) => void;
   onReset: () => void;
 }) {
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label>{label}</Label>
-        {value && <button className="text-xs text-muted-foreground hover:text-foreground" onClick={onReset}>Reset</button>}
-      </div>
-      <div className="flex items-center gap-2">
-        <label className="h-8 w-8 rounded-lg border border-input shrink-0 cursor-pointer overflow-hidden">
-          <input type="color" value={value || '#ffffff'} onChange={(e) => onChange(e.target.value)} className="h-12 w-12 -mt-1 -ml-1 cursor-pointer border-0" />
-        </label>
-        <div className="flex flex-wrap gap-1 flex-1">
-          {presets.slice(0, 6).map((c) => (
-            <button key={c.value} onClick={() => onChange(c.value)}
-              className={`h-6 w-6 rounded ring-1 ring-inset ring-black/10 ${value === c.value ? 'ring-2 ring-blue-500' : ''}`}
-              style={{ backgroundColor: c.value }} title={c.label} />
-          ))}
-        </div>
-        <span className="text-xs font-mono text-muted-foreground w-16 text-right">{value || 'default'}</span>
-      </div>
-    </div>
+    <ColorPicker
+      label={label}
+      value={value}
+      onChange={onChange}
+      presets={presets}
+      onReset={value ? onReset : undefined}
+      size="sm"
+    />
   );
 }
 
