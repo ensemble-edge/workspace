@@ -327,7 +327,7 @@ export function AppearanceTab() {
   const selClass = (selected: boolean) =>
     selected
       ? 'border-2 bg-primary text-primary-foreground'
-      : 'border-input bg-card hover:bg-accent hover:text-accent-foreground border-2';
+      : 'border-input bg-card hover:bg-primary/10 border-2';
 
   return (
     <div className="space-y-6">
