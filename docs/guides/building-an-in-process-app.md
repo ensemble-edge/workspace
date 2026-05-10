@@ -44,7 +44,10 @@ A third `connection_type: 'in_process'` with a `createWorkspace({ apps: [...] })
 
 ## Original guide (preserved for context, do not implement)
 
-The text below was written assuming consumer-extensible client routes and in-process component apps. Both assumptions are wrong for v0.1.0. Read for context only.
+The text below was written assuming consumer-extensible client routes and in-process component apps. Both assumptions are wrong for v0.1.0. **For the actual recipe, see [`building-a-guest-worker.md`](./building-a-guest-worker.md).** The original guide body is collapsed below — open only if you need historical context.
+
+<details>
+<summary>Original (deprecated) guide body — click to expand</summary>
 
 ---
 
@@ -384,3 +387,5 @@ Eventually `createWorkspace({ apps: [quizCmsApp, ...] })` will exist. When it do
 - Your client routes plug into workspace's shell route map.
 
 That's the goal. The v0.0.1 wrapping pattern in Step 3 is structured to make this migration mechanical — keep it that way.
+
+</details>

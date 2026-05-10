@@ -71,7 +71,11 @@ export function AppViewPage() {
     );
   }
 
-  const appUrl = `/_ensemble/apps/${appId}/`;
+  // Forward the full subpath through the gateway so the guest worker
+  // can route on its own. `/apps/quiz-cms/schemas/abc` →
+  // `/_ensemble/apps/quiz-cms/schemas/abc`. Falls back to root if no suffix.
+  const subpath = path.replace(/^\/apps\/[\w-]+/, '') || '/';
+  const appUrl = `/_ensemble/apps/${appId}${subpath}`;
 
   return (
     <div className="flex flex-1">
