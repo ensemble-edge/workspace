@@ -120,6 +120,22 @@ The actual blocker, but big enough to want isolation from Tier 1.
 
 These need a sit-down decision before coding. Listed so they don't get forgotten.
 
+#### In-process app registration (discovered 2026-05-10, then re-verified after pushback)
+
+A consumer trying to add a small custom app to their workspace has no good path in v0.1.0:
+
+- `createWorkspace()` hardcodes registration of workspace's own core apps. No public hook to add more.
+- The `guest_apps` table + `/_ensemble/apps/*` gateway ([packages/core/src/routes/guest-gateway.ts](../packages/core/src/routes/guest-gateway.ts)) is the right URL space and the sidebar reads from it via `/_ensemble/nav` ([create-workspace.ts:286-298](../packages/core/src/create-workspace.ts#L286-L298)), BUT every `guest_apps` row requires either `connection_type: 'service_binding'` or `'http'` ([migration 002](../packages/core/src/db/migrations/002_guest_apps.ts)). Neither resolves to a local Hono handler.
+- The shell is sealed Preact — no consumer client-route injection. UI must come from server-rendered HTML or a separate worker.
+
+So a consumer's only working v0.1.0 path is **deploying a second Worker** (or remote HTTP service), connecting via service binding, registering in `guest_apps`. That works (curalisto is going to do this for quiz-cms), but it's overkill for trusted, small UI surfaces. We surface `@ensemble-edge/workspace/guest/cloudflare` as a real published export — make sure that path is solid since it's the only available one.
+
+**Proposed for v0.2.0:** add `connection_type: 'in_process'` to the `guest_apps` schema and a `createWorkspace({ apps: [...] })` registration hook. The gateway gets a third dispatch branch (`proxyViaLocalHandler`) that calls into a Hono sub-app registered at workspace-creation time. Same URL space, same middleware inheritance, same sidebar integration — just no second Worker required for trusted apps.
+
+**Migration story:** Apps built today via `@ensemble-edge/workspace/guest/cloudflare` should be able to move to in-process by changing the `connection_type` row and the wiring (no manifest or route changes). Preserves curalisto's investment.
+
+**Bonus design surface to think through during this work:** does the in-process branch want to expose a "render a registered React component in the viewport" hook? That would let consumers ship a real component-based UI (currently impossible because the shell is sealed Preact). Probably yes — but the shell would need to grow a registration mechanism for consumer components, which is a meaningful expansion. Defer until in-process backend dispatch is shipped and we see whether the "guest worker returning HTML" pattern is actually painful enough to justify it.
+
 #### Extension points for `queue()` / `scheduled()` handlers
 
 Two viable shapes — pick one before implementing:

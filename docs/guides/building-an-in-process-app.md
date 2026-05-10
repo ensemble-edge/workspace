@@ -1,10 +1,50 @@
 # Building an in-process app in cl-workspace
 
 > **For:** the agent working on cl-workspace / curalisto's quiz-cms stub.
-> **Status:** v0.1.0 — based on actual runtime, not aspirational spec.
+> **Status:** **DEPRECATED 2026-05-10.** Read the "Use Option A instead" section at the top. The rest of this guide is preserved for context but should not be implemented as-written.
 > **Last verified:** 2026-05-10 against `@ensemble-edge/workspace@v0.1.0`.
 
-This guide tells you how to add a custom "app" (rendered page + API routes + sidebar entry) to cl-workspace without spinning up a second Cloudflare Worker.
+---
+
+## 🛑 DEPRECATED — Use Option A (separate guest worker) instead
+
+After two rounds of source verification, this guide's premise — that quiz-cms can run as an in-process component inside cl-workspace and surface in workspace's UI — turned out to be wrong for v0.1.0. **For quiz-cms v0.0.1, build it as a real guest worker (Option A) using `@ensemble-edge/workspace/guest/cloudflare`. The curalisto agent's analysis was correct.**
+
+Why the original recommendation was wrong:
+
+1. **The shell is sealed Preact**, not extensible React. There is no client-side hook for consumer-defined pages, components, or routes. `@ensemble-edge/workspace/ui` (React) cannot render inside the shell.
+2. **`/_ensemble/nav` reads from the `guest_apps` D1 table** ([create-workspace.ts:286-298](../../packages/core/src/create-workspace.ts#L286-L298)) — so the sidebar entry IS achievable, but only by inserting a row, and every row requires either a `service_binding` or `endpoint_url` ([migration 002](../../packages/core/src/db/migrations/002_guest_apps.ts)). There is no "in-process" `connection_type`.
+3. **The gateway at `/_ensemble/apps/{id}/*`** ([guest-gateway.ts](../../packages/core/src/routes/guest-gateway.ts)) proxies to either a service binding or HTTP. There is no local-handler dispatch.
+
+So the v0.1.0 architecture supports exactly two patterns: **core/bundled apps that ship inside `@ensemble-edge/workspace`** (consumers cannot add to this list without forking) and **guest apps that run as separate workers reachable via service binding or HTTP**. The in-process consumer-defined app pattern doesn't exist yet.
+
+### What to actually do for quiz-cms v0.0.1
+
+1. Create `workers/guests/quiz-cms/` as a separate CF Worker. Wrangler config, package.json, etc. — same shape as your existing workers.
+2. Use `@ensemble-edge/workspace/guest/cloudflare`'s adapter to bootstrap the worker. Returns a `fetch` handler that knows how to talk to workspace's gateway (capability tokens, context headers).
+3. In `cl-workspace`'s `wrangler.toml`, add a `[[services]]` binding pointing at `cl-quiz-cms`.
+4. Insert a row into `guest_apps`:
+   ```sql
+   INSERT INTO guest_apps (
+     workspace_id, id, name, icon, category,
+     connection_type, binding_name, enabled, required_role
+   ) VALUES (
+     ?, 'quiz-cms', 'Quiz CMS', 'clipboard-list', 'tool',
+     'service_binding', 'QUIZ_CMS', 1, 'member'
+   );
+   ```
+5. Workspace's sidebar picks it up automatically via `/_ensemble/nav`. Clicking the sidebar link sends `/apps/quiz-cms` to the gateway, which proxies to your guest worker via the service binding.
+6. Your guest worker returns whatever HTML/JSON it wants. The shell embeds it (likely iframe — verify by inspecting the shell bundle's behavior on a `/apps/*` route).
+
+### What workspace owes us in v0.2.0
+
+A third `connection_type: 'in_process'` with a `createWorkspace({ apps: [...] })` registration hook, so a consumer can register a Hono sub-app that workspace dispatches to locally — same `guest_apps` table semantics, same `/_ensemble/apps/*` URLs, same middleware inheritance, no second Worker required. Filed under v0.2.0 in [`docs/curalisto-feedback.md`](../curalisto-feedback.md). The cl-quiz-cms migration from "separate Worker" to "in-process app" should then be mechanical (same `defineGuestApp` manifest, same routes).
+
+---
+
+## Original guide (preserved for context, do not implement)
+
+The text below was written assuming consumer-extensible client routes and in-process component apps. Both assumptions are wrong for v0.1.0. Read for context only.
 
 ---
 
