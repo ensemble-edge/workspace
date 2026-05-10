@@ -1,12 +1,25 @@
 # Building a guest worker for Ensemble Workspace
 
 > **For:** an agent or developer adding a custom app to their workspace.
-> **Workspace version:** verified against v0.1.1.
+> **Workspace version:** verified against v0.1.1+ (React-native recipe verified 2026-05-10 in a /tmp sandbox).
 > **Audience:** familiar with Cloudflare Workers + wrangler.
 
 A guest worker is a separate Cloudflare Worker that shows up in your workspace's sidebar and renders inside an iframe in the shell's viewport. This is the **only consumer-extensible app path in v0.1.x** — see [the architecture overview](#architecture-at-a-glance) below for why.
 
 This guide covers the end-to-end recipe: scaffold a worker → register it with workspace → see it in the sidebar → render UI → fetch workspace data.
+
+## Which pattern to use
+
+**Two valid patterns** — pick based on UI complexity, not preference:
+
+| Pattern | When | Look-and-feel | Bundle cost |
+|---|---|---|---|
+| **React-native** (recommended for any real UI) | Tables, forms, interactive views, anything you'd reach for `@ensemble-edge/workspace/ui` components for | Pixel-native — same React components the shell uses against the same theme tokens | ~125KB gzipped JS + ~11KB gzipped CSS |
+| **HTML strings** (fallback for trivial cases) | JSON-returning connectors with no UI, or apps so simple they render <50 lines of HTML | On-brand colors via `/_ensemble/brand/css`, but you hand-roll layout | Zero JS, ~5KB CSS |
+
+**For anything customer-facing or operator-facing, use React-native.** The HTML-string pattern is for connectors and trivial admin views.
+
+Both patterns live in this guide. The [React-native section](#react-native-guest-app-recommended) is the primary recipe; [HTML-string](#html-string-guest-app-fallback) is preserved for the cases where it's the right call.
 
 ---
 
@@ -41,6 +54,329 @@ Three things to internalize:
 3. **Communication is via context headers.** The gateway injects `X-Ensemble-Workspace-Id`, `X-Ensemble-User-Id`, etc. on every proxied request. Your worker reads them to know who's asking.
 
 ---
+
+## React-native guest app (recommended)
+
+This is the primary recipe. Your worker serves a small HTML shell that boots a React app inside the iframe. The React app imports `@ensemble-edge/workspace/ui` and renders the same components the workspace shell uses — same `<Card>`, `<Button>`, `<Table>`, `<PageHeader>` — against the same theme tokens. The result is pixel-native and inherits any future workspace theme changes automatically.
+
+### Verified bundle profile (2026-05-10)
+
+A minimal `<Card>` + `<Table>` + `<Button>` page bundled with esbuild + Tailwind v4:
+
+- **JS bundle: ~125KB gzipped** (404KB minified; React 18 + Radix UI + workspace `/ui` + your app)
+- **CSS bundle: ~11KB gzipped** (workspace's design tokens + utility classes you reference)
+- Both well under CF Workers' 1MB compressed limit. Plenty of headroom for app code.
+
+### File layout
+
+```
+workers/guests/quiz-cms/
+├── wrangler.toml
+├── package.json
+├── tsconfig.json
+├── esbuild.config.mjs
+├── src/
+│   ├── index.ts           ← worker entry; defineGuestApp + asset serving
+│   ├── app.tsx            ← React root; renders into <div id="root">
+│   ├── pages/
+│   │   ├── SchemaList.tsx
+│   │   └── SchemaDetail.tsx
+│   ├── shared/
+│   │   └── index.html.ts  ← HTML shell served by worker (links bundle.js + bundle.css)
+│   └── styles.css         ← Tailwind v4 entry; @import '@ensemble-edge/workspace/ui/globals.css'
+└── dist/
+    ├── bundle.js          ← built by esbuild (committed or built in CI; embedded as string)
+    └── bundle.css         ← built by Tailwind v4
+```
+
+### Step 1 — `package.json`
+
+```json
+{
+  "name": "cl-quiz-cms",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:js": "esbuild src/app.tsx --bundle --platform=browser --format=esm --outfile=dist/bundle.js --minify --tree-shaking=true",
+    "build:css": "tailwindcss -i ./src/styles.css -o ./dist/bundle.css --minify",
+    "build": "pnpm run build:js && pnpm run build:css",
+    "deploy": "pnpm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "@ensemble-edge/workspace": "github:ensemble-edge/workspace#v0.1.1",
+    "hono": "^4.0.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
+    "@tailwindcss/cli": "^4.2.2",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "esbuild": "^0.27.4",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^5.4.0",
+    "wrangler": "^4.0.0"
+  }
+}
+```
+
+### Step 2 — Tailwind entry
+
+`src/styles.css`:
+
+```css
+@import '@ensemble-edge/workspace/ui/globals.css';
+@source './**/*.{ts,tsx}';
+```
+
+That's the whole file. The first line pulls workspace's design tokens + the source globs that walk workspace's compiled UI components. The second line tells Tailwind v4 to also scan your own source. **No `tailwind.config.ts` required.**
+
+### Step 3 — React app
+
+`src/app.tsx`:
+
+```tsx
+import { createRoot } from 'react-dom/client';
+import {
+  Card, CardHeader, CardTitle, CardDescription, CardContent,
+  Button, Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
+} from '@ensemble-edge/workspace/ui';
+
+function App() {
+  // Your real app: routing, state, data fetching from workspace API
+  // For the stub, just demonstrate the components work natively.
+  return (
+    <div className="min-h-screen bg-background text-foreground p-8">
+      <header className="mb-6">
+        <h1 className="text-2xl font-semibold">Quiz CMS</h1>
+        <p className="text-muted-foreground">Manage intake form schemas</p>
+      </header>
+      <Card>
+        <CardHeader>
+          <CardTitle>Form schemas</CardTitle>
+          <CardDescription>Edit text, options, and visibility logic</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Version</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {/* your data */}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+const root = createRoot(document.getElementById('root')!);
+root.render(<App />);
+```
+
+Use `className`, not `class`. This is React, not Preact.
+
+### Step 4 — HTML shell
+
+`src/shared/index.html.ts`:
+
+```ts
+export function indexHtml(opts: { bundleJs: string; bundleCss: string; title: string }) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${escapeHtml(opts.title)}</title>
+  <!-- Live workspace theme tokens, in order: workspace brand first, then app utilities. -->
+  <link rel="stylesheet" href="/_ensemble/brand/css">
+  <style>${opts.bundleCss}</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">${opts.bundleJs}</script>
+</body>
+</html>`;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c] as string));
+}
+```
+
+The bundle is **inlined as a string** rather than served as a separate asset. Reason: Cloudflare Workers can't serve static assets from `dist/` directly without Workers Sites. Inlining keeps the worker single-file and avoids that whole machinery for v0.0.1. For larger apps you'd move to Workers Static Assets or R2.
+
+### Step 5 — Worker entry
+
+`src/index.ts`:
+
+```ts
+import { defineGuestApp } from '@ensemble-edge/workspace/guest';
+import { createGuestWorker } from '@ensemble-edge/workspace/guest/cloudflare';
+import { Hono } from 'hono';
+import { indexHtml } from './shared/index.html.js';
+
+// Inline the built bundles. esbuild's --loader:.js=text would also work;
+// this just imports them as strings at build time.
+// @ts-ignore — virtual modules
+import bundleJs from '../dist/bundle.js?raw';
+// @ts-ignore
+import bundleCss from '../dist/bundle.css?raw';
+
+const router = new Hono();
+
+router.get('*', (c) => {
+  return c.html(indexHtml({
+    bundleJs,
+    bundleCss,
+    title: 'Quiz CMS',
+  }));
+});
+
+const app = defineGuestApp({
+  manifest: {
+    id: 'quiz-cms',
+    name: 'Quiz CMS',
+    version: '0.0.1',
+    icon: 'clipboard-list',
+    category: 'tool',
+    permissions: ['read:user', 'read:workspace'],
+    entry: '/',
+  },
+  fetch: (request) => router.fetch(request),
+});
+
+export default createGuestWorker(app);
+```
+
+The `?raw` import suffix is esbuild's text-loader convention. If your build setup doesn't recognize it, use this alternative pattern:
+
+```ts
+// Read bundle contents at build time and inline as a string
+const bundleJs = await import('fs').then(fs => fs.readFileSync('./dist/bundle.js', 'utf8'));
+```
+
+The router serves the same HTML shell for **every path** (`router.get('*', ...)`). React Router (or similar) inside the iframe handles deep-linking — `/apps/quiz-cms/schemas/:id` proxies to `/schemas/:id` at the worker, which still returns the same shell, which then renders the right page client-side.
+
+### Step 6 — `wrangler.toml`
+
+```toml
+name = "cl-quiz-cms"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+
+# No public routes — gateway-only access.
+# Workspace's [[services]] binding handles routing.
+
+[vars]
+WORKSPACE_ORIGIN = "https://workspace.example.com"
+```
+
+In `cl-workspace`'s `wrangler.toml`:
+
+```toml
+[[services]]
+binding = "QUIZ_CMS"
+service = "cl-quiz-cms"
+```
+
+### Step 7 — Build + deploy
+
+```bash
+cd workers/guests/quiz-cms
+pnpm install
+pnpm run build       # builds dist/bundle.js + dist/bundle.css
+wrangler deploy
+```
+
+Then redeploy `cl-workspace` to activate the binding, and insert the `guest_apps` row (see [§ Register the app](#step-5--register-the-app-in-guest_apps) further down for the SQL).
+
+### Verifying it looks native
+
+Once deployed and visible in the sidebar:
+
+1. **Open a core app first** (e.g., Brand Manager). Note the page padding, card border, table style, button look.
+2. **Open Quiz CMS**. The header, card, table, and buttons should look pixel-identical.
+3. **Change the workspace's brand color** in Brand Manager → Save. Refresh Quiz CMS. The card border, button color, accents should all shift to match the new brand. **This is the "lives in multiple workspaces, inherits the host theme" property working.**
+
+If something looks off:
+
+| Symptom | Likely cause |
+|---|---|
+| No styles at all | `bundle.css` didn't build, or HTML shell isn't loading it |
+| Colors look like default Tailwind, not workspace's | `/_ensemble/brand/css` link in HTML shell is missing or wrong |
+| Components render but layout is broken | Tailwind v4 `@source` not finding workspace UI sources — verify `@import '@ensemble-edge/workspace/ui/globals.css'` is the FIRST line |
+| Hydration error in console | React 18 strict mode + Radix mismatch — try removing `<React.StrictMode>` for now and report it |
+
+### Sharp edges to know about
+
+These are real and tested; they bit me building this recipe.
+
+1. **The `?raw` import suffix only works if your build tool recognizes it.** esbuild's default doesn't, but `esbuild --loader:.js=text --loader:.css=text` does. If neither works, fall back to `readFileSync` at worker startup OR use a build script that produces a `bundle-inline.ts` file that exports the strings.
+
+2. **`globals.css` MUST be the first thing in your Tailwind entry.** Workspace's design tokens have to land before any utility classes Tailwind generates, or the variable references in utilities resolve to undefined.
+
+3. **Don't mix `class` and `className`.** Workspace's UI is React; using `class` (Preact-style) silently fails to apply styles. If a component looks unstyled, this is almost always why.
+
+4. **React duplication is the most expensive bug you can hit.** Your worker imports React; workspace's UI peer-depends on React. If the consumer-side React and workspace-side React end up as two copies in the bundle, Radix's hooks break. Confirm with `grep -c '"react/jsx-runtime"' dist/bundle.js` — should be exactly 1. If it's 2+, see [§ Force a single React](#force-a-single-react).
+
+5. **Tailwind v4's `@source` is silent on misses.** A typo or wrong path produces zero output, not an error. If your custom classes don't generate, check `@source` first.
+
+### Force a single React
+
+If you hit React duplication, add to your esbuild command:
+
+```bash
+esbuild ... --alias:react=./node_modules/react --alias:react-dom=./node_modules/react-dom
+```
+
+Or in `package.json`'s `pnpm.overrides`:
+
+```json
+{
+  "pnpm": {
+    "overrides": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    }
+  }
+}
+```
+
+The `$name` syntax pins to whatever your top-level `dependencies.react` resolves to.
+
+### Calling workspace's API from your React app
+
+Inside the iframe, your React code can `fetch('/_ensemble/...')` and the gateway routes it through workspace's auth middleware automatically — the iframe is same-origin with the shell. You don't need to forward capability tokens for browser-originated calls (those are for *worker-to-workspace* calls from your guest worker's fetch handler).
+
+```tsx
+function useSchemas() {
+  const [schemas, setSchemas] = useState([]);
+  useEffect(() => {
+    fetch('/_ensemble/apps/quiz-cms/api/schemas')  // your own worker's API
+      .then(r => r.json())
+      .then(setSchemas);
+  }, []);
+  return schemas;
+}
+```
+
+Note: `/apps/quiz-cms/api/schemas` (browser URL) → `/api/schemas` (proxied to your worker) — the gateway strips the `/_ensemble/apps/<id>` prefix.
+
+---
+
+## HTML-string guest app (fallback)
+
+The original HTML-string pattern, preserved for JSON-only connectors or trivial admin views where shipping a React bundle is overkill. The architecture/registration/deployment steps are identical; only the response shape differs.
 
 ## File layout
 
