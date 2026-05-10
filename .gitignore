@@ -8,6 +8,10 @@ dist/
 .dev.vars
 package-lock.json
 *.tsbuildinfo
+
+# pnpm pack output (release artifacts — never committed on main).
+# Tagged release branches force-add packages/*/dist/ but not the tgz.
+*.tgz
 worker-configuration.d.ts
 packages/*/src/**/*.d.ts
 packages/*/src/**/*.d.ts.map

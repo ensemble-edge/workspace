@@ -97,6 +97,12 @@ export const SHELL_CSS = ${JSON.stringify(shellCss)};
 `;
 
   writeFileSync(join(distDir, 'assets.js'), moduleContent);
+
+  writeFileSync(
+    join(distDir, 'assets.d.ts'),
+    `export declare const SHELL_JS: string;\nexport declare const SHELL_CSS: string;\n`
+  );
+
   console.log('[shell] Assets module generated:', join(distDir, 'assets.js'));
 }
 

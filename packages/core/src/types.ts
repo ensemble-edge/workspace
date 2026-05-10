@@ -1,3 +1,4 @@
+/// <reference types="@cloudflare/workers-types" />
 /**
  * @ensemble-edge/core — Type Definitions
  *

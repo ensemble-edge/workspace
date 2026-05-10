@@ -1,20 +1,20 @@
 /**
  * @ensemble-edge/auth
  *
- * Re-export auth functionality from @ensemble-edge/core.
- * This package exists to allow independent versioning and imports.
+ * Thin re-export of auth functionality from @ensemble-edge/core.
  *
- * Usage:
- *   import { AuthService, authMiddleware } from '@ensemble-edge/auth';
+ * At build time, packages/auth/scripts/rewrite-imports.mjs rewrites the
+ * '@ensemble-edge/core/*' specifiers in dist/index.js into relative paths
+ * like '../../core/dist/*.js'. This is required because consumers install
+ * @ensemble-edge/workspace as a single tarball — @ensemble-edge/core is a
+ * directory inside the tarball, not a resolvable npm specifier.
  *
- * Or directly from core:
- *   import { AuthService, authMiddleware } from '@ensemble-edge/core/auth';
+ * If you need to add an export, just add it here using the @ensemble-edge/core
+ * specifier. The rewriter handles the rest.
  */
 
-// Re-export auth service and utilities
 export { AuthService, createAuthService } from '@ensemble-edge/core/services/auth';
 
-// Re-export JWT utilities
 export {
   signAccessToken,
   signRefreshToken,
@@ -24,14 +24,12 @@ export {
   REFRESH_TOKEN_EXPIRY,
 } from '@ensemble-edge/core/utils/jwt';
 
-// Re-export password utilities
 export {
   hashPassword,
   verifyPassword,
   validatePassword,
 } from '@ensemble-edge/core/utils/password';
 
-// Re-export cookie utilities
 export {
   setAccessTokenCookie,
   setRefreshTokenCookie,
@@ -40,15 +38,11 @@ export {
   getCookieOptionsForEnv,
 } from '@ensemble-edge/core/utils/cookies';
 
-// Re-export auth middleware
 export { auth, requireRole, requireOwnership, requirePermission } from '@ensemble-edge/core/middleware/auth';
-// Alias for backwards compatibility
 export { auth as authMiddleware } from '@ensemble-edge/core/middleware/auth';
 
-// Re-export auth routes
 export { createAuthRoutes } from '@ensemble-edge/core/routes/auth';
 
-// Re-export types
 export type {
   User,
   Membership,

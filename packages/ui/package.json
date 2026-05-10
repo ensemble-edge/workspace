@@ -11,6 +11,7 @@
     "./tailwind.config": "./tailwind.config.ts"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "ui:add": "npx shadcn@latest add",
     "ui:diff": "npx shadcn@latest diff",
     "ui:update": "npx shadcn@latest add --all --overwrite",

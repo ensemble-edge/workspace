@@ -63,9 +63,15 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 - `test:` Adding or updating tests
 - `chore:` Maintenance tasks
 
-## Changesets for Version Management
+## Releasing
 
-We use [Changesets](https://github.com/changesets/changesets) to manage versions and changelogs.
+To cut a new release (currently `@ensemble-edge/workspace`), see [RELEASING.md](./RELEASING.md). The whole flow is one command (`pnpm release <version>`), plus pushing the resulting branch and tag.
+
+Consumers install via git tarball — we don't publish to npm yet. RELEASING.md also documents the consumer integration story (peer deps, Tailwind v4 setup, subpath imports), which is what curalisto-app and other downstream projects rely on.
+
+## Changesets (optional, for pre-release notes)
+
+We use [Changesets](https://github.com/changesets/changesets) optionally for changelog drafting. The release flow doesn't require them — they're just nice-to-have for grouping change descriptions.
 
 ### When to Add a Changeset
 

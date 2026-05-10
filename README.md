@@ -6,10 +6,26 @@ Ensemble Workspace is a unified shell (sidebar, toolbar, viewport, AI panel) tha
 
 **Guest apps are the new website. Guest agents are the new employee.**
 
-## Quick Start
+## Using workspace in your own project
+
+Workspace ships as a single git tarball with subpath imports. We do not publish to npm yet.
 
 ```bash
-# Create a new workspace
+pnpm add github:ensemble-edge/workspace#v0.1.0
+```
+
+```ts
+import { createWorkspace } from '@ensemble-edge/workspace/core';
+import { hashPassword } from '@ensemble-edge/workspace/auth';
+import { Button } from '@ensemble-edge/workspace/ui';
+```
+
+> **The whole consumer story — peer deps, Tailwind v4 setup, subpath list, CF Workers bundling — lives in [RELEASING.md](./RELEASING.md). Read it before integrating.**
+
+## Quick Start (in-tree development)
+
+```bash
+# Create a new workspace from a template
 bun create ensemble my-workspace
 
 # Start development

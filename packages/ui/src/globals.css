@@ -1,8 +1,28 @@
 @import 'tailwindcss';
 
-@source '../../core/src/**/*.{ts,tsx}';
-@source '../../shell/src/**/*.{ts,tsx}';
-@source '../../../demos/*/src/**/*.{ts,tsx}';
+/*
+ * Source globs for Tailwind v4 to scan for utility usage.
+ *
+ * We scan TWO places so this CSS works in BOTH dev (in-tree) and installed:
+ *   - ./components, ./hooks, ./lib  — resolves in dev (this file is at packages/ui/src/)
+ *   - ../dist/components, ../dist/lib — resolves in installed (this file is at packages/ui/src/,
+ *     compiled JS lives at packages/ui/dist/). Class strings survive compilation
+ *     unchanged so Tailwind extracts them just fine from .js.
+ *
+ * Tailwind silently ignores @source globs that match nothing, so it's safe to
+ * list both paths regardless of which environment we're in.
+ *
+ * Consumers add their own @source for app sources AFTER importing this file:
+ *
+ *   @import '@ensemble-edge/workspace/ui/globals.css';
+ *   @source './src/**\/*.{ts,tsx}';
+ */
+@source './components/**/*.{ts,tsx}';
+@source './hooks/**/*.ts';
+@source './lib/**/*.ts';
+@source '../dist/components/**/*.js';
+@source '../dist/hooks/**/*.js';
+@source '../dist/lib/**/*.js';
 
 @custom-variant dark (&:is(.dark *));
 

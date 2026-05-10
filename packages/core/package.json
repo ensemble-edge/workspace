@@ -59,7 +59,7 @@
   "scripts": {
     "dev": "npm run build:shell && wrangler dev --local",
     "dev:types": "tsc --watch",
-    "build": "npm run build:shell && tsc",
+    "build": "tsc -p tsconfig.build.json",
     "build:shell": "cd ../shell && node build.js",
     "build:shell:prod": "cd ../shell && node build.js --prod",
     "typecheck": "tsc --noEmit",
@@ -73,9 +73,7 @@
     "better-sqlite3": "^12.8.0",
     "hono": "^4.0.0",
     "jose": "^5.0.0",
-    "lucide-react": "^0.469.0",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0"
+    "lucide-react": "^0.469.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240117.0",
@@ -85,13 +83,21 @@
     "bun": "^1.3.11",
     "esbuild": "^0.27.4",
     "postcss": "^8.4.38",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
     "tailwindcss": "^4.2.2",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.4.0",
     "wrangler": "^3.0.0"
   },
   "peerDependencies": {
-    "@cloudflare/workers-types": "^4.0.0"
+    "@cloudflare/workers-types": "^4.0.0",
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "react-dom": { "optional": true }
   },
   "license": "MIT"
 }
