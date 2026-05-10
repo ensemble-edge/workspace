@@ -100,18 +100,22 @@ console.log('  ✓ on main, clean tree');
 // Typecheck only the released packages. We intentionally skip
 // connectors/demos/templates — those aren't in the release surface and
 // historically have their own issues that shouldn't block a release.
+//
+// Each released package uses tsconfig.build.json if present, otherwise
+// tsconfig.json. Shell uses esbuild for its real build, but tsconfig.json
+// is still valid for typechecking.
 console.log('▶ Typechecking released packages...');
 const releasedDirs = [
-  'packages/core',
-  'packages/auth',
-  'packages/ui',
-  'packages/shell',
-  'packages/sdk',
-  'packages/guest/core',
-  'packages/guest/cloudflare',
+  { dir: 'packages/core',              config: 'tsconfig.build.json' },
+  { dir: 'packages/auth',              config: 'tsconfig.build.json' },
+  { dir: 'packages/ui',                config: 'tsconfig.build.json' },
+  { dir: 'packages/shell',             config: 'tsconfig.json' },
+  { dir: 'packages/sdk',               config: 'tsconfig.build.json' },
+  { dir: 'packages/guest/core',        config: 'tsconfig.build.json' },
+  { dir: 'packages/guest/cloudflare',  config: 'tsconfig.build.json' },
 ];
-for (const dir of releasedDirs) {
-  sh(`cd ${dir} && pnpm exec tsc -p tsconfig.build.json --noEmit`, { allowFail: false });
+for (const { dir, config } of releasedDirs) {
+  sh(`cd ${dir} && pnpm exec tsc -p ${config} --noEmit`, { allowFail: false });
 }
 
 // 2. Bump versions
