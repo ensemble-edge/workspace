@@ -111,9 +111,15 @@ console.log('▶ Typechecking released packages...');
 //   - shell: core uses its dist/assets.d.ts at type level
 //
 // Without these pre-builds, the typecheck loop fails on a cold tree.
-console.log('▶ Pre-building ui + shell (for typecheck path resolution)...');
+// Pre-build packages whose dist/ outputs other packages need to resolve
+// imports at typecheck time:
+//   - ui:         shell uses ui declarations via ../ui/dist (path-mapped)
+//   - shell:      core uses dist/assets.d.ts at type level
+//   - guest/core: guest/cloudflare imports @ensemble-edge/guest types
+console.log('▶ Pre-building ui + shell + guest/core for typecheck...');
 sh('cd packages/ui && pnpm exec tsc -p tsconfig.build.json', { allowFail: false });
 sh('cd packages/shell && node build.js', { allowFail: false });
+sh('cd packages/guest/core && pnpm exec tsc -p tsconfig.build.json', { allowFail: false });
 
 const releasedDirs = [
   { dir: 'packages/core',              config: 'tsconfig.build.json', strict: true },
