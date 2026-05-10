@@ -17,6 +17,10 @@ packages/*/src/**/*.d.ts
 packages/*/src/**/*.d.ts.map
 packages/*/src/**/*.js
 packages/*/src/**/*.js.map
+packages/*/*/src/**/*.d.ts
+packages/*/*/src/**/*.d.ts.map
+packages/*/*/src/**/*.js
+packages/*/*/src/**/*.js.map
 
 # Playwright compiled artifacts (keep .ts source files)
 playwright.config.js

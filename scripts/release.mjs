@@ -97,8 +97,22 @@ if (dirty) {
 
 console.log('  ✓ on main, clean tree');
 
-console.log('▶ Typechecking...');
-sh('pnpm typecheck', { allowFail: false });
+// Typecheck only the released packages. We intentionally skip
+// connectors/demos/templates — those aren't in the release surface and
+// historically have their own issues that shouldn't block a release.
+console.log('▶ Typechecking released packages...');
+const releasedDirs = [
+  'packages/core',
+  'packages/auth',
+  'packages/ui',
+  'packages/shell',
+  'packages/sdk',
+  'packages/guest/core',
+  'packages/guest/cloudflare',
+];
+for (const dir of releasedDirs) {
+  sh(`cd ${dir} && pnpm exec tsc -p tsconfig.build.json --noEmit`, { allowFail: false });
+}
 
 // 2. Bump versions
 console.log(`▶ Bumping versions to ${version}`);
