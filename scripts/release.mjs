@@ -105,11 +105,15 @@ console.log('  ✓ on main, clean tree');
 // tsconfig.json. Shell uses esbuild for its real build, but tsconfig.json
 // is still valid for typechecking.
 console.log('▶ Typechecking released packages...');
-// Pre-build ui so shell can resolve @ensemble-edge/ui through ui's dist
-// (where @/* aliases are already resolved by tsc). Without this, shell's
-// typecheck follows ui's src/ and trips on aliases shell can't resolve.
-console.log('▶ Pre-building ui (for shell typecheck path resolution)...');
+// Pre-build the packages whose dist/ outputs other packages need at
+// typecheck time:
+//   - ui: shell uses its declarations via ../ui/dist (path-mapped)
+//   - shell: core uses its dist/assets.d.ts at type level
+//
+// Without these pre-builds, the typecheck loop fails on a cold tree.
+console.log('▶ Pre-building ui + shell (for typecheck path resolution)...');
 sh('cd packages/ui && pnpm exec tsc -p tsconfig.build.json', { allowFail: false });
+sh('cd packages/shell && node build.js', { allowFail: false });
 
 const releasedDirs = [
   { dir: 'packages/core',              config: 'tsconfig.build.json', strict: true },
