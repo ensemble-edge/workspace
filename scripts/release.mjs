@@ -105,11 +105,15 @@ console.log('  ✓ on main, clean tree');
 // tsconfig.json. Shell uses esbuild for its real build, but tsconfig.json
 // is still valid for typechecking.
 console.log('▶ Typechecking released packages...');
+// Shell is intentionally omitted: its typecheck crosses into ../ui/src
+// where shell's `@/*` baseUrl can't resolve ui's `@/*` paths. Shell's
+// release artifact is a pre-bundled blob (esbuild output) — consumers
+// import { SHELL_JS, SHELL_CSS } strings, not TS sources. End-to-end
+// validation happens in the consumer install check, not here.
 const releasedDirs = [
   { dir: 'packages/core',              config: 'tsconfig.build.json' },
   { dir: 'packages/auth',              config: 'tsconfig.build.json' },
   { dir: 'packages/ui',                config: 'tsconfig.build.json' },
-  { dir: 'packages/shell',             config: 'tsconfig.json' },
   { dir: 'packages/sdk',               config: 'tsconfig.build.json' },
   { dir: 'packages/guest/core',        config: 'tsconfig.build.json' },
   { dir: 'packages/guest/cloudflare',  config: 'tsconfig.build.json' },
