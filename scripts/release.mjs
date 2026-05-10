@@ -105,21 +105,35 @@ console.log('  ✓ on main, clean tree');
 // tsconfig.json. Shell uses esbuild for its real build, but tsconfig.json
 // is still valid for typechecking.
 console.log('▶ Typechecking released packages...');
-// Shell is intentionally omitted: its typecheck crosses into ../ui/src
-// where shell's `@/*` baseUrl can't resolve ui's `@/*` paths. Shell's
-// release artifact is a pre-bundled blob (esbuild output) — consumers
-// import { SHELL_JS, SHELL_CSS } strings, not TS sources. End-to-end
-// validation happens in the consumer install check, not here.
+// Pre-build ui so shell can resolve @ensemble-edge/ui through ui's dist
+// (where @/* aliases are already resolved by tsc). Without this, shell's
+// typecheck follows ui's src/ and trips on aliases shell can't resolve.
+console.log('▶ Pre-building ui (for shell typecheck path resolution)...');
+sh('cd packages/ui && pnpm exec tsc -p tsconfig.build.json', { allowFail: false });
+
 const releasedDirs = [
-  { dir: 'packages/core',              config: 'tsconfig.build.json' },
-  { dir: 'packages/auth',              config: 'tsconfig.build.json' },
-  { dir: 'packages/ui',                config: 'tsconfig.build.json' },
-  { dir: 'packages/sdk',               config: 'tsconfig.build.json' },
-  { dir: 'packages/guest/core',        config: 'tsconfig.build.json' },
-  { dir: 'packages/guest/cloudflare',  config: 'tsconfig.build.json' },
+  { dir: 'packages/core',              config: 'tsconfig.build.json', strict: true },
+  { dir: 'packages/auth',              config: 'tsconfig.build.json', strict: true },
+  { dir: 'packages/ui',                config: 'tsconfig.build.json', strict: true },
+  // Shell has pre-existing internal type errors (Button variant mismatches,
+  // implicit anys in nav state). Bundle still works via esbuild. Surface
+  // the errors as a warning so we can fix them in a follow-up without
+  // blocking the release.
+  { dir: 'packages/shell',             config: 'tsconfig.json',       strict: false },
+  { dir: 'packages/sdk',               config: 'tsconfig.build.json', strict: true },
+  { dir: 'packages/guest/core',        config: 'tsconfig.build.json', strict: true },
+  { dir: 'packages/guest/cloudflare',  config: 'tsconfig.build.json', strict: true },
 ];
-for (const { dir, config } of releasedDirs) {
-  sh(`cd ${dir} && pnpm exec tsc -p ${config} --noEmit`, { allowFail: false });
+for (const { dir, config, strict } of releasedDirs) {
+  const cmd = `cd ${dir} && pnpm exec tsc -p ${config} --noEmit`;
+  if (strict) {
+    sh(cmd, { allowFail: false });
+  } else {
+    const r = spawnSync('sh', ['-c', cmd], { cwd: repoRoot, stdio: 'inherit' });
+    if (r.status !== 0) {
+      console.warn(`  ⚠ ${dir} typecheck has pre-existing errors (non-blocking)`);
+    }
+  }
 }
 
 // 2. Bump versions

@@ -9,7 +9,9 @@
     "declarationMap": true,
     "composite": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@ensemble-edge/ui": ["../ui/dist/index.d.ts"],
+      "@ensemble-edge/ui/*": ["../ui/dist/*"]
     }
   },
   "include": ["src/**/*"],
