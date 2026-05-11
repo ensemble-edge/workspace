@@ -67,7 +67,29 @@ export interface GuestAppManifest {
 
   /** Health check endpoint (defaults to /health) */
   health_endpoint?: string;
+
+  /**
+   * Rendering tier — how the host shell renders this app's UI.
+   *
+   *   'component'  Default for v0.1.9+. Host imports /ui/component.js
+   *                and renders the React component directly in its own
+   *                tree. No iframe; pixel-identical to core apps.
+   *   'iframe'     Same-origin iframe loading workspace's runtime.
+   *   'sandboxed'  Strict iframe sandbox for untrusted code.
+   *
+   * The host's `guest_apps.tier` column is the source of truth; this
+   * field is what the guest worker advertises in its own manifest so
+   * tooling and the worker stay in sync. The gateway overlays the
+   * D1 value into the manifest response when the shell asks.
+   */
+  tier?: GuestAppTier;
 }
+
+/**
+ * Render tier — the contract between the guest worker and the host shell.
+ * Mirrored in `guest_apps.tier` in the workspace DB.
+ */
+export type GuestAppTier = 'component' | 'iframe' | 'sandboxed';
 
 /**
  * Permissions that a guest app can request.

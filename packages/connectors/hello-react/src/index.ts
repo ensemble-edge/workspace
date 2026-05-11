@@ -55,6 +55,7 @@ const app = defineGuestApp({
     category: 'tool',
     permissions: ['read:user', 'read:workspace'],
     entry: '/',
+    tier: 'iframe',
   },
   fetch: (request) => router.fetch(request),
 });

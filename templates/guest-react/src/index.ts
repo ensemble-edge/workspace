@@ -50,6 +50,7 @@ const app = defineGuestApp({
     category: 'tool',
     permissions: ['read:user', 'read:workspace'],
     entry: '/',
+    tier: 'iframe',  // ← same-origin iframe; must match guest_apps.tier
   },
   fetch: (request) => router.fetch(request),
 });

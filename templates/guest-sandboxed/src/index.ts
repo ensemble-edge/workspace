@@ -59,6 +59,7 @@ const app = defineGuestApp({
     category: 'tool',
     permissions: ['read:user', 'read:workspace'],
     entry: '/',
+    tier: 'sandboxed',  // ← strict iframe sandbox; must match guest_apps.tier
   },
   fetch: (request) => router.fetch(request),
 });

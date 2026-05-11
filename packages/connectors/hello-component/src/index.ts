@@ -36,6 +36,7 @@ const app = defineGuestApp({
     category: 'tool',
     permissions: ['read:user', 'read:workspace'],
     entry: '/',
+    tier: 'component',
   },
   fetch: (request) => router.fetch(request),
 });

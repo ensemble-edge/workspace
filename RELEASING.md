@@ -71,28 +71,38 @@ Available subpaths (full list in [`package.json`](./package.json) `exports`):
 
 ## Building a guest app
 
-`@ensemble-edge/workspace` ships a scaffold command for creating new guest apps that render natively inside the workspace shell. Consumers run:
+`@ensemble-edge/workspace` ships three tiers of guest apps (see [the guide](./docs/guides/building-a-guest-worker.md)) and a scaffold command for creating them:
 
 ```bash
-# After installing @ensemble-edge/workspace:
+# Component-tier (default — renders in host React tree, pixel-native):
 node node_modules/@ensemble-edge/workspace/scripts/create-guest-app.mjs \
-  ./workers/guests/my-app \
-  --name "My App" \
-  --id my-app \
-  --icon clipboard-list
+  ./apps/my-app --name "My App" --id my-app --icon clipboard-list
 
-cd workers/guests/my-app
-pnpm install
-pnpm run build
-pnpm run dev          # local smoke test
-pnpm run deploy
+# Iframe-tier (same-origin iframe with workspace runtime):
+... --tier iframe
+
+# Sandboxed-tier (strict iframe sandbox, postMessage-only):
+... --tier sandboxed
+
+cd apps/my-app
+pnpm install && pnpm run build && pnpm run deploy
 ```
 
-The scaffold copies [`templates/guest-react/`](./templates/guest-react/) (a parameterized version of [`packages/connectors/hello-react/`](./packages/connectors/hello-react/)), substitutes the placeholders, and pins `@ensemble-edge/workspace` to the release tag it shipped in. A scaffolded app is byte-identical to hello-react in bundle profile (~125 KB gzipped JS, ~9 KB gzipped CSS).
+The scaffold picks one of [`templates/guest-component/`](./templates/guest-component/), [`templates/guest-react/`](./templates/guest-react/), or [`templates/guest-sandboxed/`](./templates/guest-sandboxed/) based on the `--tier` flag. Each maps to a reference connector (`packages/connectors/hello-{component,react,sandboxed}/`) that's verified by the release preflight — if any reference stops building, the release fails.
 
-The reference connector at `packages/connectors/hello-react/` is verified by the release script's preflight — if it stops building, the release fails. So the recipe is always known-working when a tag goes live.
+### About `tier`: two places, one source of truth
 
-Full architecture, debug order, and sharp edges live in [`docs/guides/building-a-guest-worker.md`](./docs/guides/building-a-guest-worker.md) and the connector's [README](./packages/connectors/hello-react/README.md).
+The `tier` value appears in two places — this is intentional but worth knowing:
+
+1. **`guest_apps.tier`** (D1, workspace-side) — set when the operator installs the app. The **host's source of truth.** The gateway uses this to decide rendering strategy and the shell reads it from the manifest response.
+2. **`manifest.tier`** (the value passed to `defineGuestApp({ manifest: {...} })` in your worker) — what the guest worker advertises about itself.
+
+When the shell asks for `/_ensemble/apps/<id>/manifest`, the gateway returns the guest's manifest with `tier` overlaid from D1 (D1 wins). So if the two values disagree, **D1's value is what the shell sees.** Set them to match by convention — the scaffold templates do this for you.
+
+Bundle profiles (verified by the preflight):
+- `component`: ~500 bytes gzipped (factory calls only)
+- `iframe`: ~1 KB gzipped + ~125 KB cached workspace runtime
+- `sandboxed`: whatever the guest ships
 
 ---
 

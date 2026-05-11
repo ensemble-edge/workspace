@@ -28,6 +28,7 @@ const app = defineGuestApp({
     category: 'tool',
     permissions: ['read:user', 'read:workspace'],
     entry: '/',
+    tier: 'component',  // ← renders in host React tree; must match guest_apps.tier
   },
   fetch: (request) => router.fetch(request),
 });

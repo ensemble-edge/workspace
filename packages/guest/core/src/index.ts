@@ -38,6 +38,7 @@ export {
 export type {
   // Manifest types
   GuestAppManifest,
+  GuestAppTier,
   Permission,
   WidgetDefinition,
   SearchConfig,
