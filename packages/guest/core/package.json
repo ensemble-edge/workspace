@@ -1,6 +1,6 @@
 {
   "name": "@ensemble-edge/guest",
-  "version": "0.0.1",
+  "version": "0.1.9",
   "type": "module",
   "description": "Guest app SDK for Ensemble Workspace — platform-agnostic core",
   "main": "dist/index.js",
