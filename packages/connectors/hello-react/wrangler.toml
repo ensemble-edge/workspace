@@ -1,0 +1,14 @@
+name = "hello-react-connector"
+main = "src/index.ts"
+compatibility_date = "2026-04-08"
+compatibility_flags = ["nodejs_compat"]
+
+[dev]
+port = 8789
+
+# Inline built bundles as text modules.
+# `dist/*.bundle.js` and `dist/*.bundle.css` become string imports in the worker.
+[[rules]]
+type = "Text"
+globs = ["**/*.bundle.js", "**/*.bundle.css"]
+fallthrough = false
