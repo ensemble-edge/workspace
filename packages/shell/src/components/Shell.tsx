@@ -82,8 +82,14 @@ export function Shell() {
           </Breadcrumb>
         </header>
 
-        {/* Main content - scrollable */}
-        <div className="flex-1 overflow-y-auto" style={{ padding: 'var(--content-padding, 1.5rem)' }}>
+        {/* Main content — scrollable.
+            `flex flex-col` is load-bearing: it establishes the flex context
+            so child `flex-1` (e.g. AppViewPage's iframe wrapper) actually
+            grows. Without it, iframes collapse to their intrinsic ~150px
+            and look broken even though the iframe content is rendering
+            correctly. Diagnosed in v0.1.6 by curalisto's agent in a
+            deployed v0.1.5 environment. */}
+        <div className="flex-1 overflow-y-auto flex flex-col" style={{ padding: 'var(--content-padding, 1.5rem)' }}>
           <Viewport />
         </div>
       </SidebarInset>
