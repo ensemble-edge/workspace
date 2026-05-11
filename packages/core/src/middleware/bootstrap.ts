@@ -23,7 +23,9 @@ const BOOTSTRAP_ALLOWED_PATHS = [
   '/_ensemble/bootstrap',
   '/_ensemble/brand/css',
   '/_ensemble/brand/theme',
-  '/_ensemble/shell/',  // Shell assets must be served for the bootstrap UI
+  '/_ensemble/shell/',     // Shell assets must be served for the bootstrap UI
+  '/_ensemble/runtime/',   // Guest-runtime assets (workspace-agnostic, public)
+  '/_ensemble/version',    // Diagnostic endpoint (workspace-agnostic, public)
   '/health',
 ];
 
