@@ -182,16 +182,20 @@ if (!dryRun) {
 console.log('▶ Verifying reference connector (hello-react) builds');
 if (!dryRun) {
   sh('cd packages/connectors/hello-react && pnpm run build');
-  // Spot-checks:
+  // Spot-checks for the v0.1.5+ runtime-based architecture:
   //  - both bundles produced
-  //  - the JS bundle is tiny (under 10KB unminified — proves React isn't bundled)
-  //  - the JS calls the runtime (proves jsx-runtime shim is working)
+  //  - JS bundle is tiny (under 10KB unminified — proves React isn't bundled)
+  //  - JS references the runtime (globalThis.Ensemble — proves jsx-runtime shim wired)
+  //
+  // Also verify the runtime CSS itself contains the design tokens (since
+  // that's where bg-background etc. live in this architecture, not in the
+  // per-guest CSS).
   sh(
     'test -s packages/connectors/hello-react/dist/app.bundle.js && ' +
     'test -s packages/connectors/hello-react/dist/app.bundle.css && ' +
     'test "$(wc -c < packages/connectors/hello-react/dist/app.bundle.js)" -lt 10000 && ' +
-    'grep -q "window.Ensemble" packages/connectors/hello-react/dist/app.bundle.js && ' +
-    'grep -q "bg-background" packages/connectors/hello-react/dist/app.bundle.css'
+    'grep -q "Ensemble" packages/connectors/hello-react/dist/app.bundle.js && ' +
+    'grep -q "bg-background" packages/guest-runtime/dist/runtime.css'
   );
 }
 
