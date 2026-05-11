@@ -1,0 +1,1 @@
+{"version":3,"file":"guest-gateway.d.ts","sourceRoot":"","sources":["../../src/routes/guest-gateway.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;;;;GAeG;AAEH,OAAO,EAAE,IAAI,EAAE,MAAM,MAAM,CAAC;AAC5B,OAAO,KAAK,EAAE,GAAG,EAAE,gBAAgB,EAAE,MAAM,UAAU,CAAC;AAgCtD;;GAEG;AACH,wBAAgB,wBAAwB;cAE1B,GAAG;eACF,gBAAgB;0CAmL9B"}
