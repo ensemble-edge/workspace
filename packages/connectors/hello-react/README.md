@@ -2,6 +2,16 @@
 
 The reference guest app. **Read this file before writing your own.** Everything here is verified to build, deploy, and serve a valid HTML response — but pixel-native rendering inside the host shell only happens when this is installed in a running workspace.
 
+> **To start a new guest app, don't copy this directory by hand.** Run the scaffold command:
+>
+> ```bash
+> node node_modules/@ensemble-edge/workspace/scripts/create-guest-app.mjs \
+>   ./workers/guests/my-app \
+>   --name "My App" --id my-app --icon clipboard-list
+> ```
+>
+> The scaffold copies [`templates/guest-react/`](../../../templates/guest-react/) — which is this same code, parameterized — and fills in your names. The hello-react connector here is the **reference** (verified by the release pipeline); the scaffold is the **starter** (you customize it).
+
 ## What it demonstrates
 
 - Cloudflare Worker that registers as a guest app via `@ensemble-edge/guest` + `@ensemble-edge/guest-cloudflare`

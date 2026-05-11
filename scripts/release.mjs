@@ -153,10 +153,39 @@ for (const p of releasedPackages) {
   bumpVersion(`${p.dir}/package.json`, version);
 }
 
+// 2a. Update the guest-react template's pinned workspace ref to match.
+// Consumers running `create-guest-app` get a template whose package.json
+// points at the SAME tag we're about to cut — works the moment the tag
+// goes live. Without this, a fresh scaffold would reference a stale version.
+console.log(`▶ Updating templates/guest-react package.json ref to v${version}`);
+if (!dryRun) {
+  const templatePkgPath = join(repoRoot, 'templates/guest-react/package.json');
+  const templatePkg = JSON.parse(readFileSync(templatePkgPath, 'utf8'));
+  templatePkg.dependencies['@ensemble-edge/workspace'] =
+    `github:ensemble-edge/workspace#v${version}`;
+  writeFileSync(templatePkgPath, JSON.stringify(templatePkg, null, 2) + '\n');
+}
+
 // 3. Build
 console.log('▶ Building all packages');
 if (!dryRun) {
   sh('node scripts/build-all.mjs');
+}
+
+// 3a. Verify the reference connector still builds.
+// hello-react is the canonical "React-native guest app" example. If it stops
+// building, the recipe documented in docs/guides/building-a-guest-worker.md
+// + packages/connectors/hello-react/README.md is broken — meaning the next
+// person to follow the guide hits an error we shipped. Fail the release here.
+console.log('▶ Verifying reference connector (hello-react) builds');
+if (!dryRun) {
+  sh('cd packages/connectors/hello-react && pnpm run build');
+  // Spot-check the output to catch silent regressions in Tailwind/CSS chain.
+  sh(
+    'test -s packages/connectors/hello-react/dist/app.bundle.js && ' +
+    'test -s packages/connectors/hello-react/dist/app.bundle.css && ' +
+    'grep -q "bg-background" packages/connectors/hello-react/dist/app.bundle.css'
+  );
 }
 
 // 4. Create release branch
@@ -168,7 +197,7 @@ sh(`git checkout -b ${releaseBranch}`, { write: true });
 console.log('▶ Staging dist artifacts');
 const distGlobs = releasedPackages.map((p) => `${p.dir}/dist`).join(' ');
 sh(`git add -f ${distGlobs}`, { write: true });
-sh('git add package.json packages/*/package.json packages/guest/*/package.json', { write: true });
+sh('git add package.json packages/*/package.json packages/guest/*/package.json templates/guest-react/package.json', { write: true });
 
 // 6. Commit and tag
 console.log(`▶ Committing and tagging v${version}`);

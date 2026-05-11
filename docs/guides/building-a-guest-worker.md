@@ -100,14 +100,34 @@ src/app.tsx     → esbuild     → dist/app.bundle.js
 
 ### To build your own React-native guest app
 
-Copy `packages/connectors/hello-react/` into your monorepo as a starting point. Then:
+**Use the scaffold command** instead of copying files manually:
 
-1. Rename the worker (`wrangler.toml`'s `name`)
-2. Rename the manifest (`src/index.ts`'s `manifest.id`, `manifest.name`)
-3. Edit `src/app.tsx` to render your actual UI using `@ensemble-edge/ui` components
-4. Optionally split into multiple pages — add `react-router` or roll your own routing inside the iframe; the worker still serves the same shell on every path
+```bash
+# From a consumer repo where @ensemble-edge/workspace is already installed:
+node node_modules/@ensemble-edge/workspace/scripts/create-guest-app.mjs \
+  ./workers/guests/my-app \
+  --name "My App" --id my-app --icon clipboard-list
+```
 
-Everything else — `wrangler.toml`'s Text rules, the Tailwind entry, the bundle inlining in `src/index.ts`, the `predeploy` hook — stays the same.
+This:
+
+1. Copies [`templates/guest-react/`](../../templates/guest-react/) to your target directory
+2. Replaces `{{APP_NAME}}`, `{{APP_ID}}`, `{{ICON}}`, `{{WORKER_NAME}}`, `{{BINDING_NAME}}` across every file
+3. Pins `@ensemble-edge/workspace` to the same release tag you installed
+4. Prints the next-step commands
+
+Then:
+
+```bash
+cd workers/guests/my-app
+pnpm install
+pnpm run build
+pnpm run dev      # local smoke test on :8789
+```
+
+Edit `src/app.tsx` to render your actual UI. Everything else — `wrangler.toml`'s Text rules, the Tailwind entry, the bundle inlining in `src/index.ts`, the `predeploy` hook — stays the same.
+
+The reference implementation at [`packages/connectors/hello-react/`](../../packages/connectors/hello-react/) is verified to build on every release (the release script runs its build as a preflight). If your scaffold doesn't behave like hello-react does, that's the diff to investigate.
 
 ### Debugging order, if your app doesn't render
 

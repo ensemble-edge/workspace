@@ -105,6 +105,8 @@
     "packages/guest/core/README.md",
     "packages/guest/cloudflare/dist",
     "packages/guest/cloudflare/README.md",
+    "scripts/create-guest-app.mjs",
+    "templates/guest-react/**",
     "RELEASING.md",
     "LICENSE",
     "README.md"
