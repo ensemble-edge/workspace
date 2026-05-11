@@ -16,6 +16,13 @@ function indexHtml(title: string): string {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>${escapeHtml(title)}</title>
   <link rel="stylesheet" href="/_ensemble/brand/css">
+  <style>
+    /* Minimal iframe-body reset so workspace's brand tokens are the only
+       authority on layout/colors. Without this, default 8px UA margin
+       on body misaligns the React app vs. the shell's content area. */
+    html, body { margin: 0; padding: 0; min-height: 100%; background: hsl(var(--background)); color: hsl(var(--foreground)); }
+    #root { min-height: 100%; }
+  </style>
   <style>${bundleCss as string}</style>
 </head>
 <body>

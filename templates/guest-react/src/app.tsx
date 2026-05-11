@@ -5,14 +5,19 @@ import {
 } from '@ensemble-edge/workspace/ui';
 
 function App() {
+  // Layout matches core app pages — see hello-react reference connector.
+  // Outer: space-y-6 between header and content. No bg-background or
+  // min-h-screen — the iframe inherits the workspace theme via
+  // /_ensemble/brand/css and fills its container via the shell's flex layout.
   return (
-    <div className="min-h-screen bg-background text-foreground p-8">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold">{{APP_NAME}}</h1>
+    <div className="space-y-6 p-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">{{APP_NAME}}</h1>
         <p className="text-muted-foreground">
           A new guest app — replace this placeholder with your real UI.
         </p>
-      </header>
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle>Getting started</CardTitle>

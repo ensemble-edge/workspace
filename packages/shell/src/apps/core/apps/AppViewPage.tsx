@@ -78,11 +78,16 @@ export function AppViewPage() {
   const appUrl = `/_ensemble/apps/${appId}${subpath}`;
 
   return (
-    <div className="flex flex-1">
+    // flex-1 on the container, AND on the iframe — without flex-1 on the
+    // iframe itself, the parent's flex layout doesn't allocate space and
+    // the iframe collapses to its intrinsic 150px height. `w-full` alone
+    // isn't enough because iframes are replaced elements; they need an
+    // explicit "fill the available space" rule from the flex parent.
+    <div className="flex flex-1 flex-col">
       <iframe
         ref={iframeRef}
         src={appUrl}
-        className="h-full w-full border-0"
+        className="flex-1 w-full border-0 block"
         title={appInfo?.name || appId}
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
       />

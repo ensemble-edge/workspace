@@ -11,20 +11,27 @@ function App() {
     { id: 'demographics', name: 'Demographics', version: '0.0.1' },
   ];
 
+  // Layout matches core app pages (see packages/shell/src/apps/core/brand/BrandPage.tsx):
+  //   - Outer container: space-y-6 between header block and content blocks
+  //   - Header block: `text-3xl font-bold tracking-tight` h1 + muted-foreground p
+  //   - NO bg-background or min-h-screen — the iframe's body inherits those
+  //     from /_ensemble/brand/css, and the iframe itself fills its container
+  //     via the shell's AppViewPage flex layout.
   return (
-    <div className="min-h-screen bg-background text-foreground p-8">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold">Hello, React</h1>
+    <div className="space-y-6 p-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Hello, React</h1>
         <p className="text-muted-foreground">
           A reference guest app using @ensemble-edge/ui inside an iframe.
         </p>
-      </header>
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle>Form schemas (demo data)</CardTitle>
           <CardDescription>
             This renders with the host workspace&apos;s brand tokens. Change the brand
-            in workspace settings → this view follows.
+            in workspace settings — this view follows.
           </CardDescription>
         </CardHeader>
         <CardContent>

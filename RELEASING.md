@@ -26,11 +26,13 @@ pnpm add github:ensemble-edge/workspace#v0.2.0
 
 ## TL;DR for consumers
 
-Add the package and a pinned tag (NOT `main` — see [§ Why pin to a tag](#why-pin-to-a-tag) below):
+Add the package and a pinned tag (NOT `main` — see [§ Why pin to a tag](#why-pin-to-a-tag) below). Use whichever release is current — at time of last RELEASING.md update, that's v0.1.4:
 
 ```bash
-pnpm add github:ensemble-edge/workspace#v0.1.0
+pnpm add github:ensemble-edge/workspace#v0.1.4
 ```
+
+See [GitHub releases](https://github.com/ensemble-edge/workspace/releases) (or `git tag --list 'v*'` on the repo) for the latest tag.
 
 Import via subpath — there is **no root export** by design (see [§ Design choices](#design-choices)):
 
@@ -64,6 +66,47 @@ Available subpaths (full list in [`package.json`](./package.json) `exports`):
 | `/sdk` | Extension hooks: `useTheme`, `useAuth`, `useWorkspace`, `useEvents` |
 | `/guest` | Platform-agnostic guest-app SDK |
 | `/guest/cloudflare` | CF Workers adapter for guest apps |
+
+---
+
+## Building a guest app
+
+`@ensemble-edge/workspace` ships a scaffold command for creating new guest apps that render natively inside the workspace shell. Consumers run:
+
+```bash
+# After installing @ensemble-edge/workspace:
+node node_modules/@ensemble-edge/workspace/scripts/create-guest-app.mjs \
+  ./workers/guests/my-app \
+  --name "My App" \
+  --id my-app \
+  --icon clipboard-list
+
+cd workers/guests/my-app
+pnpm install
+pnpm run build
+pnpm run dev          # local smoke test
+pnpm run deploy
+```
+
+The scaffold copies [`templates/guest-react/`](./templates/guest-react/) (a parameterized version of [`packages/connectors/hello-react/`](./packages/connectors/hello-react/)), substitutes the placeholders, and pins `@ensemble-edge/workspace` to the release tag it shipped in. A scaffolded app is byte-identical to hello-react in bundle profile (~125 KB gzipped JS, ~9 KB gzipped CSS).
+
+The reference connector at `packages/connectors/hello-react/` is verified by the release script's preflight — if it stops building, the release fails. So the recipe is always known-working when a tag goes live.
+
+Full architecture, debug order, and sharp edges live in [`docs/guides/building-a-guest-worker.md`](./docs/guides/building-a-guest-worker.md) and the connector's [README](./packages/connectors/hello-react/README.md).
+
+---
+
+## What ships in each release
+
+| Path in tarball | What it's for |
+|---|---|
+| `packages/*/dist/` | Built library code for each released package (`@ensemble-edge/workspace/core`, `/auth`, `/ui`, `/shell`, `/sdk`, `/guest`, `/guest/cloudflare`) |
+| `packages/ui/src/globals.css` | Tailwind v4 entry consumers `@import` |
+| `scripts/create-guest-app.mjs` | Scaffold command (v0.1.3+) |
+| `templates/guest-react/` | Parameterized starter template (v0.1.3+) |
+| `RELEASING.md`, `LICENSE`, `README.md` | Documentation |
+
+Not shipped (intentionally): `packages/connectors/*` (they're development reference + CI verification, not library code), `packages/cli/` (deferred to a future release), test files, source maps.
 
 ---
 
@@ -102,14 +145,15 @@ That's the entire integration. Tailwind v4 then walks both your sources and work
 
 ## How releases work mechanically
 
-`scripts/release.mjs` does six things, in order:
+`scripts/release.mjs` does these things, in order:
 
-1. **Preflight** — checks you're on `main`, the tree is clean, and `pnpm typecheck` passes.
-2. **Version bump** — writes the new version to the root `package.json` and to every released subpackage's `package.json` (skipping `@ensemble-edge/cli`, which is deferred).
+1. **Preflight** — checks you're on `main`, the tree is clean, and `pnpm typecheck` passes for every released package (v0.1.1: shell is warn-only; ui must build first so its `dist/` declarations exist for shell's path mapping).
+2. **Version bump** — writes the new version to the root `package.json` + every released subpackage's `package.json` (skipping `@ensemble-edge/cli`). **Also bumps `templates/guest-react/package.json`** so a fresh `create-guest-app` scaffold always pins the version it shipped in.
 3. **Build** — runs `scripts/build-all.mjs`, which compiles all seven released packages in topological order using the root's tsc (NOT per-package `pnpm run build` — that fails on consumer installs, see [§ Design choices](#design-choices)).
-4. **Cross-package rewrite** — runs `scripts/rewrite-cross-package-imports.mjs`, which fixes up bare `@ensemble-edge/*` specifiers and `@/*` aliases in the built dist files so they resolve as relative paths inside the single tarball. **This is the load-bearing piece** — without it, `@ensemble-edge/auth` would import `@ensemble-edge/core/services/auth` and consumers couldn't resolve it.
-5. **Release branch** — creates `release/v<version>` off `main`, force-adds `packages/*/dist/`, commits and tags.
-6. **Print push instructions** (doesn't push automatically — you do that).
+4. **Reference connector check (v0.1.3+)** — builds [`packages/connectors/hello-react/`](./packages/connectors/hello-react/) end-to-end (esbuild + Tailwind v4) and spot-checks that `dist/app.bundle.css` contains the `.bg-background` utility. If the recipe documented in the [guest-worker guide](./docs/guides/building-a-guest-worker.md) stops compiling, the release fails here. The reference example is load-bearing.
+5. **Cross-package rewrite** — runs `scripts/rewrite-cross-package-imports.mjs`, which fixes up bare `@ensemble-edge/*` specifiers and `@/*` aliases in the built dist files so they resolve as relative paths inside the single tarball. **This is the load-bearing piece for cross-package imports** — without it, `@ensemble-edge/auth` would import `@ensemble-edge/core/services/auth` and consumers couldn't resolve it.
+6. **Release branch** — creates `release/v<version>` off `main`, force-adds `packages/*/dist/`, includes the bumped `templates/guest-react/package.json`, commits and tags.
+7. **Print push instructions** (doesn't push automatically — you do that).
 
 Useful flags:
 
