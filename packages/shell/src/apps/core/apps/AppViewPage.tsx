@@ -173,19 +173,94 @@ function sendContext(iframe: HTMLIFrameElement) {
   // Security note: the messages we send are not sensitive (just brand
   // tokens and viewport state); auth happens via gateway-injected headers.
   try {
+    // 1. Send the host's CSS variables. This is what makes the iframe
+    //    visually match the host: padding, fonts, radius, colors all
+    //    come from the SAME values the host's <main> wrapper is using,
+    //    not from /_ensemble/brand/css's fallback defaults.
+    iframe.contentWindow?.postMessage(
+      { type: 'ensemble:cssVars', v: 1, payload: snapshotHostCssVars() },
+      '*',
+    );
+
+    // 2. Send the context (path, etc.)
     iframe.contentWindow?.postMessage(
       {
         type: 'ensemble:context',
         v: 1,
         payload: {
           path: window.location.pathname,
-          // Brand tokens are already loaded into the iframe via
-          // /_ensemble/brand/css — we don't need to send them here.
         },
       },
       '*',
     );
   } catch {
     /* iframe may not be ready; the guest will retry by sending another ready */
+  }
+}
+
+/**
+ * Build a snapshot of every CSS custom property currently set on
+ * document.documentElement (the host's :root). We have to enumerate
+ * stylesheet rules to find them — getComputedStyle doesn't enumerate
+ * custom properties on its own.
+ *
+ * The cost is one walk of the workspace's small set of stylesheets at
+ * mount time. Cached values mean re-pushes (on settings change) are
+ * trivial.
+ */
+function snapshotHostCssVars(): Record<string, string> {
+  const out: Record<string, string> = {};
+  const root = document.documentElement;
+  const cs = getComputedStyle(root);
+
+  // First: anything set as an inline style on :root (the brand CSS that
+  // /_ensemble/brand/css sets via @theme + :root rules ends up here once
+  // applied). We can't enumerate custom properties from getComputedStyle
+  // directly, so we walk stylesheet rules.
+  const names = collectCustomPropertyNames();
+  for (const name of names) {
+    const value = cs.getPropertyValue(name).trim();
+    if (value) out[name] = value;
+  }
+  return out;
+}
+
+/**
+ * Walk every same-origin stylesheet and collect the names of CSS custom
+ * properties declared on :root, .dark, html, or body selectors. The set
+ * is what the host has available to share with iframes.
+ *
+ * We swallow cross-origin sheets — they'd throw a SecurityError on
+ * .cssRules access. Workspace's stylesheets are all same-origin so this
+ * doesn't actually skip anything in production.
+ */
+function collectCustomPropertyNames(): Set<string> {
+  const names = new Set<string>();
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList | null = null;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue; // cross-origin, skip
+    }
+    if (!rules) continue;
+    walkRules(rules, names);
+  }
+  return names;
+}
+
+function walkRules(rules: CSSRuleList, names: Set<string>): void {
+  for (const rule of Array.from(rules)) {
+    if (rule instanceof CSSStyleRule) {
+      // Look at every declaration on this rule's style block
+      const style = rule.style;
+      for (let i = 0; i < style.length; i++) {
+        const prop = style.item(i);
+        if (prop.startsWith('--')) names.add(prop);
+      }
+    } else if ('cssRules' in rule && (rule as CSSGroupingRule).cssRules) {
+      // @media, @supports, etc. — recurse
+      walkRules((rule as CSSGroupingRule).cssRules, names);
+    }
   }
 }

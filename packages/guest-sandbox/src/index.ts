@@ -80,6 +80,21 @@ export function connectToHost(): HostConnection {
           try { cb((msg as { payload: { mode?: 'light' | 'dark' } }).payload); } catch { /* shield */ }
         }
         break;
+      case 'ensemble:cssVars': {
+        // Apply host-provided CSS variables to this iframe's :root.
+        // This is what makes the iframe pixel-identical to the host —
+        // the same --content-padding, --font-heading, --primary, etc.
+        // resolve to the same computed values, regardless of any
+        // /_ensemble/brand/css fallbacks loaded via <link>.
+        const payload = (msg as { payload: Record<string, string> }).payload;
+        const root = document.documentElement;
+        for (const [name, value] of Object.entries(payload || {})) {
+          if (typeof name === 'string' && name.startsWith('--')) {
+            root.style.setProperty(name, value);
+          }
+        }
+        break;
+      }
     }
   });
 

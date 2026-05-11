@@ -37,6 +37,23 @@ export type EnsembleMessage =
   /** host -> guest: Workspace theme/brand changed. */
   | { type: 'ensemble:themeChange'; v: 1; payload: { mode?: 'light' | 'dark' } }
 
+  /**
+   * host -> guest: Snapshot of the host's computed CSS custom properties.
+   * Sent on iframe mount (in response to ensemble:ready) and re-sent whenever
+   * the operator changes workspace settings.
+   *
+   * The iframe applies these to its own :root so any var(--*) reference
+   * inside the iframe resolves to the host's exact value — no drift on
+   * padding, fonts, radius, etc. This is what makes guest apps look
+   * pixel-identical to core apps regardless of the iframe document boundary.
+   */
+  | {
+      type: 'ensemble:cssVars';
+      v: 1;
+      /** Map of CSS custom property name (with leading --) to value. */
+      payload: Record<string, string>;
+    }
+
   /** guest -> host: Emit an audit event (logged to workspace's audit trail). */
   | { type: 'ensemble:audit'; v: 1; event: string; details?: Record<string, unknown> }
 

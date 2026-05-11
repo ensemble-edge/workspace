@@ -154,6 +154,25 @@ function mount(Component: React.ComponentType): void {
     console.error("[ensemble-runtime] No #root element found");
     return;
   }
+
+  // Listen for the host's CSS variable snapshot and apply to this iframe's
+  // :root. The host sends it once on ensemble:ready (which we emit below).
+  // After this, var(--*) references inside the iframe resolve to the host's
+  // values — padding, fonts, radius, colors all match identically.
+  window.addEventListener("message", (event) => {
+    const msg = event.data as { type?: string; v?: number; payload?: Record<string, string> };
+    if (!msg || msg.type !== "ensemble:cssVars" || msg.v !== 1) return;
+    const root = document.documentElement;
+    for (const [name, value] of Object.entries(msg.payload || {})) {
+      if (typeof name === "string" && name.startsWith("--")) {
+        root.style.setProperty(name, value);
+      }
+    }
+  });
+
+  // Tell the host we're ready so it pushes context + cssVars.
+  try { window.parent.postMessage({ type: "ensemble:ready", v: 1 }, "*"); } catch { /* same-origin same window */ }
+
   const root = createRoot(container);
   root.render(<Component />);
 }
