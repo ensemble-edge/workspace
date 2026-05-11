@@ -1,6 +1,6 @@
 {
   "name": "@ensemble-edge/sdk",
-  "version": "0.0.1",
+  "version": "0.1.3",
   "type": "module",
   "description": "Extension hooks for Ensemble Workspace customization",
   "main": "dist/index.js",
