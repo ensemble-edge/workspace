@@ -46,10 +46,11 @@ interface AppRegistration {
   endpoint_url?: string;
   // Required permissions to use this app
   required_role?: 'guest' | 'member' | 'admin' | 'owner';
-  // Isolation mode — drives how the shell renders this app's iframe.
-  // 'trusted'   = shared origin, loads workspace runtime (default)
-  // 'sandboxed' = strict iframe sandbox, postMessage-only communication
-  isolation?: 'trusted' | 'sandboxed';
+  // Tier — drives how the shell renders this app (v0.1.9+).
+  //   'component'  = runs in host's React tree, no iframe (primary)
+  //   'iframe'     = same-origin iframe, loads workspace runtime
+  //   'sandboxed'  = strict iframe sandbox, postMessage-only
+  tier?: 'component' | 'iframe' | 'sandboxed';
 }
 
 /**
@@ -110,13 +111,13 @@ export function createGuestGatewayRoutes() {
       // Fetch manifest from the app itself
       const manifest = await fetchAppManifest(c.env, app);
 
-      // Merge the host-controlled `isolation` field into the response so
-      // the shell can decide how to render the iframe. The guest's own
-      // manifest cannot self-declare isolation — that's a host decision
-      // recorded in the guest_apps row at install time.
+      // Merge the host-controlled `tier` field into the response so the
+      // shell can decide how to render the app. The guest's own manifest
+      // cannot self-declare tier — that's a host decision recorded in the
+      // guest_apps row at install time.
       return c.json({
         ...(manifest as Record<string, unknown>),
-        isolation: app.isolation ?? 'trusted',
+        tier: app.tier ?? 'iframe',
       });
     } catch (error) {
       console.error('Failed to get app manifest:', error);

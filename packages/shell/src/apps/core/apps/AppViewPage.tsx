@@ -1,20 +1,27 @@
 /**
- * App View Page — Render a guest app in an iframe.
+ * App View Page — Render a guest app per its tier (v0.1.9+).
  *
- * Two isolation modes (v0.1.6+):
+ * Three tiers, three render strategies:
  *
- *   trusted   — iframe has allow-same-origin; loads workspace's runtime;
- *               shares React + UI. For first-party apps.
- *   sandboxed — strict sandbox (allow-scripts only); no shared origin;
- *               no runtime access; communicates via postMessage.
- *               For third-party / untrusted apps.
+ *   'component' — Default. The guest's UI is an ES module that default-
+ *                 exports a React component. We `import()` it dynamically
+ *                 and render it directly in the shell's React tree.
+ *                 No iframe. Same document, same :root, same theme.
+ *                 Visually identical to core apps by construction.
  *
- * The mode comes from the guest_apps.isolation column, surfaced via the
- * /_ensemble/apps/<id>/manifest endpoint.
+ *   'iframe'    — Same-origin iframe; loads /_ensemble/runtime/v1/runtime.js.
+ *                 Guest worker serves an HTML shell + a tiny app bundle.
+ *                 Useful when you need iframe boundary semantics without
+ *                 strict sandboxing.
+ *
+ *   'sandboxed' — Strict iframe sandbox (allow-scripts only). For untrusted
+ *                 code. Communicates only via postMessage.
+ *
+ * The tier comes from guest_apps.tier surfaced via the manifest endpoint.
  */
 
 import * as React from 'react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSignals } from '@preact/signals-react/runtime';
 
 import {
@@ -25,19 +32,24 @@ import {
 
 import { currentPath, navigate } from '../../../state';
 
-type Isolation = 'trusted' | 'sandboxed';
+type Tier = 'component' | 'iframe' | 'sandboxed';
 
 interface AppManifestResponse {
   name?: string;
-  isolation?: Isolation;
+  tier?: Tier;
+}
+
+interface AppInfo {
+  name: string;
+  id: string;
+  tier: Tier;
 }
 
 export function AppViewPage() {
   useSignals();
   const path = currentPath.value;
   const appId = path.split('/')[2];
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [appInfo, setAppInfo] = useState<{ name: string; id: string; isolation: Isolation } | null>(null);
+  const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,7 +63,7 @@ export function AppViewPage() {
         setAppInfo({
           name: manifest.name || appId,
           id: appId,
-          isolation: manifest.isolation ?? 'trusted',
+          tier: manifest.tier ?? 'iframe',
         });
         setLoading(false);
       })
@@ -61,93 +73,128 @@ export function AppViewPage() {
       });
   }, [appId]);
 
-  // Listen for postMessage from sandboxed iframes. We accept a small fixed
-  // protocol — see packages/guest-sandbox/src/protocol.ts for the schema.
-  // Trusted iframes also can use this but typically reach for window.Ensemble
-  // directly.
+  if (loading) return <LoadingState appId={appId} />;
+  if (error) return <ErrorState message={error} />;
+
+  const info = appInfo!;
+  switch (info.tier) {
+    case 'component':
+      return <ComponentTierRenderer appInfo={info} />;
+    case 'iframe':
+    case 'sandboxed':
+      return <IframeTierRenderer appInfo={info} path={path} />;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Tier 1: 'component' — render in host's React tree, no iframe
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Dynamically imports the guest's component module and renders it.
+ * The guest worker serves /_ensemble/apps/<id>/ui/component.js as an ES
+ * module whose default export is a React component.
+ *
+ * No iframe. The component renders directly in the shell's <Viewport>,
+ * so it inherits every CSS variable, font, theme rule, and React
+ * context that the host already provides.
+ */
+function ComponentTierRenderer({ appInfo }: { appInfo: AppInfo }) {
+  const [Component, setComponent] = useState<React.ComponentType | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
   useEffect(() => {
-    if (!appInfo) return;
+    let cancelled = false;
+    const url = `/_ensemble/apps/${appInfo.id}/ui/component.js`;
+    import(/* @vite-ignore */ url)
+      .then((mod) => {
+        if (cancelled) return;
+        const C = (mod && typeof mod === 'object' && 'default' in mod) ? mod.default : null;
+        if (typeof C !== 'function') {
+          setImportError(`Guest module at ${url} did not export a default React component.`);
+          return;
+        }
+        setComponent(() => C as React.ComponentType);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setImportError(err.message);
+      });
+    return () => { cancelled = true; };
+  }, [appInfo.id]);
+
+  if (importError) return <ErrorState message={importError} />;
+  if (!Component) return <LoadingState appId={appInfo.id} />;
+
+  // Render the guest in an error-boundary so a crashing component doesn't
+  // unmount the whole shell.
+  return (
+    <ComponentErrorBoundary appName={appInfo.name}>
+      <Suspense fallback={<LoadingState appId={appInfo.id} />}>
+        <Component />
+      </Suspense>
+    </ComponentErrorBoundary>
+  );
+}
+
+class ComponentErrorBoundary extends React.Component<
+  { appName: string; children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) {
+    console.error(`[guest:${this.props.appName}] crashed:`, error);
+  }
+  render() {
+    if (this.state.error) {
+      return <ErrorState message={`${this.props.appName} crashed: ${this.state.error.message}`} />;
+    }
+    return this.props.children;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Tiers 2 & 3: iframe / sandboxed — render in an iframe with proper sandbox
+// ────────────────────────────────────────────────────────────────────────────
+
+function IframeTierRenderer({ appInfo, path }: { appInfo: AppInfo; path: string }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Listen for postMessage from the iframe and respond with CSS-var snapshot
+  // and context. This is what makes iframe-tier apps inherit host design
+  // tokens (padding, fonts, radius) on mount.
+  useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
 
     function onMessage(event: MessageEvent) {
-      // Authenticate by message source — origin will be "null" for sandboxed.
       if (event.source !== iframe?.contentWindow) return;
       const msg = event.data as { type?: string; v?: number; path?: string };
       if (!msg || typeof msg.type !== 'string' || !msg.type.startsWith('ensemble:')) return;
 
       switch (msg.type) {
         case 'ensemble:ready':
-          // Guest is ready. Send a snapshot of the current theme/context.
           sendContext(iframe);
           break;
         case 'ensemble:navigate':
-          if (typeof msg.path === 'string' && msg.path.startsWith('/')) {
-            navigate(msg.path);
-          }
+          if (typeof msg.path === 'string' && msg.path.startsWith('/')) navigate(msg.path);
           break;
         case 'ensemble:audit':
-          // Forward to the audit log (best-effort, no auth needed — iframe is
-          // already authenticated via the gateway's context headers).
           fetch('/_ensemble/audit/event', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: appId, ...((msg as unknown) as Record<string, unknown>) }),
+            body: JSON.stringify({ source: appInfo.id, ...((msg as unknown) as Record<string, unknown>) }),
           }).catch(() => { /* best-effort */ });
           break;
-        default:
-          // Unknown message types are ignored, not rejected — additive evolution.
       }
     }
-
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [appInfo, appId]);
+  }, [appInfo.id]);
 
-  if (loading) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="flex flex-col items-center gap-2">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <p className="text-muted-foreground">Loading {appId}...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <Card className="max-w-md">
-          <CardContent className="flex flex-col items-center py-8">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-destructive">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            <h2 className="mt-4 text-lg font-semibold">Unable to load app</h2>
-            <p className="mt-1 text-muted-foreground">{error}</p>
-            <Button variant="outline" className="mt-4" onClick={() => navigate('/apps')}>
-              &larr; Back to Apps
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // Forward the full subpath through the gateway so the guest worker
-  // can route on its own. `/apps/quiz-cms/schemas/abc` →
-  // `/_ensemble/apps/quiz-cms/schemas/abc`. Falls back to root if no suffix.
   const subpath = path.replace(/^\/apps\/[\w-]+/, '') || '/';
-  const appUrl = `/_ensemble/apps/${appId}${subpath}`;
-  const isolation = appInfo!.isolation;
-
-  // Sandbox attribute differs by isolation mode.
-  // - trusted: shared origin (loads the runtime, calls back to workspace API)
-  // - sandboxed: NO same-origin, NO forms, NO popups. Just scripts. Untrusted
-  //   code can't read the workspace's cookies or DOM.
-  const sandbox = isolation === 'sandboxed'
+  const appUrl = `/_ensemble/apps/${appInfo.id}${subpath}`;
+  const sandbox = appInfo.tier === 'sandboxed'
     ? 'allow-scripts'
     : 'allow-scripts allow-same-origin allow-forms allow-popups';
 
@@ -157,92 +204,80 @@ export function AppViewPage() {
         ref={iframeRef}
         src={appUrl}
         className="flex-1 w-full border-0 block"
-        title={appInfo!.name}
+        title={appInfo.name}
         sandbox={sandbox}
-        data-isolation={isolation}
+        data-tier={appInfo.tier}
       />
     </div>
   );
 }
 
-/** Push a context snapshot to the iframe. Used on ensemble:ready. */
+// ────────────────────────────────────────────────────────────────────────────
+// Shared helpers (loading state, error state, postMessage senders)
+// ────────────────────────────────────────────────────────────────────────────
+
+function LoadingState({ appId }: { appId: string }) {
+  return (
+    <div className="flex flex-1 items-center justify-center">
+      <div className="flex flex-col items-center gap-2">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        <p className="text-muted-foreground">Loading {appId}...</p>
+      </div>
+    </div>
+  );
+}
+
+function ErrorState({ message }: { message: string }) {
+  return (
+    <div className="flex flex-1 items-center justify-center">
+      <Card className="max-w-md">
+        <CardContent className="flex flex-col items-center py-8">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-destructive">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <h2 className="mt-4 text-lg font-semibold">Unable to load app</h2>
+          <p className="mt-1 text-muted-foreground">{message}</p>
+          <Button variant="outline" className="mt-4" onClick={() => navigate('/apps')}>
+            &larr; Back to Apps
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function sendContext(iframe: HTMLIFrameElement) {
-  // For sandboxed iframes contentWindow exists but cross-origin; postMessage
-  // still works. We use targetOrigin '*' because sandboxed iframes have a
-  // 'null' origin — there's no other valid targetOrigin to use.
-  // Security note: the messages we send are not sensitive (just brand
-  // tokens and viewport state); auth happens via gateway-injected headers.
   try {
-    // 1. Send the host's CSS variables. This is what makes the iframe
-    //    visually match the host: padding, fonts, radius, colors all
-    //    come from the SAME values the host's <main> wrapper is using,
-    //    not from /_ensemble/brand/css's fallback defaults.
     iframe.contentWindow?.postMessage(
       { type: 'ensemble:cssVars', v: 1, payload: snapshotHostCssVars() },
       '*',
     );
-
-    // 2. Send the context (path, etc.)
     iframe.contentWindow?.postMessage(
-      {
-        type: 'ensemble:context',
-        v: 1,
-        payload: {
-          path: window.location.pathname,
-        },
-      },
+      { type: 'ensemble:context', v: 1, payload: { path: window.location.pathname } },
       '*',
     );
   } catch {
-    /* iframe may not be ready; the guest will retry by sending another ready */
+    /* iframe may not be ready; the guest will retry */
   }
 }
 
-/**
- * Build a snapshot of every CSS custom property currently set on
- * document.documentElement (the host's :root). We have to enumerate
- * stylesheet rules to find them — getComputedStyle doesn't enumerate
- * custom properties on its own.
- *
- * The cost is one walk of the workspace's small set of stylesheets at
- * mount time. Cached values mean re-pushes (on settings change) are
- * trivial.
- */
 function snapshotHostCssVars(): Record<string, string> {
   const out: Record<string, string> = {};
-  const root = document.documentElement;
-  const cs = getComputedStyle(root);
-
-  // First: anything set as an inline style on :root (the brand CSS that
-  // /_ensemble/brand/css sets via @theme + :root rules ends up here once
-  // applied). We can't enumerate custom properties from getComputedStyle
-  // directly, so we walk stylesheet rules.
-  const names = collectCustomPropertyNames();
-  for (const name of names) {
+  const cs = getComputedStyle(document.documentElement);
+  for (const name of collectCustomPropertyNames()) {
     const value = cs.getPropertyValue(name).trim();
     if (value) out[name] = value;
   }
   return out;
 }
 
-/**
- * Walk every same-origin stylesheet and collect the names of CSS custom
- * properties declared on :root, .dark, html, or body selectors. The set
- * is what the host has available to share with iframes.
- *
- * We swallow cross-origin sheets — they'd throw a SecurityError on
- * .cssRules access. Workspace's stylesheets are all same-origin so this
- * doesn't actually skip anything in production.
- */
 function collectCustomPropertyNames(): Set<string> {
   const names = new Set<string>();
   for (const sheet of Array.from(document.styleSheets)) {
     let rules: CSSRuleList | null = null;
-    try {
-      rules = sheet.cssRules;
-    } catch {
-      continue; // cross-origin, skip
-    }
+    try { rules = sheet.cssRules; } catch { continue; }
     if (!rules) continue;
     walkRules(rules, names);
   }
@@ -252,14 +287,12 @@ function collectCustomPropertyNames(): Set<string> {
 function walkRules(rules: CSSRuleList, names: Set<string>): void {
   for (const rule of Array.from(rules)) {
     if (rule instanceof CSSStyleRule) {
-      // Look at every declaration on this rule's style block
       const style = rule.style;
       for (let i = 0; i < style.length; i++) {
         const prop = style.item(i);
         if (prop.startsWith('--')) names.add(prop);
       }
     } else if ('cssRules' in rule && (rule as CSSGroupingRule).cssRules) {
-      // @media, @supports, etc. — recurse
       walkRules((rule as CSSGroupingRule).cssRules, names);
     }
   }

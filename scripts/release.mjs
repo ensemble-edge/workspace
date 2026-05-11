@@ -166,6 +166,7 @@ for (const p of releasedPackages) {
 // points at the SAME tag we're about to cut — works the moment the tag
 // goes live. Without this, a fresh scaffold would reference a stale version.
 const templatePkgPaths = [
+  'templates/guest-component/package.json',
   'templates/guest-react/package.json',
   'templates/guest-sandboxed/package.json',
 ];
@@ -186,14 +187,21 @@ if (!dryRun) {
   sh('node scripts/build-all.mjs');
 }
 
-// 3a. Verify the reference connector still builds against the runtime.
-// hello-react demonstrates the runtime-based pattern; its bundle should
-// stay tiny (~1 KB gzipped) because React + UI live in the workspace runtime.
-// If hello-react's build breaks, the documented guest-worker recipe is
-// broken — fail the release here.
-console.log('▶ Verifying reference connectors (hello-react + hello-sandboxed) build');
+// 3a. Verify all three tier reference connectors build cleanly. If any of
+// them stops compiling, the documented guest-app recipes are broken — fail
+// the release here so we never ship docs that don't work.
+console.log('▶ Verifying reference connectors (hello-component, hello-react, hello-sandboxed) build');
 if (!dryRun) {
-  // Trusted reference: hello-react
+  // Tier 1 (primary): hello-component
+  sh('cd packages/connectors/hello-component && pnpm run build');
+  sh(
+    'test -s packages/connectors/hello-component/dist/component.bundle.js && ' +
+    'test "$(wc -c < packages/connectors/hello-component/dist/component.bundle.js)" -lt 5000 && ' +
+    // Confirms the jsx-runtime shim wired (component compiles to factory calls).
+    'grep -q "Ensemble" packages/connectors/hello-component/dist/component.bundle.js'
+  );
+
+  // Tier 2: hello-react (iframe + workspace runtime)
   sh('cd packages/connectors/hello-react && pnpm run build');
   sh(
     'test -s packages/connectors/hello-react/dist/app.bundle.js && ' +
@@ -203,14 +211,11 @@ if (!dryRun) {
     'grep -q "bg-background" packages/guest-runtime/dist/runtime.css'
   );
 
-  // Sandboxed reference: hello-sandboxed
+  // Tier 3: hello-sandboxed (strict iframe)
   sh('cd packages/connectors/hello-sandboxed && pnpm run build');
   sh(
     'test -s packages/connectors/hello-sandboxed/dist/app.bundle.js && ' +
-    // Sandboxed bundle has its own UI; still expected to be small but not
-    // as tight as the trusted one (no shared runtime). 20KB ceiling.
     'test "$(wc -c < packages/connectors/hello-sandboxed/dist/app.bundle.js)" -lt 20000 && ' +
-    // Confirms the postMessage SDK is wired (sandboxed apps must use it).
     'grep -q "ensemble:" packages/connectors/hello-sandboxed/dist/app.bundle.js'
   );
 }
@@ -224,7 +229,7 @@ sh(`git checkout -b ${releaseBranch}`, { write: true });
 console.log('▶ Staging dist artifacts');
 const distGlobs = releasedPackages.map((p) => `${p.dir}/dist`).join(' ');
 sh(`git add -f ${distGlobs}`, { write: true });
-sh('git add package.json packages/*/package.json packages/guest/*/package.json templates/guest-react/package.json templates/guest-sandboxed/package.json', { write: true });
+sh('git add package.json packages/*/package.json packages/guest/*/package.json templates/guest-component/package.json templates/guest-react/package.json templates/guest-sandboxed/package.json', { write: true });
 
 // 6. Commit and tag
 console.log(`▶ Committing and tagging v${version}`);

@@ -1,0 +1,13 @@
+name = "hello-component-connector"
+main = "src/index.ts"
+compatibility_date = "2026-04-08"
+compatibility_flags = ["nodejs_compat"]
+
+[dev]
+port = 8794
+
+# The component module is served as text from the worker.
+[[rules]]
+type = "Text"
+globs = ["**/*.bundle.js"]
+fallthrough = false

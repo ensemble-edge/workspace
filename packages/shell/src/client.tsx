@@ -9,8 +9,42 @@
 // This MUST be imported before any components that use signals
 import '@preact/signals-react/runtime';
 
+import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Shell } from './components/Shell';
+import * as EnsembleUI from '@ensemble-edge/ui';
+
+/**
+ * Expose `window.Ensemble` so that dynamically-imported guest component
+ * modules (tier: 'component') can render against the same React + UI
+ * library the shell uses. The guest's compiled JSX targets
+ * window.Ensemble.createElement via the jsx-runtime shim from
+ * @ensemble-edge/workspace/guest-runtime.
+ *
+ * No iframe here — this is the shell's own window. Guest components
+ * imported via `import('/_ensemble/apps/<id>/ui/component.js')` run in
+ * the same JS context as the shell, so they pick up this global directly.
+ */
+function installEnsembleGlobal() {
+  if (typeof window === 'undefined') return;
+  (window as unknown as { Ensemble: Record<string, unknown> }).Ensemble = {
+    version: 1,
+    React,
+    createElement: React.createElement,
+    Fragment: React.Fragment,
+    useState: React.useState,
+    useEffect: React.useEffect,
+    useMemo: React.useMemo,
+    useCallback: React.useCallback,
+    useRef: React.useRef,
+    useContext: React.useContext,
+    useReducer: React.useReducer,
+    ...EnsembleUI,
+    // Layout primitives re-exported under their short names.
+    Page: EnsembleUI.EnsemblePage,
+    Section: EnsembleUI.EnsembleSection,
+  };
+}
 
 /**
  * Mount the shell to the DOM.
@@ -26,6 +60,10 @@ function initShell(): void {
     console.error('[Shell] Mount container #app not found');
     return;
   }
+
+  // Install window.Ensemble BEFORE rendering — component-tier guest apps
+  // imported during shell render reference it during their own load.
+  installEnsembleGlobal();
 
   // Always render fresh - the loading spinner is just a placeholder
   const root = createRoot(container);

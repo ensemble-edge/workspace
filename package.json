@@ -130,6 +130,7 @@
     "packages/guest-sandbox/dist",
     "packages/guest-sandbox/README.md",
     "scripts/create-guest-app.mjs",
+    "templates/guest-component/**",
     "templates/guest-react/**",
     "templates/guest-sandboxed/**",
     "RELEASING.md",

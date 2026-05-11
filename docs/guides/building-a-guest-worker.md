@@ -1,118 +1,72 @@
-# Building a guest worker for Ensemble Workspace
+# Building a guest app for Ensemble Workspace
 
-> **Workspace version:** v0.1.6+
+> **Workspace version:** v0.1.9+
 > **Audience:** familiar with Cloudflare Workers + wrangler
 > **Reference implementations:**
-> - [`packages/connectors/hello-react/`](../../packages/connectors/hello-react/) — trusted (pixel-native UI)
-> - [`packages/connectors/hello-sandboxed/`](../../packages/connectors/hello-sandboxed/) — sandboxed (iframe isolation)
+> - [`packages/connectors/hello-component/`](../../packages/connectors/hello-component/) — **component tier (primary)**
+> - [`packages/connectors/hello-react/`](../../packages/connectors/hello-react/) — iframe tier
+> - [`packages/connectors/hello-sandboxed/`](../../packages/connectors/hello-sandboxed/) — sandboxed tier
 
-A guest worker is a Cloudflare Worker that renders inside an iframe in the workspace shell. There are **two isolation modes** — pick based on whether you trust the guest code:
+A guest app extends a workspace with new functionality. Workspace v0.1.9 supports three tiers, all using the same `guest_apps` table and gateway; they differ only in how the shell renders the app's UI.
 
-| Mode | When to use | UI | Sandbox |
-|---|---|---|---|
-| **trusted** (default) | First-party apps, your own code, audited partners | Pixel-native via workspace's runtime (React + UI components) | `allow-scripts` + `allow-same-origin` + forms + popups |
-| **sandboxed** | Third-party apps, customer-installed widgets, agent-generated code | Bring your own (any framework, any DOM) | `allow-scripts` only — no same-origin, no host cookies, no workspace runtime |
+## Pick your tier
 
-The shell renders both the same way (iframe in the viewport). The host's `guest_apps.isolation` column controls the sandbox attribute and which contract the iframe gets to use.
+| Tier | Renders | Use when | Visual integration | Crash isolation |
+|---|---|---|---|---|
+| **`component`** *(default)* | In the host's React tree | First-party trusted apps; anything you want to look exactly like a core app | Pixel-identical, automatic | None (crashes throw into shell) |
+| **`iframe`** | Same-origin iframe with workspace runtime | First-party apps where you want an iframe boundary anyway (rare) | Near-identical via cssVars push | Document-level |
+| **`sandboxed`** | Strict iframe sandbox | Third-party, customer-installed, agent-generated, or any code you don't fully trust | Best-effort; guest brings its own UI | Browser-enforced |
 
-## Which one do you want?
+**Default to `component`.** That's the design ceiling — visually indistinguishable from a core app, no propagation logic, no boundary. Adding the 50th component-tier app is the same as adding the 1st.
 
-- **"I want this app to look like a built-in workspace app, no manual styling work, and follow brand changes automatically."** → trusted. Use [`templates/guest-react/`](../../templates/guest-react/) or `create-guest-app` with no `--isolation` flag.
-- **"This code is from a third party and shouldn't be able to read workspace cookies or share React with the host."** → sandboxed. Use [`templates/guest-sandboxed/`](../../templates/guest-sandboxed/) or `create-guest-app --isolation sandboxed`.
+Use `iframe` only if you specifically need an iframe document (e.g. third-party widgets that require their own document context). Use `sandboxed` when the iframe boundary IS the feature (you don't trust the code).
 
-If you don't have a clear answer, default to **trusted** — it's the lower-friction option for apps you control.
-
----
-
-## Architecture
-
-```
-Browser
-  │
-  ├── Loads /apps/<id> in the workspace shell
-  │   ↓
-  │   Shell renders <iframe src="/_ensemble/apps/<id>/">
-  │
-  └── Iframe content (HTML returned by the guest worker):
-      ├── <link rel="stylesheet" href="/_ensemble/brand/css">     ← workspace tokens
-      ├── <link rel="stylesheet" href="/_ensemble/runtime/v1/runtime.css">
-      ├── <script src="/_ensemble/runtime/v1/runtime.js"></script> ← React + UI on window.Ensemble
-      ├── inline <script> with the guest's bundled app code
-      └── window.Ensemble.mount(window.__EnsembleApp)
-```
-
-Three things to internalize:
-
-1. **The guest's bundle contains zero of React or workspace UI.** Both live in the workspace-served runtime, cached by the browser. Guest bundles are typically 1–5 KB.
-2. **The guest declares intent, not layout.** You write `<Page title="...">` and the workspace renders the chrome.
-3. **Discovery is D1, not config.** The workspace sidebar reads from `guest_apps` — you insert a row to make your app appear.
-
----
-
-## Quick start
+## Quick start (component tier — the primary path)
 
 ```bash
-# In your monorepo, after installing @ensemble-edge/workspace:
 node node_modules/@ensemble-edge/workspace/scripts/create-guest-app.mjs \
   ./apps/my-app \
   --name "My App" \
   --id my-app \
   --icon clipboard-list
+# → defaults to --tier component
 
 cd apps/my-app
 pnpm install
-pnpm run build        # → dist/app.bundle.{js,css}
-pnpm run dev          # wrangler dev on :8789
+pnpm run build
 pnpm run deploy
 ```
 
-Then register your app (one-time, per workspace):
+Then register the app with `tier = 'component'`:
 
-1. **Workspace `wrangler.toml`** — add a service binding to your guest worker:
+1. Add to your **workspace** worker's `wrangler.toml`:
    ```toml
    [[services]]
    binding = "MY_APP"
    service = "my-app-guest"
    ```
-2. **Redeploy the workspace worker.**
-3. **Insert a `guest_apps` row** in the workspace's D1:
+2. Redeploy the workspace worker.
+3. Insert a `guest_apps` row:
    ```bash
    wrangler d1 execute <workspace-db> --remote --command "
      INSERT INTO guest_apps (
        workspace_id, id, name, icon, category,
-       connection_type, binding_name, enabled, required_role
+       connection_type, binding_name, enabled, required_role, tier
      ) VALUES (
        '<YOUR_WORKSPACE_ID>', 'my-app', 'My App', 'clipboard-list', 'tool',
-       'service_binding', 'MY_APP', 1, 'member'
+       'service_binding', 'MY_APP', 1, 'member', 'component'
      );
    "
    ```
 
-Your app appears in the sidebar immediately.
+Your app appears in the sidebar. Click it. The shell dynamically imports `/_ensemble/apps/my-app/ui/component.js` and renders the component directly in its viewport.
 
-### …or scaffold a sandboxed app
+## What a component-tier app looks like
 
-For untrusted code, add `--isolation sandboxed`:
-
-```bash
-node node_modules/@ensemble-edge/workspace/scripts/create-guest-app.mjs \
-  ./apps/third-party-thing \
-  --name "Third-Party Thing" \
-  --id third-party-thing \
-  --icon lock \
-  --isolation sandboxed
-```
-
-This produces a template that uses [`@ensemble-edge/workspace/guest-sandbox`](../../packages/guest-sandbox/) instead of the runtime. The guest app brings its own UI (any framework, any DOM) and talks to the host through typed `postMessage`. When you insert the `guest_apps` row for it, set `isolation = 'sandboxed'` (see the template's generated README).
-
----
-
-## What a guest app looks like
-
-Just JSX. No React import, no UI import.
+Just JSX. No imports except types.
 
 ```tsx
-// src/app.tsx
+// src/component.tsx
 import type { EnsembleRuntime } from '@ensemble-edge/workspace/guest-runtime';
 
 declare const Ensemble: EnsembleRuntime;
@@ -120,7 +74,7 @@ const { Page, Card, CardHeader, CardTitle, CardContent, Button } = Ensemble;
 
 export default function MyApp() {
   return (
-    <Page title="My App" description="Description goes here">
+    <Page title="My App" description="Anything I want.">
       <Card>
         <CardHeader>
           <CardTitle>Hello</CardTitle>
@@ -134,147 +88,104 @@ export default function MyApp() {
 }
 ```
 
-That compiles to ~1 KB of factory calls against `window.Ensemble`. The JSX `import { jsx } from '@ensemble-edge/workspace/guest-runtime/jsx-runtime'` resolves to a tiny shim that delegates to React on the host runtime.
+That compiles to ~500 bytes of factory calls against `Ensemble.createElement`. The shell already has React, Radix, and the workspace UI library loaded — the component module references them through `window.Ensemble` at runtime. No iframe.
 
----
-
-## What you get from the runtime
-
-The full `EnsembleRuntime` type lives in [`packages/guest-runtime/src/runtime.tsx`](../../packages/guest-runtime/src/runtime.tsx). The current v1 surface:
-
-**Layout primitives** (these are where the magic happens — they read workspace settings)
-- `Page` — title + description + content with workspace padding/fonts
-- `Section` — subsection within a page
-- `PageHeader` — header-only variant
-
-**Common shadcn components** (all from `@ensemble-edge/ui`)
-- `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter`
-- `Button`, `Input`, `Label`, `Textarea`
-- `Table` family
-- `Tabs`, `Dialog`, `DropdownMenu`, `Popover`, `Tooltip`, `Select`
-- `Checkbox`, `Switch`, `Badge`, `Separator`, `Skeleton`
-- `Alert`, `Avatar`, `EmptyState`, `StatCard`, `DataRow`
-
-**React essentials**
-- `React`, `createElement`, `Fragment`
-- All common hooks: `useState`, `useEffect`, `useMemo`, `useCallback`, `useRef`, `useContext`, `useReducer`
-
-**Utility**
-- `cn` — the className composer
-
-Need something not in this list? File feedback; we'll add it to v1 (additive changes only) or surface it in v2 if it requires breaking the contract.
-
----
-
-## What a sandboxed guest app looks like
-
-Plain DOM, no framework — but it's whatever you want. The only constraint is that the only way to talk to the host is `postMessage`, wrapped by [`@ensemble-edge/workspace/guest-sandbox`](../../packages/guest-sandbox/):
+## Worker entry for component tier
 
 ```ts
-// src/app.ts (no JSX — bring your own UI if you want one)
-import { connectToHost } from '@ensemble-edge/workspace/guest-sandbox';
+// src/index.ts
+import { defineGuestApp } from '@ensemble-edge/workspace/guest';
+import { createGuestWorker } from '@ensemble-edge/workspace/guest/cloudflare';
+import { Hono } from 'hono';
 
-const host = connectToHost();
-host.ready();
+// @ts-expect-error — Text loader rule turns this into a string at build time.
+import componentBundle from '../dist/component.bundle.js';
 
-host.onContext((ctx) => {
-  console.log('host context:', ctx);
+const router = new Hono();
+
+// The shell does `import('/_ensemble/apps/my-app/ui/component.js')` and
+// gets back this module.
+router.get('/ui/component.js', (c) => {
+  return c.text(componentBundle as string, 200, {
+    'Content-Type': 'application/javascript; charset=utf-8',
+    'Cache-Control': 'public, max-age=300',
+  });
 });
 
-document.body.innerHTML = `
-  <h1>My App</h1>
-  <button id="x">Audit something</button>
-`;
-document.getElementById('x')!.addEventListener('click', () => {
-  host.audit('clicked', { button: 'x' });
+// Your API routes go here.
+// router.get('/api/things', async (c) => c.json({ things: [...] }));
+
+const app = defineGuestApp({
+  manifest: { id: 'my-app', name: 'My App', version: '0.0.1', icon: 'clipboard-list',
+              category: 'tool', permissions: ['read:user'], entry: '/' },
+  fetch: (request) => router.fetch(request),
 });
+
+export default createGuestWorker(app);
 ```
 
-The full message protocol is in [`packages/guest-sandbox/src/protocol.ts`](../../packages/guest-sandbox/src/protocol.ts). v1 freezes these shapes; additive evolution only.
+The worker now does two things: serves the component module, and (optionally) serves API routes for the app's data.
 
-| Guest → Host | Host → Guest |
-|---|---|
-| `ready()` — guest is mounted | `onContext(cb)` — workspace pushes context (path, etc.) |
-| `navigate(path)` — request host nav | `onThemeChange(cb)` — workspace tells guest mode changed |
-| `audit(event, details)` — log to workspace audit trail | |
-| `resize(heightPx)` — request iframe sizing | |
+## What flows automatically (component tier)
 
-Sandboxed apps **don't** get workspace's React, `@ensemble-edge/workspace/ui`, or `window.Ensemble`. They get the iframe and a typed mailbox.
+The component runs in the host's React tree. Therefore:
 
-### What sandboxed apps lose
+- **All CSS variables** — same `:root`, no propagation
+- **All fonts, padding, radius, spacing** — same document
+- **Brand color changes** — host re-renders, guest re-renders along with it, no postMessage
+- **Dark/light mode** — same class on `<html>`, instant
+- **Future workspace tokens** — added to the host, applied to the guest on the next render
+- **Workspace adds new components to `@ensemble-edge/ui`** — guests get them on next page load via `Ensemble.*`
 
-- No same-origin → can't read workspace cookies, can't fetch `/_ensemble/...` with auth (would need to relay through `postMessage`)
-- No shared React → bigger bundle if you ship your own framework
-- No automatic theme inheritance → if you want workspace's brand colors, fetch `/_ensemble/brand/css` and inline it yourself
+Operator changes any setting → next render = the change is there. Zero per-guest plumbing.
 
-### What sandboxed apps gain
+## Iframe tier (when you actually want an iframe)
 
-- Browser-enforced isolation. A bug or malicious code in the guest can't touch the host.
-- Freedom of framework. Vue, Svelte, htmx, vanilla DOM, Streamlit-embedded — all valid.
-- Independent deployment cadence. The host's runtime contract (v1, v2, …) doesn't matter to sandboxed apps; they only depend on the postMessage protocol version.
+Use `--tier iframe`. The shell wraps your app in a same-origin iframe that loads `/_ensemble/runtime/v1/runtime.js`. The iframe's `:root` receives a snapshot of the host's CSS variables on mount (v0.1.8+). Useful when:
 
----
+- You explicitly want an iframe boundary visible to the user
+- You're integrating a third-party widget that requires its own document context
 
-## What follows workspace settings automatically
+Bundle profile is similar to component-tier (~1KB gzipped), but the iframe carries its own document. Reference: [`packages/connectors/hello-react/`](../../packages/connectors/hello-react/).
 
-When an operator changes any of these in workspace settings, every installed guest app picks up the change on next iframe render — no guest redeploy:
+## Sandboxed tier (untrusted code)
 
-| Setting | How it flows |
-|---|---|
-| Brand colors | `/_ensemble/brand/css` ships shadcn tokens (`--background`, `--primary`, etc.); workspace components reference them via Tailwind utility classes |
-| Heading + body fonts | Same endpoint; `Page` sets `font-family: var(--font-heading)` on h1, `var(--font-body)` on container |
-| Content padding | `Page` reads `var(--content-padding, 1.5rem)` |
-| Card padding | `Card` reads `var(--card-padding, 1.5rem)` |
-| Border radius | shadcn components reference `var(--radius)` |
-| Light / dark mode | Body class injected by workspace; tokens swap |
+Use `--tier sandboxed`. Strict iframe sandbox (`allow-scripts` only). Guest brings its own framework; communication is postMessage only via [`@ensemble-edge/workspace/guest-sandbox`](../../packages/guest-sandbox/). Reference: [`packages/connectors/hello-sandboxed/`](../../packages/connectors/hello-sandboxed/).
 
-Workspace pushes new components to the runtime in future versions — your guest doesn't redeploy to receive them, just refresh.
+| Capability | Component | Iframe | Sandboxed |
+|---|---|---|---|
+| Workspace cookies / auth | Yes (same window) | Yes (same-origin) | No |
+| `window.Ensemble` (React + UI) | Yes (host's) | Yes (runtime-loaded) | No |
+| `fetch('/_ensemble/...')` | Yes | Yes | No (no same-origin) |
+| postMessage to host | Not needed (same window) | Available | Required |
+| Crash blast radius | Host React tree | Iframe | Iframe |
 
----
+## Migration from v0.1.5–v0.1.8
 
-## Versioning contract
+Existing apps were tier `iframe` (formerly `isolation = 'trusted'`). They keep working — migration 005 maps `isolation` values to `tier` automatically.
 
-The runtime URL is `/_ensemble/runtime/v1/runtime.js`. v1 is a frozen contract:
-- New components and types **CAN** be added within v1.
-- Existing components, their props, or the `mount()` signature **CANNOT** change within v1.
-- Breaking changes ship as `/v2/runtime.js`. The `@ensemble-edge/workspace/guest-runtime` package version gates which one your scaffold targets.
+To upgrade an app to component tier (recommended):
+1. Re-scaffold with default tier (`component`)
+2. Move your component's JSX from the old `app.tsx` to the new `component.tsx`
+3. Drop the HTML shell / `<script src="runtime.js">` / Tailwind build — none of that exists in component tier
+4. Update the `guest_apps` row: `UPDATE guest_apps SET tier = 'component' WHERE id = '...'`
+5. Redeploy
 
-So a v0.1.5 guest app keeps working when workspace is at v0.2.0, v0.3.0, v0.9.0 — until workspace cuts a v2 runtime. At that point, guest apps update by bumping their `@ensemble-edge/workspace` pin.
+## Bundle profiles (verified per release)
 
----
-
-## Bundle profile (verified per release by the preflight)
-
-| Asset | Size | Gzipped |
+| Tier | JS bundle (gzipped) | What's in it |
 |---|---|---|
-| Guest app JS bundle | ~2 KB | **~1 KB** |
-| Guest app CSS bundle | ~57 KB | **~9 KB** |
-| Workspace runtime JS (cached) | ~404 KB | **~125 KB** |
-| Workspace runtime CSS (cached) | ~57 KB | **~9 KB** |
+| `component` | ~500 bytes | JSX factory calls only |
+| `iframe` | ~1 KB + cached 125 KB runtime | Same factory calls + the workspace runtime |
+| `sandboxed` | Whatever the guest ships | Guest's full UI bundle |
 
-For N guest apps in a workspace, the browser downloads the runtime once (~135 KB gzipped total) and ~1 KB per app. Was previously ~135 KB **per app**.
+## Debugging
 
----
+1. **No sidebar entry** — `SELECT * FROM guest_apps WHERE id = '...'`. Verify `enabled = 1`, `tier` is what you expect.
+2. **Sidebar entry but blank viewport** — for component tier, check browser Network for `/_ensemble/apps/<id>/ui/component.js` returning 200 with the right Content-Type. For iframe tier, check the iframe loads at all.
+3. **Component renders but unstyled** — `window.Ensemble` not installed. Confirm shell is v0.1.9+ (`curl /_ensemble/version`).
+4. **"Guest module did not export a default React component"** — your `src/component.tsx` is missing `export default function ...`.
 
-## Debugging order, if your app doesn't render
+## Versioning
 
-Work through these in order — most likely causes first.
-
-1. **No sidebar entry.** `SELECT * FROM guest_apps WHERE id='<your-id>'`. Confirm `enabled=1`.
-2. **Sidebar → 502 "App not found".** Service binding misconfigured; the workspace worker hasn't been redeployed after adding the `[[services]]` block.
-3. **Iframe blank, console error "Ensemble runtime not loaded".** The `<script src="/_ensemble/runtime/v1/runtime.js">` tag is missing or didn't load. Check the iframe's Network tab.
-4. **Iframe renders with default Tailwind colors (not the workspace's).** `/_ensemble/brand/css` link tag is missing. Add it as the first stylesheet in your HTML shell.
-5. **Components render but look wrong (wrong spacing, wrong font).** Make sure you used `Page` from the runtime, not a hand-rolled `<div>` wrapper. The `Page` primitive is where workspace settings are applied.
-6. **Layout/hover/focus broken.** You probably used `class=` instead of `className=`. This is React.
-
----
-
-## What workspace owes guests in future versions
-
-Tracked in [`docs/curalisto-feedback.md`](../curalisto-feedback.md). Notably:
-
-- A real `wrangler ensemble app install` command so the `guest_apps` INSERT isn't a manual step
-- Local-dev gateway so `pnpm dev` boots a workspace shell + your guest worker behind a single dev server
-- `postMessage`-based iframe ↔ shell communication for URL sync, modals over the whole viewport, etc.
-
-These are quality-of-life improvements. The current pattern works end-to-end.
+The `guest_apps.tier` column + the `EnsembleRuntime` API surface are the v1 contract. Additive evolution within v1; breaking changes ship as a new runtime version. Guests pinned to v1 keep working.
