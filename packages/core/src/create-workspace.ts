@@ -390,6 +390,23 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   });
 
   // ============================================================================
+  // Version sentinel (v0.1.6+)
+  // ============================================================================
+  // Lets consumers verify which workspace version is actually deployed.
+  // Useful when "I updated my pin and redeployed but iframe still looks
+  // old" — hit this endpoint to check whether the new build is live.
+  app.get('/_ensemble/version', (c) => {
+    return c.json({
+      runtime_version: RUNTIME_VERSION,
+      shell_assets_size: SHELL_JS.length,
+      runtime_assets_size: RUNTIME_JS.length,
+      // The capabilities array is the discoverable feature list. Consumers
+      // can check for "isolation" before assuming sandboxed-mode support.
+      capabilities: ['runtime-v1', 'guest-isolation', 'sandbox-postmessage'],
+    });
+  });
+
+  // ============================================================================
   // Catch-all for SPA routing
   // ============================================================================
 

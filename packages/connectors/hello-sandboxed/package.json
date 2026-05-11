@@ -1,0 +1,26 @@
+{
+  "name": "@ensemble-edge/connector-hello-sandboxed",
+  "version": "0.1.0",
+  "description": "Reference sandboxed guest app — strict iframe, postMessage SDK, no shared runtime",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "node build.js",
+    "predeploy": "pnpm run build",
+    "dev": "pnpm run build && wrangler dev --local --ip 0.0.0.0",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ensemble-edge/guest": "workspace:*",
+    "@ensemble-edge/guest-cloudflare": "workspace:*",
+    "@ensemble-edge/guest-sandbox": "workspace:*",
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250327.0",
+    "esbuild": "^0.27.4",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.80.0"
+  }
+}

@@ -50,6 +50,7 @@ const releasedPackages = [
   { dir: 'packages/guest/core', name: '@ensemble-edge/guest' },
   { dir: 'packages/guest/cloudflare', name: '@ensemble-edge/guest-cloudflare' },
   { dir: 'packages/guest-runtime', name: '@ensemble-edge/guest-runtime' },
+  { dir: 'packages/guest-sandbox', name: '@ensemble-edge/guest-sandbox' },
 ];
 
 function sh(cmd, opts = {}) {
@@ -135,6 +136,7 @@ const releasedDirs = [
   { dir: 'packages/guest/core',        config: 'tsconfig.build.json', strict: true },
   { dir: 'packages/guest/cloudflare',  config: 'tsconfig.build.json', strict: true },
   { dir: 'packages/guest-runtime',     config: 'tsconfig.build.json', strict: true },
+  { dir: 'packages/guest-sandbox',     config: 'tsconfig.build.json', strict: true },
 ];
 for (const { dir, config, strict } of releasedDirs) {
   const cmd = `cd ${dir} && pnpm exec tsc -p ${config} --noEmit`;
@@ -155,17 +157,23 @@ for (const p of releasedPackages) {
   bumpVersion(`${p.dir}/package.json`, version);
 }
 
-// 2a. Update the guest-react template's pinned workspace ref to match.
+// 2a. Update both template package.json's pinned workspace refs to match.
 // Consumers running `create-guest-app` get a template whose package.json
 // points at the SAME tag we're about to cut — works the moment the tag
 // goes live. Without this, a fresh scaffold would reference a stale version.
-console.log(`▶ Updating templates/guest-react package.json ref to v${version}`);
-if (!dryRun) {
-  const templatePkgPath = join(repoRoot, 'templates/guest-react/package.json');
-  const templatePkg = JSON.parse(readFileSync(templatePkgPath, 'utf8'));
-  templatePkg.dependencies['@ensemble-edge/workspace'] =
-    `github:ensemble-edge/workspace#v${version}`;
-  writeFileSync(templatePkgPath, JSON.stringify(templatePkg, null, 2) + '\n');
+const templatePkgPaths = [
+  'templates/guest-react/package.json',
+  'templates/guest-sandboxed/package.json',
+];
+for (const templateRel of templatePkgPaths) {
+  console.log(`▶ Updating ${templateRel} ref to v${version}`);
+  if (!dryRun) {
+    const full = join(repoRoot, templateRel);
+    const pkg = JSON.parse(readFileSync(full, 'utf8'));
+    pkg.dependencies['@ensemble-edge/workspace'] =
+      `github:ensemble-edge/workspace#v${version}`;
+    writeFileSync(full, JSON.stringify(pkg, null, 2) + '\n');
+  }
 }
 
 // 3. Build
@@ -179,23 +187,27 @@ if (!dryRun) {
 // stay tiny (~1 KB gzipped) because React + UI live in the workspace runtime.
 // If hello-react's build breaks, the documented guest-worker recipe is
 // broken — fail the release here.
-console.log('▶ Verifying reference connector (hello-react) builds');
+console.log('▶ Verifying reference connectors (hello-react + hello-sandboxed) build');
 if (!dryRun) {
+  // Trusted reference: hello-react
   sh('cd packages/connectors/hello-react && pnpm run build');
-  // Spot-checks for the v0.1.5+ runtime-based architecture:
-  //  - both bundles produced
-  //  - JS bundle is tiny (under 10KB unminified — proves React isn't bundled)
-  //  - JS references the runtime (globalThis.Ensemble — proves jsx-runtime shim wired)
-  //
-  // Also verify the runtime CSS itself contains the design tokens (since
-  // that's where bg-background etc. live in this architecture, not in the
-  // per-guest CSS).
   sh(
     'test -s packages/connectors/hello-react/dist/app.bundle.js && ' +
     'test -s packages/connectors/hello-react/dist/app.bundle.css && ' +
     'test "$(wc -c < packages/connectors/hello-react/dist/app.bundle.js)" -lt 10000 && ' +
     'grep -q "Ensemble" packages/connectors/hello-react/dist/app.bundle.js && ' +
     'grep -q "bg-background" packages/guest-runtime/dist/runtime.css'
+  );
+
+  // Sandboxed reference: hello-sandboxed
+  sh('cd packages/connectors/hello-sandboxed && pnpm run build');
+  sh(
+    'test -s packages/connectors/hello-sandboxed/dist/app.bundle.js && ' +
+    // Sandboxed bundle has its own UI; still expected to be small but not
+    // as tight as the trusted one (no shared runtime). 20KB ceiling.
+    'test "$(wc -c < packages/connectors/hello-sandboxed/dist/app.bundle.js)" -lt 20000 && ' +
+    // Confirms the postMessage SDK is wired (sandboxed apps must use it).
+    'grep -q "ensemble:" packages/connectors/hello-sandboxed/dist/app.bundle.js'
   );
 }
 
@@ -208,7 +220,7 @@ sh(`git checkout -b ${releaseBranch}`, { write: true });
 console.log('▶ Staging dist artifacts');
 const distGlobs = releasedPackages.map((p) => `${p.dir}/dist`).join(' ');
 sh(`git add -f ${distGlobs}`, { write: true });
-sh('git add package.json packages/*/package.json packages/guest/*/package.json templates/guest-react/package.json', { write: true });
+sh('git add package.json packages/*/package.json packages/guest/*/package.json templates/guest-react/package.json templates/guest-sandboxed/package.json', { write: true });
 
 // 6. Commit and tag
 console.log(`▶ Committing and tagging v${version}`);

@@ -1,0 +1,12 @@
+name = "hello-sandboxed-connector"
+main = "src/index.ts"
+compatibility_date = "2026-04-08"
+compatibility_flags = ["nodejs_compat"]
+
+[dev]
+port = 8790
+
+[[rules]]
+type = "Text"
+globs = ["**/*.bundle.js"]
+fallthrough = false

@@ -53,6 +53,7 @@ function buildTsc(pkgDir, label) {
 buildTsc('packages/guest/core', 'guest/core');
 buildTsc('packages/sdk', 'sdk');
 buildTsc('packages/ui', 'ui');
+buildTsc('packages/guest-sandbox', 'guest-sandbox');
 
 // 2. guest/cloudflare
 buildTsc('packages/guest/cloudflare', 'guest/cloudflare');

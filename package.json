@@ -98,6 +98,14 @@
     "./guest-runtime/jsx-dev-runtime": {
       "types": "./packages/guest-runtime/dist/jsx-runtime.d.ts",
       "import": "./packages/guest-runtime/dist/jsx-runtime.js"
+    },
+    "./guest-sandbox": {
+      "types": "./packages/guest-sandbox/dist/index.d.ts",
+      "import": "./packages/guest-sandbox/dist/index.js"
+    },
+    "./guest-sandbox/protocol": {
+      "types": "./packages/guest-sandbox/dist/protocol.d.ts",
+      "import": "./packages/guest-sandbox/dist/protocol.js"
     }
   },
   "files": [
@@ -119,8 +127,11 @@
     "packages/guest/cloudflare/README.md",
     "packages/guest-runtime/dist",
     "packages/guest-runtime/README.md",
+    "packages/guest-sandbox/dist",
+    "packages/guest-sandbox/README.md",
     "scripts/create-guest-app.mjs",
     "templates/guest-react/**",
+    "templates/guest-sandboxed/**",
     "RELEASING.md",
     "LICENSE",
     "README.md"

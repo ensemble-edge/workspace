@@ -1,10 +1,26 @@
 # Building a guest worker for Ensemble Workspace
 
-> **Workspace version:** v0.1.5+ (the runtime-based architecture)
+> **Workspace version:** v0.1.6+
 > **Audience:** familiar with Cloudflare Workers + wrangler
-> **Reference implementation:** [`packages/connectors/hello-react/`](../../packages/connectors/hello-react/)
+> **Reference implementations:**
+> - [`packages/connectors/hello-react/`](../../packages/connectors/hello-react/) — trusted (pixel-native UI)
+> - [`packages/connectors/hello-sandboxed/`](../../packages/connectors/hello-sandboxed/) — sandboxed (iframe isolation)
 
-A guest worker is a Cloudflare Worker that renders inside an iframe in the workspace shell. Its UI is a tiny React bundle that pulls all of React + workspace UI components from a workspace-served runtime. Bundles are ~1 KB. Workspace theme settings (brand, fonts, spacing, radius) propagate to every guest app automatically — no guest redeploy needed.
+A guest worker is a Cloudflare Worker that renders inside an iframe in the workspace shell. There are **two isolation modes** — pick based on whether you trust the guest code:
+
+| Mode | When to use | UI | Sandbox |
+|---|---|---|---|
+| **trusted** (default) | First-party apps, your own code, audited partners | Pixel-native via workspace's runtime (React + UI components) | `allow-scripts` + `allow-same-origin` + forms + popups |
+| **sandboxed** | Third-party apps, customer-installed widgets, agent-generated code | Bring your own (any framework, any DOM) | `allow-scripts` only — no same-origin, no host cookies, no workspace runtime |
+
+The shell renders both the same way (iframe in the viewport). The host's `guest_apps.isolation` column controls the sandbox attribute and which contract the iframe gets to use.
+
+## Which one do you want?
+
+- **"I want this app to look like a built-in workspace app, no manual styling work, and follow brand changes automatically."** → trusted. Use [`templates/guest-react/`](../../templates/guest-react/) or `create-guest-app` with no `--isolation` flag.
+- **"This code is from a third party and shouldn't be able to read workspace cookies or share React with the host."** → sandboxed. Use [`templates/guest-sandboxed/`](../../templates/guest-sandboxed/) or `create-guest-app --isolation sandboxed`.
+
+If you don't have a clear answer, default to **trusted** — it's the lower-friction option for apps you control.
 
 ---
 
@@ -74,6 +90,21 @@ Then register your app (one-time, per workspace):
 
 Your app appears in the sidebar immediately.
 
+### …or scaffold a sandboxed app
+
+For untrusted code, add `--isolation sandboxed`:
+
+```bash
+node node_modules/@ensemble-edge/workspace/scripts/create-guest-app.mjs \
+  ./apps/third-party-thing \
+  --name "Third-Party Thing" \
+  --id third-party-thing \
+  --icon lock \
+  --isolation sandboxed
+```
+
+This produces a template that uses [`@ensemble-edge/workspace/guest-sandbox`](../../packages/guest-sandbox/) instead of the runtime. The guest app brings its own UI (any framework, any DOM) and talks to the host through typed `postMessage`. When you insert the `guest_apps` row for it, set `isolation = 'sandboxed'` (see the template's generated README).
+
 ---
 
 ## What a guest app looks like
@@ -132,6 +163,55 @@ The full `EnsembleRuntime` type lives in [`packages/guest-runtime/src/runtime.ts
 - `cn` — the className composer
 
 Need something not in this list? File feedback; we'll add it to v1 (additive changes only) or surface it in v2 if it requires breaking the contract.
+
+---
+
+## What a sandboxed guest app looks like
+
+Plain DOM, no framework — but it's whatever you want. The only constraint is that the only way to talk to the host is `postMessage`, wrapped by [`@ensemble-edge/workspace/guest-sandbox`](../../packages/guest-sandbox/):
+
+```ts
+// src/app.ts (no JSX — bring your own UI if you want one)
+import { connectToHost } from '@ensemble-edge/workspace/guest-sandbox';
+
+const host = connectToHost();
+host.ready();
+
+host.onContext((ctx) => {
+  console.log('host context:', ctx);
+});
+
+document.body.innerHTML = `
+  <h1>My App</h1>
+  <button id="x">Audit something</button>
+`;
+document.getElementById('x')!.addEventListener('click', () => {
+  host.audit('clicked', { button: 'x' });
+});
+```
+
+The full message protocol is in [`packages/guest-sandbox/src/protocol.ts`](../../packages/guest-sandbox/src/protocol.ts). v1 freezes these shapes; additive evolution only.
+
+| Guest → Host | Host → Guest |
+|---|---|
+| `ready()` — guest is mounted | `onContext(cb)` — workspace pushes context (path, etc.) |
+| `navigate(path)` — request host nav | `onThemeChange(cb)` — workspace tells guest mode changed |
+| `audit(event, details)` — log to workspace audit trail | |
+| `resize(heightPx)` — request iframe sizing | |
+
+Sandboxed apps **don't** get workspace's React, `@ensemble-edge/workspace/ui`, or `window.Ensemble`. They get the iframe and a typed mailbox.
+
+### What sandboxed apps lose
+
+- No same-origin → can't read workspace cookies, can't fetch `/_ensemble/...` with auth (would need to relay through `postMessage`)
+- No shared React → bigger bundle if you ship your own framework
+- No automatic theme inheritance → if you want workspace's brand colors, fetch `/_ensemble/brand/css` and inline it yourself
+
+### What sandboxed apps gain
+
+- Browser-enforced isolation. A bug or malicious code in the guest can't touch the host.
+- Freedom of framework. Vue, Svelte, htmx, vanilla DOM, Streamlit-embedded — all valid.
+- Independent deployment cadence. The host's runtime contract (v1, v2, …) doesn't matter to sandboxed apps; they only depend on the postMessage protocol version.
 
 ---
 

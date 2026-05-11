@@ -8,6 +8,7 @@ import type { Migration } from '../migrate';
 import { migration as m001 } from './001_initial';
 import { migration as m002 } from './002_guest_apps';
 import { migration as m003 } from './003_brand_groups';
+import { migration as m004 } from './004_guest_apps_isolation';
 
 /**
  * All migrations in order.
@@ -17,4 +18,5 @@ export const migrations: Migration[] = [
   m001,
   m002,
   m003,
+  m004,
 ];

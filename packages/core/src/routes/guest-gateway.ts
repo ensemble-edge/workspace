@@ -46,6 +46,10 @@ interface AppRegistration {
   endpoint_url?: string;
   // Required permissions to use this app
   required_role?: 'guest' | 'member' | 'admin' | 'owner';
+  // Isolation mode — drives how the shell renders this app's iframe.
+  // 'trusted'   = shared origin, loads workspace runtime (default)
+  // 'sandboxed' = strict iframe sandbox, postMessage-only communication
+  isolation?: 'trusted' | 'sandboxed';
 }
 
 /**
@@ -106,7 +110,14 @@ export function createGuestGatewayRoutes() {
       // Fetch manifest from the app itself
       const manifest = await fetchAppManifest(c.env, app);
 
-      return c.json(manifest);
+      // Merge the host-controlled `isolation` field into the response so
+      // the shell can decide how to render the iframe. The guest's own
+      // manifest cannot self-declare isolation — that's a host decision
+      // recorded in the guest_apps row at install time.
+      return c.json({
+        ...(manifest as Record<string, unknown>),
+        isolation: app.isolation ?? 'trusted',
+      });
     } catch (error) {
       console.error('Failed to get app manifest:', error);
       return c.json({ error: 'Failed to get manifest' }, 500);

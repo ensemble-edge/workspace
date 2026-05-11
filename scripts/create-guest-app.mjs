@@ -30,25 +30,21 @@ import { dirname, join, basename, resolve, relative } from 'node:path';
 import { argv, exit } from 'node:process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// Templates dir relative to this script — works whether script lives at
-// workspace's scripts/ OR at consumer's node_modules/@ensemble-edge/workspace/scripts/
-const templateDir = resolve(__dirname, '..', 'templates', 'guest-react');
-
-if (!existsSync(templateDir)) {
-  console.error(`[create-guest-app] template not found at ${templateDir}`);
-  console.error(`  This script must run from inside the @ensemble-edge/workspace package.`);
-  exit(1);
-}
+// Templates dir is resolved AFTER we parse --isolation (different templates
+// for trusted vs sandboxed). Works whether this script lives at workspace's
+// scripts/ OR at consumer's node_modules/@ensemble-edge/workspace/scripts/.
 
 // ── Parse args ────────────────────────────────────────────────────────────
 const args = argv.slice(2);
 if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
-  console.log('Usage: create-guest-app.mjs <target-dir> [--name "..."] [--id ...] [--icon ...]');
+  console.log('Usage: create-guest-app.mjs <target-dir> [options]');
   console.log('');
   console.log('Options:');
-  console.log('  --name "..."     Display name (e.g. "Quiz CMS"). Default: derived from target-dir.');
-  console.log('  --id <id>        Manifest id (e.g. "quiz-cms"). Default: derived from target-dir.');
-  console.log('  --icon <name>    Lucide icon name (e.g. "clipboard-list"). Default: "sparkles".');
+  console.log('  --name "..."         Display name (e.g. "Quiz CMS"). Default: derived from target-dir.');
+  console.log('  --id <id>            Manifest id (e.g. "quiz-cms"). Default: derived from target-dir.');
+  console.log('  --icon <name>        Lucide icon name (e.g. "clipboard-list"). Default: "sparkles".');
+  console.log('  --isolation <mode>   "trusted" (default) for pixel-native first-party apps,');
+  console.log('                        or "sandboxed" for untrusted/third-party apps.');
   exit(0);
 }
 
@@ -62,10 +58,15 @@ function parseFlags(rest) {
     if (k === '--name') out.name = rest[++i];
     else if (k === '--id') out.id = rest[++i];
     else if (k === '--icon') out.icon = rest[++i];
+    else if (k === '--isolation') out.isolation = rest[++i];
     else {
       console.error(`[create-guest-app] unknown flag: ${k}`);
       exit(1);
     }
+  }
+  if (out.isolation && out.isolation !== 'trusted' && out.isolation !== 'sandboxed') {
+    console.error(`[create-guest-app] --isolation must be "trusted" or "sandboxed", got "${out.isolation}"`);
+    exit(1);
   }
   return out;
 }
@@ -76,12 +77,23 @@ const slug = basename(targetDir).toLowerCase().replace(/[^a-z0-9-]/g, '-');
 const id = opts.id || slug;
 const name = opts.name || titleCase(slug);
 const icon = opts.icon || 'sparkles';
+const isolation = opts.isolation || 'trusted';
 // Worker name: prefix with "guest-" if the slug doesn't already include "worker"
 const workerName = /worker/.test(slug) ? slug : `${slug}-guest`;
 // Binding name: SCREAMING_SNAKE_CASE of the id
 const bindingName = id.toUpperCase().replace(/-/g, '_');
-// React component name: PascalCase, must be a valid JS identifier
+// React component name: PascalCase, must be a valid JS identifier (only used by trusted template)
 const componentName = pascalCase(id).replace(/[^A-Za-z0-9_]/g, '');
+
+// Template choice depends on isolation mode.
+const templateName = isolation === 'sandboxed' ? 'guest-sandboxed' : 'guest-react';
+const templateDir = resolve(__dirname, '..', 'templates', templateName);
+
+if (!existsSync(templateDir)) {
+  console.error(`[create-guest-app] template not found at ${templateDir}`);
+  console.error(`  This script must run from inside the @ensemble-edge/workspace package.`);
+  exit(1);
+}
 
 function titleCase(s) {
   return s.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
@@ -97,6 +109,8 @@ console.log(`  app name:      ${name}`);
 console.log(`  icon:          ${icon}`);
 console.log(`  worker name:   ${workerName}`);
 console.log(`  binding name:  ${bindingName}`);
+console.log(`  isolation:     ${isolation}`);
+console.log(`  template:      ${templateName}`);
 console.log('');
 
 if (existsSync(targetDir)) {

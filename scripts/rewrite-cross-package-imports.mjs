@@ -79,6 +79,8 @@ function resolveSpecifier(spec, file) {
   if (spec === '@ensemble-edge/guest-runtime') return 'packages/guest-runtime/dist/index';
   if (spec === '@ensemble-edge/guest-runtime/assets') return 'packages/guest-runtime/dist/assets';
   if (spec === '@ensemble-edge/guest-runtime/jsx-runtime') return 'packages/guest-runtime/dist/jsx-runtime';
+  if (spec === '@ensemble-edge/guest-sandbox') return 'packages/guest-sandbox/dist/index';
+  if (spec === '@ensemble-edge/guest-sandbox/protocol') return 'packages/guest-sandbox/dist/protocol';
   if (spec === '@ensemble-edge/sdk') return 'packages/sdk/dist/index';
   if (spec === '@ensemble-edge/ui') return 'packages/ui/dist/index';
   if (spec.startsWith('@ensemble-edge/ui/')) {
