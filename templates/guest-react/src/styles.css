@@ -1,2 +1,9 @@
-@import '@ensemble-edge/workspace/ui/globals.css';
+/*
+ * Tailwind for app-local class strings.
+ *
+ * Workspace's runtime already serves the full design-token set via
+ * /_ensemble/runtime/v1/runtime.css. This file only generates classes
+ * YOU reference in src/ that the runtime didn't ship.
+ */
+@import 'tailwindcss';
 @source './**/*.{ts,tsx}';

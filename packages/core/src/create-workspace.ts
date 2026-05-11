@@ -30,6 +30,7 @@ import { registerCoreApps } from './apps';
 import { generateBrandCss, getSavedThemeMode } from './apps/core/brand/css';
 // Shell assets are built by @ensemble-edge/shell and exported as strings
 import { SHELL_JS, SHELL_CSS } from '@ensemble-edge/shell/assets';
+import { RUNTIME_JS, RUNTIME_CSS, RUNTIME_VERSION } from '@ensemble-edge/guest-runtime/assets';
 
 /**
  * Cloudflare Worker instance returned by createWorkspace.
@@ -360,6 +361,29 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
 
   app.get('/_ensemble/shell/shell.css', (c) => {
     return c.text(SHELL_CSS, 200, {
+      'Content-Type': 'text/css; charset=utf-8',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    });
+  });
+
+  // ============================================================================
+  // Guest Runtime — served to iframe-side of guest apps
+  // ============================================================================
+  // The runtime bundle exposes React + workspace UI + layout primitives on
+  // window.Ensemble. Guest apps load it via <script src="..."> and call
+  // Ensemble.mount(YourComponent). Guest bundles ship only their own code.
+  //
+  // Versioned URL: /_ensemble/runtime/v1/* . Breaking changes ship as /v2/.
+  // Cache-Control immutable + 1y because tagged runtime versions never change.
+  app.get(`/_ensemble/runtime/v${RUNTIME_VERSION}/runtime.js`, (c) => {
+    return c.text(RUNTIME_JS, 200, {
+      'Content-Type': 'application/javascript; charset=utf-8',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    });
+  });
+
+  app.get(`/_ensemble/runtime/v${RUNTIME_VERSION}/runtime.css`, (c) => {
+    return c.text(RUNTIME_CSS, 200, {
       'Content-Type': 'text/css; charset=utf-8',
       'Cache-Control': 'public, max-age=31536000, immutable',
     });

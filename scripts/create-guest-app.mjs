@@ -80,9 +80,14 @@ const icon = opts.icon || 'sparkles';
 const workerName = /worker/.test(slug) ? slug : `${slug}-guest`;
 // Binding name: SCREAMING_SNAKE_CASE of the id
 const bindingName = id.toUpperCase().replace(/-/g, '_');
+// React component name: PascalCase, must be a valid JS identifier
+const componentName = pascalCase(id).replace(/[^A-Za-z0-9_]/g, '');
 
 function titleCase(s) {
   return s.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+}
+function pascalCase(s) {
+  return s.split(/[-_\s]+/).map((w) => w[0].toUpperCase() + w.slice(1)).join('');
 }
 
 console.log(`[create-guest-app] Creating new guest app:`);
@@ -106,6 +111,7 @@ const replacements = {
   '{{ICON}}': icon,
   '{{WORKER_NAME}}': workerName,
   '{{BINDING_NAME}}': bindingName,
+  '{{APP_COMPONENT_NAME}}': componentName,
 };
 
 function copyTree(src, dst) {

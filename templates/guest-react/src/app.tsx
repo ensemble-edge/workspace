@@ -1,38 +1,36 @@
-import { createRoot } from 'react-dom/client';
-import {
-  Card, CardHeader, CardTitle, CardDescription, CardContent,
-  Button,
-} from '@ensemble-edge/workspace/ui';
+/**
+ * Your guest app. Just JSX. No React import, no UI import, no styles.
+ *
+ * Workspace's runtime serves React, Radix UI, and the @ensemble-edge/ui
+ * component library, attached to window.Ensemble. This file's compiled
+ * output contains ONLY this file's factory calls — typically ~1 KB.
+ *
+ * Change workspace settings (brand color, font, spacing, radius) and this
+ * app picks up the new values automatically. No redeploy needed.
+ */
+import type { EnsembleRuntime } from '@ensemble-edge/workspace/guest-runtime';
 
-function App() {
-  // Layout matches core app pages — see hello-react reference connector.
-  // Outer: space-y-6 between header and content. No bg-background or
-  // min-h-screen — the iframe inherits the workspace theme via
-  // /_ensemble/brand/css and fills its container via the shell's flex layout.
+declare const Ensemble: EnsembleRuntime;
+const { Page, Card, CardHeader, CardTitle, CardDescription, CardContent, Button } = Ensemble;
+
+export default function {{APP_COMPONENT_NAME}}() {
   return (
-    <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">{{APP_NAME}}</h1>
-        <p className="text-muted-foreground">
-          A new guest app — replace this placeholder with your real UI.
-        </p>
-      </div>
-
+    <Page
+      title="{{APP_NAME}}"
+      description="A new guest app — replace this with your real UI."
+    >
       <Card>
         <CardHeader>
           <CardTitle>Getting started</CardTitle>
           <CardDescription>
-            Edit <code className="font-mono text-sm">src/app.tsx</code> to build your interface.
-            Components come from <code className="font-mono text-sm">@ensemble-edge/workspace/ui</code>.
+            Edit <code>src/app.tsx</code> to build your interface. Components are
+            destructured from <code>Ensemble</code> (typed via @ensemble-edge/workspace/guest-runtime).
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Button variant="default">Primary action</Button>
+          <Button>Primary action</Button>
         </CardContent>
       </Card>
-    </div>
+    </Page>
   );
 }
-
-const root = createRoot(document.getElementById('root')!);
-root.render(<App />);

@@ -76,6 +76,9 @@ function resolveSpecifier(spec, file) {
     return `packages/guest/core/dist/${spec.slice('@ensemble-edge/guest/'.length)}`;
   }
   if (spec === '@ensemble-edge/guest-cloudflare') return 'packages/guest/cloudflare/dist/index';
+  if (spec === '@ensemble-edge/guest-runtime') return 'packages/guest-runtime/dist/index';
+  if (spec === '@ensemble-edge/guest-runtime/assets') return 'packages/guest-runtime/dist/assets';
+  if (spec === '@ensemble-edge/guest-runtime/jsx-runtime') return 'packages/guest-runtime/dist/jsx-runtime';
   if (spec === '@ensemble-edge/sdk') return 'packages/sdk/dist/index';
   if (spec === '@ensemble-edge/ui') return 'packages/ui/dist/index';
   if (spec.startsWith('@ensemble-edge/ui/')) {

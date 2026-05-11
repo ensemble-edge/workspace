@@ -12,11 +12,12 @@
  * Build order (matters for type resolution downstream):
  *   1. guest/core, sdk, ui     (no internal deps; parallelizable)
  *   2. guest/cloudflare         (uses guest types)
- *   3. shell                    (needs ui types + emits assets.d.ts)
- *   4. core                     (needs shell/assets types)
- *   5. auth                     (re-exports from core)
+ *   3. shell                    (needs ui; emits assets.d.ts)
+ *   4. guest-runtime            (needs ui; emits assets.d.ts that core imports)
+ *   5. core                     (needs shell/assets + guest-runtime/assets types)
+ *   6. auth                     (re-exports from core)
  *
- * @ensemble-edge/cli is intentionally excluded — deferred to v0.2.0.
+ * @ensemble-edge/cli is intentionally excluded — deferred.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -60,10 +61,20 @@ buildTsc('packages/guest/cloudflare', 'guest/cloudflare');
 console.log('\n[ensemble:build] shell');
 run('node', [join(repoRoot, 'packages/shell/build.js')], { cwd: join(repoRoot, 'packages/shell') });
 
-// 4. core
+// 4. guest-runtime — first build the TS declarations consumers will see
+// (index.d.ts, jsx-runtime.d.ts), then build the browser runtime + assets.
+// Must complete before core, which imports guest-runtime/assets at type level.
+console.log('\n[ensemble:build] guest-runtime (types)');
+buildTsc('packages/guest-runtime', 'guest-runtime (types)');
+console.log('\n[ensemble:build] guest-runtime (browser bundle)');
+run('node', [join(repoRoot, 'packages/guest-runtime/build.js'), '--prod'], {
+  cwd: join(repoRoot, 'packages/guest-runtime'),
+});
+
+// 5. core
 buildTsc('packages/core', 'core');
 
-// 5. auth
+// 6. auth
 buildTsc('packages/auth', 'auth');
 
 // 6. Rewrite cross-package @ensemble-edge/* specifiers to relative paths.

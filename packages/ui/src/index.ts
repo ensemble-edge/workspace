@@ -249,6 +249,12 @@ export type { StatCardProps } from "./components/ensemble/stat-card";
 export { PageHeader } from "./components/ensemble/page-header";
 export type { PageHeaderProps } from "./components/ensemble/page-header";
 
+// EnsemblePage + EnsembleSection - the canonical page chrome.
+// Both core apps and guest apps render through these primitives so a
+// workspace settings change propagates everywhere automatically.
+export { EnsemblePage, EnsembleSection } from "./components/ensemble/page";
+export type { EnsemblePageProps, EnsembleSectionProps } from "./components/ensemble/page";
+
 // Data Row - label/value pairs for details views
 export { DataRow } from "./components/ensemble/data-row";
 export type { DataRowProps } from "./components/ensemble/data-row";

@@ -1,37 +1,41 @@
-import { createRoot } from 'react-dom/client';
-import {
-  Card, CardHeader, CardTitle, CardDescription, CardContent,
-  Button, Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
-} from '@ensemble-edge/ui';
+/**
+ * The whole guest app. Just JSX. No React import, no UI import, no styles.
+ *
+ * Components come from window.Ensemble at runtime via the jsx-runtime shim
+ * configured in tsconfig.json. The compiled JS contains ONLY this code's
+ * factory calls — about 2 KB total. React, Radix, and all workspace UI
+ * components live in the workspace-served runtime bundle.
+ *
+ * Change workspace settings (brand color, font, spacing) and this app
+ * follows automatically — the runtime is re-served per workspace.
+ */
+import type { EnsembleRuntime } from '@ensemble-edge/guest-runtime';
 
-function App() {
+// Pull the primitives from the runtime. Types check at build time;
+// at runtime these are resolved from window.Ensemble.
+declare const Ensemble: EnsembleRuntime;
+const { Page, Card, CardHeader, CardTitle, CardDescription, CardContent,
+        Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
+        Button } = Ensemble;
+
+export default function HelloReact() {
   const rows = [
-    { id: 'glp1-intake', name: 'GLP-1 Intake', version: '1.0.0' },
-    { id: 'consent', name: 'Patient Consent', version: '0.3.1' },
-    { id: 'demographics', name: 'Demographics', version: '0.0.1' },
+    { id: 'glp1-intake',  name: 'GLP-1 Intake',     version: '1.0.0' },
+    { id: 'consent',      name: 'Patient Consent',  version: '0.3.1' },
+    { id: 'demographics', name: 'Demographics',     version: '0.0.1' },
   ];
 
-  // Layout matches core app pages (see packages/shell/src/apps/core/brand/BrandPage.tsx):
-  //   - Outer container: space-y-6 between header block and content blocks
-  //   - Header block: `text-3xl font-bold tracking-tight` h1 + muted-foreground p
-  //   - NO bg-background or min-h-screen — the iframe's body inherits those
-  //     from /_ensemble/brand/css, and the iframe itself fills its container
-  //     via the shell's AppViewPage flex layout.
   return (
-    <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Hello, React</h1>
-        <p className="text-muted-foreground">
-          A reference guest app using @ensemble-edge/ui inside an iframe.
-        </p>
-      </div>
-
+    <Page
+      title="Hello, React"
+      description="A reference guest app using @ensemble-edge/workspace primitives."
+    >
       <Card>
         <CardHeader>
           <CardTitle>Form schemas (demo data)</CardTitle>
           <CardDescription>
-            This renders with the host workspace&apos;s brand tokens. Change the brand
-            in workspace settings — this view follows.
+            Padding, fonts, colors, and radius are inherited from the host
+            workspace. Change them in workspace settings — this view follows.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -57,9 +61,6 @@ function App() {
           </Table>
         </CardContent>
       </Card>
-    </div>
+    </Page>
   );
 }
-
-const root = createRoot(document.getElementById('root')!);
-root.render(<App />);

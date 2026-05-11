@@ -67,6 +67,7 @@
     "deploy": "npm run build:shell:prod && wrangler deploy"
   },
   "dependencies": {
+    "@ensemble-edge/guest-runtime": "workspace:*",
     "@ensemble-edge/shell": "workspace:*",
     "@ensemble-edge/ui": "workspace:*",
     "@preact/signals-react": "^2.0.0",

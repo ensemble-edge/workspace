@@ -1,124 +1,143 @@
 # `@ensemble-edge/connector-hello-react`
 
-The reference guest app. **Read this file before writing your own.** Everything here is verified to build, deploy, and serve a valid HTML response — but pixel-native rendering inside the host shell only happens when this is installed in a running workspace.
+The canonical reference guest app. **Read this file before writing your own.**
 
-> **To start a new guest app, don't copy this directory by hand.** Run the scaffold command:
+> To start a NEW guest app, don't copy this directory — run the scaffold:
 >
 > ```bash
 > node node_modules/@ensemble-edge/workspace/scripts/create-guest-app.mjs \
->   ./workers/guests/my-app \
->   --name "My App" --id my-app --icon clipboard-list
+>   ./apps/my-app --name "My App" --id my-app --icon clipboard-list
 > ```
 >
-> The scaffold copies [`templates/guest-react/`](../../../templates/guest-react/) — which is this same code, parameterized — and fills in your names. The hello-react connector here is the **reference** (verified by the release pipeline); the scaffold is the **starter** (you customize it).
+> The scaffold uses [`templates/guest-react/`](../../../templates/guest-react/) — same code, parameterized. The hello-react connector here is the **reference** (verified by every release); the scaffold is the **starter** (you customize it).
 
-## What it demonstrates
+## What this demonstrates
 
-- Cloudflare Worker that registers as a guest app via `@ensemble-edge/guest` + `@ensemble-edge/guest-cloudflare`
-- Iframe content is a **React app** built with esbuild
-- Components imported directly from `@ensemble-edge/ui` (Card, Table, Button)
-- Tailwind v4 entry that pulls workspace's design tokens
-- Bundle inlined into the worker via wrangler's Text loader rules
-- Live theme: links `/_ensemble/brand/css` so brand changes propagate without redeploy
+The Ensemble guest-app architecture:
 
-## Verified bundle profile
+- A Cloudflare Worker that registers as a guest app
+- An iframe-side React app that imports nothing — it pulls React, Radix UI, and workspace UI primitives from `window.Ensemble` at runtime
+- The runtime is served by the host workspace at `/_ensemble/runtime/v1/runtime.js` and cached forever
+- **Guest worker bundle: ~1 KB gzipped** (just this app's JSX factory calls)
+- Brand color, font, spacing, radius — all inherited from the host workspace automatically, even after the guest is deployed
 
-- JS: 404 KB minified / **125 KB gzipped**
-- CSS: 56 KB / **9 KB gzipped**
-- Single copy of React + React-DOM (measured via esbuild metafile)
-
-## How it's built
+## How the pieces fit
 
 ```
-src/styles.css      → tailwindcss → dist/app.bundle.css   (links workspace tokens)
-src/app.tsx         → esbuild     → dist/app.bundle.js    (React + workspace UI + your code)
-src/index.ts                                              (worker entry; imports bundles as text)
+Browser
+  │
+  ├── Loads /apps/hello-react in the shell
+  │   ↓
+  │   Shell renders <iframe src="/_ensemble/apps/hello-react/">
+  │
+  └── Iframe content:
+      ├── 1. Loads /_ensemble/brand/css        ← workspace tokens
+      ├── 2. Loads /_ensemble/runtime/v1/runtime.css ← utility classes
+      ├── 3. Loads /_ensemble/runtime/v1/runtime.js  ← React + UI on window.Ensemble
+      ├── 4. Loads this app's tiny app.bundle.js     ← assigns window.__EnsembleApp
+      └── 5. Calls window.Ensemble.mount(window.__EnsembleApp)
+            ↓
+          Same React. Same components. Same theme tokens.
+          Identical chrome to any core app in the workspace.
 ```
 
-`wrangler.toml` has a `[[rules]]` block declaring `**/*.bundle.{js,css}` as Text modules — so `import bundleJs from '../dist/app.bundle.js'` resolves to a string at deploy time.
+## Files
 
-## Running locally
+| File | What it is |
+|---|---|
+| `src/app.tsx` | The React app — pure JSX, no imports except types |
+| `src/index.ts` | The worker entry — serves the HTML shell + the bundled app |
+| `src/styles.css` | Tailwind v4 entry (tiny — most utilities already in the runtime) |
+| `build.js` | esbuild + tailwind. Emits `dist/app.bundle.{js,css}`. |
+| `wrangler.toml` | Includes `[[rules]] type = "Text"` to inline `dist/app.bundle.js` as a string at deploy time |
+| `tsconfig.json` | `jsxImportSource: "@ensemble-edge/guest-runtime"` — JSX compiles against the shim, not React |
+
+## Build + run
 
 ```bash
-pnpm install         # workspace install
-pnpm run build       # builds dist/app.bundle.{js,css}
-pnpm run dev         # wrangler dev on :8789
+pnpm install
+pnpm run build         # builds dist/app.bundle.{js,css} — about 1 second
+pnpm run dev           # wrangler dev on :8789
 ```
 
-A bare GET will return 400 `MISSING_CONTEXT` — that's correct. The worker rejects requests without `X-Ensemble-*` headers (which the workspace gateway injects). Test with the headers manually:
+A bare GET returns `HTTP 400 MISSING_CONTEXT` — correct, the worker rejects requests without the gateway's headers. Smoke test:
 
 ```bash
 curl -i http://127.0.0.1:8789/ \
   -H "X-Ensemble-Workspace-Id: ws_test" \
   -H "X-Ensemble-User-Id: usr_test" \
-  -H "X-Ensemble-User-Email: test@example.com" \
+  -H "X-Ensemble-User-Email: t@x.com" \
   -H "X-Ensemble-App-Id: hello-react" \
   -H "X-Ensemble-Capability-Token: dev" \
   -H "X-Ensemble-Request-Id: 00000000-0000-0000-0000-000000000000"
 ```
 
-Should return `HTTP 200`, `Content-Type: text/html`, with a full HTML page containing inlined React + Tailwind.
+Returns `HTTP 200`, `Content-Type: text/html`, ~2.6 KB. The HTML includes the inlined app bundle and the three `/_ensemble/*` link/script tags.
 
-## Installing into a workspace
+## Install into a workspace
 
-After `wrangler deploy`, install it as a guest app in your workspace:
+After `wrangler deploy`:
 
-1. Add a service binding in your **workspace** worker's `wrangler.toml`:
-
+1. Workspace `wrangler.toml`:
    ```toml
    [[services]]
    binding = "HELLO_REACT"
    service = "hello-react-connector"
    ```
-
 2. Redeploy the workspace worker.
-
-3. Insert a `guest_apps` row in the workspace's D1:
-
+3. Register in the workspace's D1:
    ```bash
    wrangler d1 execute <workspace-db> --remote --command "
      INSERT INTO guest_apps (
        workspace_id, id, name, icon, category,
        connection_type, binding_name, enabled, required_role
      ) VALUES (
-       'YOUR_WORKSPACE_ID', 'hello-react', 'Hello, React', 'sparkles', 'tool',
+       '<YOUR_WORKSPACE_ID>', 'hello-react', 'Hello, React', 'sparkles', 'tool',
        'service_binding', 'HELLO_REACT', 1, 'member'
      );
    "
    ```
+4. Open the workspace. "Hello, React" appears in the sidebar.
 
-4. Open the workspace. Sidebar should show **Hello, React**. Clicking it loads the iframe → React app renders.
+## Bundle profile
 
-## Debugging order, if it doesn't render
+Measured after a fresh `pnpm run build`:
 
-Work through these in order — most likely causes first.
+| Asset | Size | Gzipped |
+|---|---|---|
+| `dist/app.bundle.js` | ~2 KB | **~1 KB** |
+| `dist/app.bundle.css` | ~57 KB | **~9 KB** |
 
-1. **Sidebar entry missing.** Verify the `guest_apps` row exists: `SELECT * FROM guest_apps WHERE id='hello-react'`. Confirm `enabled = 1`.
-2. **Sidebar entry present but click → 502 or "App not found".** The service binding isn't routing. Check workspace's `wrangler.toml` `[[services]]` block matches the worker name. Redeploy workspace worker.
-3. **Iframe loads but blank page.** Browser DevTools → Console. Most common: React duplication (Radix throws an internal error). Measure: `grep -oE 'react@[0-9.]+' dist/app.bundle.js | sort -u | wc -l` (must be 1). If 2+, add `pnpm.overrides` at your repo root pinning react/react-dom.
-4. **Iframe renders but no styles.** Browser DevTools → Network. Is `/_ensemble/brand/css` returning 200? Is the inline `<style>` block in the HTML present? View source the iframe.
-5. **Components render but look weird (default Tailwind colors instead of workspace's).** Workspace tokens aren't propagating. Check `src/styles.css`: the FIRST line MUST be `@import '@ensemble-edge/ui/globals.css';`. Order matters.
-6. **Layout is broken or class hover/focus states don't work.** You probably used `class=` instead of `className=`. This is React — `className` only.
+The runtime served by workspace is ~125 KB gzipped JS + ~9 KB gzipped CSS. The browser caches it once per workspace; every additional guest app load is ~1 KB.
+
+## What workspace settings flow through automatically
+
+Once installed, change any of these in workspace settings and refresh the iframe — no redeploy:
+
+- Brand colors (the entire shadcn token set: background, foreground, primary, accent, border, etc.)
+- Typography (heading font, body font)
+- Radius
+- Content padding / card padding (read by `EnsemblePage` and `Card`)
+- Light/dark mode
+
+You inherit them because the iframe loads `/_ensemble/brand/css` on every page load — that endpoint is regenerated per request from the host's D1.
+
+## Debugging order, if your app doesn't render
+
+1. **No sidebar entry.** Verify `guest_apps` row: `SELECT * FROM guest_apps WHERE id='hello-react'`. Confirm `enabled = 1`.
+2. **Sidebar entry → "App not found" / 502.** Service binding misconfigured. Check the workspace's `wrangler.toml` has the `[[services]]` block and that the workspace was redeployed.
+3. **Iframe loads, blank page.** Open browser DevTools console. Most likely cause: a runtime script load failure. Check Network for `/_ensemble/runtime/v1/runtime.js` returning 200.
+4. **Iframe loads, error "Ensemble runtime not loaded".** The `<script>` tag for `runtime.js` is missing from your HTML shell, or it failed to execute. Check `src/index.ts`.
+5. **Iframe renders, but with default Tailwind colors not workspace's brand.** `/_ensemble/brand/css` link is missing in your HTML shell. Should be the first stylesheet.
+6. **Looks weird, layout broken.** You probably used `class=` instead of `className=`. This is React — `className` only.
 
 ## Sharp edges to know
 
-- **Text rules require the file to exist at build time.** `wrangler deploy` fails if `dist/app.bundle.js` doesn't exist. The `predeploy` script in `package.json` ensures the build runs first.
-- **CSS class strings must be string literals.** Tailwind v4 can't extract dynamically-constructed classes. `className={\`bg-\${color}\`}` won't generate the utility class. Use `className={cn(color === 'primary' ? 'bg-primary' : 'bg-secondary')}` instead.
-- **Server-side `process.env` is not available.** Workers runtime has no `process`. Use `env.*` from the worker's `fetch(request, env, ctx)` signature.
-- **The HTML shell is served for ALL paths.** That's intentional. Routing inside the iframe is the React app's job (React Router or similar). The worker doesn't differentiate routes.
+- **The runtime version is in the URL** (`/v1/`). Workspace can ship v2 in the future; v1 keeps working forever. Bump your scaffold to v2 when you opt in.
+- **The HTML shell is identical across all guest apps.** Don't customize it. If you need to load extra `<script>`s, do it INSIDE your React app.
+- **`window.Ensemble` is a global.** Treat it as the API surface. Don't poke at React internals through it.
+- **CSS class strings must be string literals** for Tailwind to extract them. `cn('bg-primary')` works; `cn(\`bg-\${color}\`)` doesn't.
 
-## File map
+## Versioning
 
-```
-hello-react/
-├── package.json         scripts: build:js, build:css, build, dev, deploy, predeploy
-├── wrangler.toml        Text rules for inlining bundles
-├── tsconfig.json        React + Workers types
-├── src/
-│   ├── index.ts         worker entry; serves HTML shell on every path
-│   ├── app.tsx          React app; imports from @ensemble-edge/ui
-│   └── styles.css       Tailwind v4 entry
-└── dist/                gitignored; built before deploy
-    ├── app.bundle.js
-    └── app.bundle.css
-```
+Workspace's runtime is versioned (`/v1/`, `/v2/`, ...). The `EnsembleRuntime` type from `@ensemble-edge/workspace/guest-runtime` defines what's in v1. New components can be added; existing API surface won't change within v1.

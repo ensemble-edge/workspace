@@ -86,6 +86,18 @@
     "./guest/cloudflare": {
       "types": "./packages/guest/cloudflare/dist/index.d.ts",
       "import": "./packages/guest/cloudflare/dist/index.js"
+    },
+    "./guest-runtime": {
+      "types": "./packages/guest-runtime/dist/index.d.ts",
+      "import": "./packages/guest-runtime/dist/index.js"
+    },
+    "./guest-runtime/jsx-runtime": {
+      "types": "./packages/guest-runtime/dist/jsx-runtime.d.ts",
+      "import": "./packages/guest-runtime/dist/jsx-runtime.js"
+    },
+    "./guest-runtime/jsx-dev-runtime": {
+      "types": "./packages/guest-runtime/dist/jsx-runtime.d.ts",
+      "import": "./packages/guest-runtime/dist/jsx-runtime.js"
     }
   },
   "files": [
@@ -105,6 +117,8 @@
     "packages/guest/core/README.md",
     "packages/guest/cloudflare/dist",
     "packages/guest/cloudflare/README.md",
+    "packages/guest-runtime/dist",
+    "packages/guest-runtime/README.md",
     "scripts/create-guest-app.mjs",
     "templates/guest-react/**",
     "RELEASING.md",

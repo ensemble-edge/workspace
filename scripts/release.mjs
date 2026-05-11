@@ -49,6 +49,7 @@ const releasedPackages = [
   { dir: 'packages/sdk', name: '@ensemble-edge/sdk' },
   { dir: 'packages/guest/core', name: '@ensemble-edge/guest' },
   { dir: 'packages/guest/cloudflare', name: '@ensemble-edge/guest-cloudflare' },
+  { dir: 'packages/guest-runtime', name: '@ensemble-edge/guest-runtime' },
 ];
 
 function sh(cmd, opts = {}) {
@@ -133,6 +134,7 @@ const releasedDirs = [
   { dir: 'packages/sdk',               config: 'tsconfig.build.json', strict: true },
   { dir: 'packages/guest/core',        config: 'tsconfig.build.json', strict: true },
   { dir: 'packages/guest/cloudflare',  config: 'tsconfig.build.json', strict: true },
+  { dir: 'packages/guest-runtime',     config: 'tsconfig.build.json', strict: true },
 ];
 for (const { dir, config, strict } of releasedDirs) {
   const cmd = `cd ${dir} && pnpm exec tsc -p ${config} --noEmit`;
@@ -172,18 +174,23 @@ if (!dryRun) {
   sh('node scripts/build-all.mjs');
 }
 
-// 3a. Verify the reference connector still builds.
-// hello-react is the canonical "React-native guest app" example. If it stops
-// building, the recipe documented in docs/guides/building-a-guest-worker.md
-// + packages/connectors/hello-react/README.md is broken — meaning the next
-// person to follow the guide hits an error we shipped. Fail the release here.
+// 3a. Verify the reference connector still builds against the runtime.
+// hello-react demonstrates the runtime-based pattern; its bundle should
+// stay tiny (~1 KB gzipped) because React + UI live in the workspace runtime.
+// If hello-react's build breaks, the documented guest-worker recipe is
+// broken — fail the release here.
 console.log('▶ Verifying reference connector (hello-react) builds');
 if (!dryRun) {
   sh('cd packages/connectors/hello-react && pnpm run build');
-  // Spot-check the output to catch silent regressions in Tailwind/CSS chain.
+  // Spot-checks:
+  //  - both bundles produced
+  //  - the JS bundle is tiny (under 10KB unminified — proves React isn't bundled)
+  //  - the JS calls the runtime (proves jsx-runtime shim is working)
   sh(
     'test -s packages/connectors/hello-react/dist/app.bundle.js && ' +
     'test -s packages/connectors/hello-react/dist/app.bundle.css && ' +
+    'test "$(wc -c < packages/connectors/hello-react/dist/app.bundle.js)" -lt 10000 && ' +
+    'grep -q "window.Ensemble" packages/connectors/hello-react/dist/app.bundle.js && ' +
     'grep -q "bg-background" packages/connectors/hello-react/dist/app.bundle.css'
   );
 }

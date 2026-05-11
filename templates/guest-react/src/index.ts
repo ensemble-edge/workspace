@@ -2,10 +2,8 @@ import { defineGuestApp } from '@ensemble-edge/workspace/guest';
 import { createGuestWorker } from '@ensemble-edge/workspace/guest/cloudflare';
 import { Hono } from 'hono';
 
-// @ts-expect-error — Text rule in wrangler.toml converts these to string modules.
+// @ts-expect-error — Text rule in wrangler.toml turns this into a string.
 import bundleJs from '../dist/app.bundle.js';
-// @ts-expect-error — same
-import bundleCss from '../dist/app.bundle.css';
 
 function indexHtml(title: string): string {
   return `<!doctype html>
@@ -15,17 +13,21 @@ function indexHtml(title: string): string {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>${escapeHtml(title)}</title>
   <link rel="stylesheet" href="/_ensemble/brand/css">
+  <link rel="stylesheet" href="/_ensemble/runtime/v1/runtime.css">
+  <script src="/_ensemble/runtime/v1/runtime.js"></script>
   <style>
-    /* Minimal iframe-body reset so workspace's brand tokens are the only
-       authority on layout/colors. */
-    html, body { margin: 0; padding: 0; min-height: 100%; background: hsl(var(--background)); color: hsl(var(--foreground)); }
+    html, body { margin: 0; padding: 0; min-height: 100%;
+                 background: hsl(var(--background));
+                 color: hsl(var(--foreground)); }
     #root { min-height: 100%; }
   </style>
-  <style>${bundleCss as string}</style>
 </head>
 <body>
   <div id="root"></div>
-  <script type="module">${bundleJs as string}</script>
+  <script type="module">
+${bundleJs as string}
+window.Ensemble.mount(window.__EnsembleApp);
+  </script>
 </body>
 </html>`;
 }
