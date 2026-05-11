@@ -118,10 +118,14 @@ console.log('▶ Typechecking released packages...');
 //   - ui:         shell uses ui declarations via ../ui/dist (path-mapped)
 //   - shell:      core uses dist/assets.d.ts at type level
 //   - guest/core: guest/cloudflare imports @ensemble-edge/guest types
-console.log('▶ Pre-building ui + shell + guest/core for typecheck...');
+console.log('▶ Pre-building ui + shell + guest/core + guest-runtime for typecheck...');
 sh('cd packages/ui && pnpm exec tsc -p tsconfig.build.json', { allowFail: false });
 sh('cd packages/shell && node build.js', { allowFail: false });
 sh('cd packages/guest/core && pnpm exec tsc -p tsconfig.build.json', { allowFail: false });
+// guest-runtime: core imports guest-runtime/assets at type level. Both
+// the types (via tsc) and the assets.js (via build.js) must exist.
+sh('cd packages/guest-runtime && pnpm exec tsc -p tsconfig.build.json', { allowFail: false });
+sh('cd packages/guest-runtime && node build.js --prod', { allowFail: false });
 
 const releasedDirs = [
   { dir: 'packages/core',              config: 'tsconfig.build.json', strict: true },
