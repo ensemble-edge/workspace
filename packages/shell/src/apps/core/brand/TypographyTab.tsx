@@ -160,8 +160,10 @@ export function TypographyTab() {
 
   const googleOptions: FontComboboxOption[] = useMemo(
     () =>
-      catalog
-        .filter((f) => f.popularity !== undefined)
+      // Sort by popularity rank (lower = more popular). Keep families
+      // without popularity (rare) at the end so the picker never goes
+      // blank — better than dropping them entirely.
+      [...catalog]
         .sort((a, b) => (a.popularity ?? 9999) - (b.popularity ?? 9999))
         .map((f) => ({ family: f.family, category: f.category })),
     [catalog],

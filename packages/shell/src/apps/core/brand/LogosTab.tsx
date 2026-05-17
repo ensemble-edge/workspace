@@ -646,8 +646,7 @@ function WordmarkTypographyControls({
   const systemOptions: FontComboboxOption[] = SYSTEM_FONTS.map((s) => ({
     family: s.family, category: s.category, hint: 'System',
   }));
-  const googleOptions: FontComboboxOption[] = fontCatalog
-    .filter((f) => f.popularity !== undefined)
+  const googleOptions: FontComboboxOption[] = [...fontCatalog]
     .sort((a, b) => (a.popularity ?? 9999) - (b.popularity ?? 9999))
     .map((f) => ({ family: f.family, category: f.category }));
 

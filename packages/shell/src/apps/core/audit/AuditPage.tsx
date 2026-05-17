@@ -15,6 +15,8 @@ import {
   Skeleton,
 } from '@ensemble-edge/ui';
 
+import { authedFetch } from '../../../state';
+
 interface AuditEvent {
   id: string;
   actor_id: string;

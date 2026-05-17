@@ -57,8 +57,15 @@ export function SessionsTab() {
         }
       } finally {
         setLoading(false);
+        // Snapshot the loaded value as the dirty-tracking baseline. The
+        // hook's mount-time baseline saw `draftValue === null`; once we
+        // populate it from the server, treat that as the new baseline
+        // so the card doesn't read "Unsaved changes" before the
+        // operator has actually changed anything.
+        queueMicrotask(() => status.resetBaseline());
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function save() {

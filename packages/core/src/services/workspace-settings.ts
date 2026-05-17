@@ -16,11 +16,13 @@ interface Env {
 
 export type SettingKey =
   | 'session_ttl_seconds'
-  // v0.1.15.1: when 'true', R2-backed brand assets also serve from
-  // /assets/<key> in addition to the canonical /_ensemble/brand/asset/<key>.
-  // Presentation-only; stored brand_token values stay canonical so
-  // changing this setting cannot break stored data.
-  | 'asset_public_alias_enabled'
+  // v0.1.17+: operator-chosen path segment for the public R2 asset
+  // alias. Empty string = disabled; populated = R2-backed brand assets
+  // serve at /<this-path>/<key> in addition to the canonical
+  // /_ensemble/brand/asset/<key>. Presentation-only — stored brand
+  // token values always reference the canonical path, so changing
+  // this setting cannot break stored data.
+  | 'asset_public_alias_path'
   // v0.1.15.1: when 'true', the public brand guide page at /brand is
   // reachable without auth. When 'false' or unset, /brand 404s.
   | 'public_brand_guide_enabled';
@@ -29,11 +31,51 @@ export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
   // 30 days — matches typical workspace expectations. Operators can
   // dial this down to as little as 1 hour for sensitive deployments.
   session_ttl_seconds: String(30 * 24 * 60 * 60),
-  // Pretty asset path off by default — operators opt in.
-  asset_public_alias_enabled: 'false',
+  // Empty = alias disabled (canonical /_ensemble/brand/asset/<key> only).
+  asset_public_alias_path: '',
   // Brand guide off by default — operators opt in.
   public_brand_guide_enabled: 'false',
 };
+
+/**
+ * Reserved path segments that operators cannot use for the asset
+ * alias. Anything that would shadow a real workspace route, plus
+ * anything starting with `_` (the internal-namespace prefix). The
+ * alias *can* still be set to `assets` — that's the suggested default
+ * and doesn't shadow anything.
+ */
+export const RESERVED_ALIAS_PATHS = new Set([
+  '_ensemble', // can't override the underscore-namespace anyway, but explicit
+  'login', 'logout', 'register',
+  'brand',                // public brand guide
+  'people', 'settings', 'admin', 'auth', 'apps', 'audit', 'home',
+  'health', 'bootstrap',
+  'api',                  // common third-party expectation
+  'static',               // operator could pick it but it's overloaded
+  'public',
+]);
+
+const ALIAS_PATH_RE = /^[a-z][a-z0-9-]{0,30}$/;
+
+/**
+ * Validate a proposed alias-path value. Returns an error message
+ * string if invalid; null if valid. Empty string is valid (disables
+ * the alias).
+ */
+export function validateAliasPath(value: string): string | null {
+  const v = value.trim();
+  if (v === '') return null; // empty = disabled, always valid
+  if (!ALIAS_PATH_RE.test(v)) {
+    return 'Use lowercase letters, digits, and hyphens. Must start with a letter. Max 31 chars.';
+  }
+  if (v.startsWith('_')) {
+    return 'Cannot start with "_" (reserved for workspace internals).';
+  }
+  if (RESERVED_ALIAS_PATHS.has(v)) {
+    return `"${v}" is reserved (it would shadow a workspace route). Try another name.`;
+  }
+  return null;
+}
 
 /** Allowed session TTL values (in seconds) — the UI shows these as options. */
 export const SESSION_TTL_OPTIONS: Array<{ value: number; label: string }> = [

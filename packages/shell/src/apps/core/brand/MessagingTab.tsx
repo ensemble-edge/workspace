@@ -88,14 +88,14 @@ interface SimpleFieldDef {
 }
 
 const SIMPLE_FIELDS: SimpleFieldDef[] = [
-  { key: 'tagline',           label: 'Tagline',            placeholder: 'The intelligent capital platform' },
-  { key: 'elevator_pitch',    label: 'Elevator Pitch',     placeholder: 'One paragraph explaining what you do…', multiline: true, rows: 3 },
-  { key: 'mission',           label: 'Mission Statement',  placeholder: 'Our mission is to…', multiline: true, rows: 2 },
-  { key: 'boilerplate',       label: 'Company Boilerplate', placeholder: 'Ownly Group is an Austin-based fintech…', multiline: true, rows: 3 },
-  { key: 'legal_footer',      label: 'Legal Footer',       placeholder: '© {year} The Ownly Group, LLC.', helpText: 'Use {year} for auto-updating year' },
+  { key: 'tagline',           label: 'Tagline',            placeholder: 'A short, memorable phrase that describes what you do' },
+  { key: 'elevator_pitch',    label: 'Elevator Pitch',     placeholder: 'One paragraph explaining what you do and who you do it for…', multiline: true, rows: 3 },
+  { key: 'mission',           label: 'Mission Statement',  placeholder: 'Your mission in one or two sentences…', multiline: true, rows: 2 },
+  { key: 'boilerplate',       label: 'Company Boilerplate', placeholder: 'A paragraph about the company — used in press releases and footers.', multiline: true, rows: 3 },
+  { key: 'legal_footer',      label: 'Legal Footer',       placeholder: '© {year} Your Company, LLC. All rights reserved.', helpText: 'Use {year} for auto-updating year' },
   { key: 'tone_descriptors',  label: 'Tone Descriptors',   placeholder: 'confident, clear, approachable', helpText: 'Comma-separated adjectives' },
-  { key: 'tone_avoid',        label: 'Tone — Avoid',       placeholder: 'jargon without explanation, hype', helpText: 'Things to never say' },
-  { key: 'voice_guidelines',  label: 'Voice Guidelines',   placeholder: "First person plural ('we'). Active voice…", multiline: true, rows: 3 },
+  { key: 'tone_avoid',        label: 'Tone — Avoid',       placeholder: 'jargon, hype, superlatives', helpText: 'Things to never say' },
+  { key: 'voice_guidelines',  label: 'Voice Guidelines',   placeholder: 'Describe how your brand sounds — voice, person, sentence shape…', multiline: true, rows: 3 },
 ];
 
 const SIMPLE_FIELD_KEYS = new Set(SIMPLE_FIELDS.map((f) => f.key));

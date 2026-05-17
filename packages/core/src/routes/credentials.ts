@@ -31,6 +31,7 @@ import {
 } from '../services/locales';
 import {
   getSetting, setSetting, parseSessionTtl, SESSION_TTL_OPTIONS,
+  validateAliasPath,
   type SettingKey,
 } from '../services/workspace-settings';
 
@@ -100,13 +101,16 @@ export function createCredentialsRoutes(): App {
     });
 
     // Canonical URL is always returned for storage. When the operator
-    // has enabled the public alias (`/assets/<key>`), we also include
-    // it as `display_url` so the UI's "Copy URL" can show the pretty
-    // form. Stored brand_token values stay canonical — changing the
-    // alias toggle never breaks stored data.
+    // has configured a public alias path (e.g. 'media'), we also
+    // include the pretty form (/media/<key>) as `display_url` so the
+    // UI's "Copy URL" can show the operator's chosen path. Stored
+    // brand_token values stay canonical — changing the alias path
+    // never breaks stored data.
     const canonical = `/_ensemble/brand/asset/${encodeURIComponent(key)}`;
-    const aliasEnabled = (await getSetting(c.env, workspace.id, 'asset_public_alias_enabled')) === 'true';
-    const display = aliasEnabled ? `/assets/${encodeURIComponent(key)}` : canonical;
+    const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
+    const display = aliasPath
+      ? `/${aliasPath}/${encodeURIComponent(key)}`
+      : canonical;
 
     return c.json({
       ok: true,
@@ -140,17 +144,27 @@ export function createCredentialsRoutes(): App {
   });
 
   /**
-   * Optional pretty alias for R2-backed brand assets. Serves only when
-   * `asset_public_alias_enabled === 'true'` for the resolved workspace.
-   * The handler always matches the URL shape; the setting gate decides
-   * whether to serve or 404 (so disabling the alias makes the path
-   * disappear cleanly for new requests).
+   * Operator-configurable pretty alias for R2-backed brand assets.
+   *
+   * The route shape is intentionally generic — `/:alias/:key{.+}`
+   * matches *any* two-segment URL. The handler checks the request's
+   * first segment against the workspace's configured
+   * `asset_public_alias_path` setting; if it matches (and is
+   * non-empty), it serves the asset. Otherwise it returns 404, which
+   * Hono's router takes as a non-match and proceeds to other handlers
+   * — including the SPA catchall. So this doesn't shadow real
+   * workspace routes; it only intercepts URLs that operators have
+   * explicitly opted into.
+   *
+   * Reserved names are enforced at write time (see validateAliasPath
+   * in workspace-settings.ts).
    */
-  app.get('/assets/:key{.+}', async (c) => {
+  app.get('/:alias/:key{.+}', async (c) => {
     const workspace = c.get('workspace');
-    if (!workspace?.id) return c.json({ error: 'Not found' }, 404);
-    const enabled = (await getSetting(c.env, workspace.id, 'asset_public_alias_enabled')) === 'true';
-    if (!enabled) return c.json({ error: 'Not found' }, 404);
+    if (!workspace?.id) return c.notFound();
+    const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
+    if (!aliasPath) return c.notFound();
+    if (c.req.param('alias') !== aliasPath) return c.notFound();
     return serveBrandAsset(c, decodeURIComponent(c.req.param('key')));
   });
 
@@ -835,7 +849,7 @@ export function createCredentialsRoutes(): App {
 
   const SETTING_KEYS: SettingKey[] = [
     'session_ttl_seconds',
-    'asset_public_alias_enabled',
+    'asset_public_alias_path',
     'public_brand_guide_enabled',
   ];
   function isSettingKey(k: string): k is SettingKey {
@@ -873,10 +887,14 @@ export function createCredentialsRoutes(): App {
       if (!Number.isFinite(n)) return c.json({ error: 'session_ttl_seconds must be a number' }, 400);
       if (n < 60) return c.json({ error: 'session_ttl_seconds must be >= 60' }, 400);
     }
-    if (key === 'asset_public_alias_enabled' || key === 'public_brand_guide_enabled') {
+    if (key === 'public_brand_guide_enabled') {
       if (body.value !== 'true' && body.value !== 'false') {
         return c.json({ error: `${key} must be "true" or "false"` }, 400);
       }
+    }
+    if (key === 'asset_public_alias_path') {
+      const err = validateAliasPath(body.value);
+      if (err) return c.json({ error: err }, 400);
     }
     const user = c.get('user');
     await setSetting(c.env, workspace.id, key, body.value, user?.id);

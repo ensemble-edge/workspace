@@ -144,29 +144,29 @@ export function IdentityTab() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label>Display Name</Label>
-              <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Ownly" />
+              <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Your company name" />
             </div>
             <div className="space-y-2">
               <Label>Legal Name</Label>
-              <Input value={legalName} onChange={(e) => setLegalName(e.target.value)} placeholder="The Ownly Group, LLC" />
+              <Input value={legalName} onChange={(e) => setLegalName(e.target.value)} placeholder="Legal entity name, e.g. Your Company, LLC" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Founded</Label>
-                <Input value={foundingYear} onChange={(e) => setFoundingYear(e.target.value)} placeholder="2024" />
+                <Input value={foundingYear} onChange={(e) => setFoundingYear(e.target.value)} placeholder="YYYY" />
               </div>
               <div className="space-y-2">
                 <Label>Industry</Label>
-                <Input value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="Fintech" />
+                <Input value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="e.g. SaaS, Fintech, Healthcare" />
               </div>
             </div>
             <div className="space-y-2">
               <Label>Headquarters</Label>
-              <Input value={headquarters} onChange={(e) => setHeadquarters(e.target.value)} placeholder="Austin, TX" />
+              <Input value={headquarters} onChange={(e) => setHeadquarters(e.target.value)} placeholder="City, State or City, Country" />
             </div>
             <div className="space-y-2">
               <Label>Website</Label>
-              <Input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://ownly.com" />
+              <Input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://example.com" />
             </div>
           </CardContent>
           <CardFooter className="gap-3">

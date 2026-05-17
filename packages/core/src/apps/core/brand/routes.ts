@@ -375,8 +375,12 @@ async function fetchGoogleFontsMetadata(): Promise<GoogleFontEntry[]> {
 
   return (parsed.familyMetadataList ?? []).map((f) => {
     const variants = Object.keys(f.fonts ?? {});
-    // Normalize category to lowercase, dropping the "SANS_SERIF"-style spelling.
-    const category = (f.category ?? '').toLowerCase().replace('_', '-');
+    // Google ships categories as Title Case with spaces: "Sans Serif",
+    // "Serif", "Display", "Handwriting", "Monospace". Normalize to
+    // lowercase-hyphenated so the client picker can group by a stable key.
+    const category = (f.category ?? '')
+      .toLowerCase()
+      .replace(/\s+/g, '-');
     return {
       family: f.family,
       category: category as GoogleFontEntry['category'],

@@ -157,15 +157,39 @@ export function writeRoleTokens(
 }
 
 /**
- * Parse a Google Fonts variant string into a structured shape.
- * Examples: '400' → {weight:'400', italic:false}; '700italic' → {weight:'700', italic:true};
- * 'regular' → {weight:'400', italic:false}; 'italic' → {weight:'400', italic:true}.
+ * Parse a Google Fonts variant key into a structured shape.
+ *
+ * Google's metadata-endpoint shape uses keys like:
+ *   '400'   → regular weight 400
+ *   '400i'  → italic weight 400
+ *   '700'   → bold
+ *   '700i'  → bold italic
+ *
+ * Older shapes (still seen in other Google APIs):
+ *   'regular' | 'italic' | '700italic'
+ *
+ * All forms are handled.
  */
 export function parseVariant(v: string): { weight: string; italic: boolean } {
-  const italic = v.endsWith('italic') || v === 'italic';
-  const numeric = v.replace(/italic/, '').trim();
-  if (!numeric || numeric === 'regular') return { weight: '400', italic };
-  return { weight: numeric, italic };
+  if (v === 'regular') return { weight: '400', italic: false };
+  if (v === 'italic') return { weight: '400', italic: true };
+
+  // Old shape: '<digits>italic'
+  if (v.endsWith('italic')) {
+    const numeric = v.slice(0, -'italic'.length);
+    return { weight: numeric || '400', italic: true };
+  }
+
+  // New shape: '<digits>i' (e.g. '400i', '700i')
+  if (/^\d+i$/.test(v)) {
+    return { weight: v.slice(0, -1), italic: true };
+  }
+
+  // Plain numeric: '400', '700'
+  if (/^\d+$/.test(v)) return { weight: v, italic: false };
+
+  // Anything else (variable axis tuples, etc.) — fall back to 400 regular.
+  return { weight: '400', italic: false };
 }
 
 /** Human-readable weight name for UI display. */

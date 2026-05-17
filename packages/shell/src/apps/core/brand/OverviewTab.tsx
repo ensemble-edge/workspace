@@ -119,18 +119,23 @@ export function OverviewTab() {
     <div className="space-y-6">
       {/* Hero */}
       <Card>
-        <CardContent className="py-8">
+        <CardContent className="px-8 py-10">
           <div className="flex items-start justify-between">
-            <div>
+            <div className="space-y-3">
               {/* Renders styled-text segments when configured, image
-                  wordmark when set, or plain name as final fallback. */}
-              <Wordmark
-                segments={wordmarkSegments}
-                imageUrl={spec.logos.wordmark}
-                name={name}
-                imageHeight={48}
-                className="text-4xl"
-              />
+                  wordmark when set, or plain name as final fallback.
+                  Wrap in a block element so the wordmark sits inside
+                  its own line box with proper top padding from the
+                  surrounding flex container. */}
+              <div className="pt-2">
+                <Wordmark
+                  segments={wordmarkSegments}
+                  imageUrl={spec.logos.wordmark}
+                  name={name}
+                  imageHeight={48}
+                  className="text-4xl"
+                />
+              </div>
               {spec.messaging.tagline && (
                 <p className="mt-2 text-lg text-muted-foreground">{spec.messaging.tagline}</p>
               )}
