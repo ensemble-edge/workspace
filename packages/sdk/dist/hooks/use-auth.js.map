@@ -1,0 +1,1 @@
+{"version":3,"file":"use-auth.js","sourceRoot":"","sources":["../../src/hooks/use-auth.ts"],"names":[],"mappings":"AAAA,sCAAsC;AActC,MAAM,UAAU,OAAO;IACrB,4BAA4B;IAC5B,OAAO;QACL,IAAI,EAAE,IAAI;QACV,eAAe,EAAE,KAAK;QACtB,MAAM,EAAE,KAAK,IAAI,EAAE,GAAE,CAAC;KACvB,CAAC;AACJ,CAAC"}
