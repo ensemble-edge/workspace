@@ -14,6 +14,9 @@ pnpm release 0.2.0
 # Then push:
 git push origin release/v0.2.0
 git push origin v0.2.0
+
+# CRITICAL: always switch back to main before doing anything else.
+git checkout main
 ```
 
 That's it. Consumers can immediately:
@@ -21,6 +24,14 @@ That's it. Consumers can immediately:
 ```bash
 pnpm add github:ensemble-edge/workspace#v0.2.0
 ```
+
+> **Always return to `main` after a release.** The release script leaves
+> you checked out on `release/v<version>`. That branch is dist-stuffed
+> and pinned to the released versions — any subsequent commit you make
+> while still on it will pollute the release artifact, and version
+> bumps there will conflict when you try to cherry-pick the next fix
+> onto `main`. The first command after pushing should always be
+> `git checkout main`.
 
 ---
 
@@ -306,6 +317,7 @@ If `v0.1.0` is broken and you need a patch:
 1. From `main`, fix the bug and merge.
 2. `pnpm release 0.1.1` from main.
 3. Push the new tag.
+4. **`git checkout main`** — see the warning in [§ TL;DR](#tldr-for-cutting-a-release).
 
 You don't need to delete the old release branch — leave it alone. Consumers pinned to `v0.1.0` keep working; new installs use `v0.1.1`.
 
