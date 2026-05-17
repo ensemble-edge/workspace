@@ -62,15 +62,53 @@ interface BrandSpec {
   endpoints?: Record<string, string>;
 }
 
+interface ResolvedFontRole {
+  family: string;
+  weight: string;
+  style: 'normal' | 'italic';
+  letterSpacing: string;
+  textTransform: 'none' | 'uppercase' | 'lowercase';
+  fontSize: string;
+  scaleRatio: string;
+  stack: string;
+  label?: string;
+  usage?: string;
+}
+
+type FontRoleKey =
+  | 'display' | 'heading' | 'subheading' | 'body'
+  | 'eyebrow' | 'label' | 'caption' | 'mono';
+
+/** Shared specimen sample text — the canonical English pangram. */
+const SPECIMEN_PANGRAM = 'The quick brown fox jumps over the lazy dog.';
+
+/** Display order of roles in the specimen card. Wordmark omitted by design. */
+const SPECIMEN_ORDER: FontRoleKey[] = [
+  'display', 'heading', 'subheading', 'body', 'eyebrow', 'label', 'caption', 'mono',
+];
+
+/** Compute the three H-step sizes from a base + ratio. Mirrors server logic. */
+function computeScaleStepsClient(baseRem: string, ratio: string): [string, string, string] {
+  const base = parseFloat(baseRem);
+  const r = parseFloat(ratio);
+  if (!isFinite(base) || !isFinite(r) || r <= 0) return [baseRem, baseRem, baseRem];
+  const round = (n: number) => Math.round(n * 10000) / 10000;
+  return [`${round(base)}rem`, `${round(base / r)}rem`, `${round(base / (r * r))}rem`];
+}
+
+function remToPx(rem: string): string {
+  const n = parseFloat(rem);
+  return isFinite(n) ? `${Math.round(n * 16)}px` : rem;
+}
+
 export function OverviewTab() {
   const [spec, setSpec] = useState<BrandSpec | null>(null);
   const [wordmarkSegments, setWordmarkSegments] = useState<WordmarkSegment[]>([]);
+  const [activeFonts, setActiveFonts] = useState<Record<string, ResolvedFontRole> | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Spec + wordmark_text in parallel. The spec doesn't carry the
-    // styled-wordmark JSON today; we fetch it separately to keep the
-    // public spec contract stable.
+    // Spec + wordmark_text + resolved-fonts-with-sizes in parallel.
     Promise.all([
       authedFetch('/_ensemble/brand/spec').then((r) => r.json() as Promise<BrandSpec>),
       authedFetch('/_ensemble/core/brand/tokens/identity')
@@ -86,10 +124,15 @@ export function OverviewTab() {
           }
         })
         .catch(() => [] as WordmarkSegment[]),
+      authedFetch('/_ensemble/core/brand/fonts/active')
+        .then((r) => r.json() as Promise<{ roles?: Record<string, ResolvedFontRole> }>)
+        .then((res) => res.roles ?? null)
+        .catch(() => null),
     ])
-      .then(([data, segments]) => {
+      .then(([data, segments, fonts]) => {
         setSpec(data);
         setWordmarkSegments(segments);
+        setActiveFonts(fonts);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -110,7 +153,6 @@ export function OverviewTab() {
 
   const name = spec.identity.display_name || 'Workspace';
   const hasColors = spec.colors.groups.length > 0;
-  const hasTypography = !!(spec.typography.heading || spec.typography.body);
   const hasMessaging = !!(spec.messaging.tagline || spec.messaging.mission);
   const specUrl = spec.endpoints?.spec || `${window.location.origin}/_ensemble/brand/spec`;
   const cssUrl = spec.endpoints?.css || `${window.location.origin}/_ensemble/brand/css`;
@@ -208,44 +250,16 @@ export function OverviewTab() {
         </Card>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Typography */}
-        {hasTypography && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2">
-                <Type className="h-5 w-5" /> Typography
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {spec.typography.display && (
-                <div>
-                  <p className="text-xs text-muted-foreground">Display</p>
-                  <p className="text-2xl font-bold">{spec.typography.display.family}</p>
-                </div>
-              )}
-              {spec.typography.heading && (
-                <div>
-                  <p className="text-xs text-muted-foreground">Heading</p>
-                  <p className="text-xl font-semibold">{spec.typography.heading.family}</p>
-                </div>
-              )}
-              {spec.typography.body && (
-                <div>
-                  <p className="text-xs text-muted-foreground">Body</p>
-                  <p className="text-base">{spec.typography.body.family}</p>
-                </div>
-              )}
-              {spec.typography.mono && (
-                <div>
-                  <p className="text-xs text-muted-foreground">Mono</p>
-                  <p className="text-sm font-mono">{spec.typography.mono.family}</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
+      {/* Typography specimen — full width, renders every content role at
+          its real brand tokens (family/weight/size/letter-spacing/case)
+          with the canonical pangram so cross-role visual comparison is
+          apples-to-apples. Wordmark is intentionally omitted; it's a
+          lockup, not a typeface specimen. */}
+      {activeFonts && (
+        <TypographySpecimenCard fonts={activeFonts} />
+      )}
 
+      <div className="grid gap-6 lg:grid-cols-2">
         {/* Messaging */}
         {hasMessaging && (
           <Card>
@@ -323,6 +337,94 @@ export function OverviewTab() {
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// ─── Typography Specimen ─────────────────────────────────────────────
+
+/**
+ * Full-width specimen showing every content role rendered at its real
+ * brand tokens (family/weight/size/letter-spacing/case) with the same
+ * pangram. Cross-role differences become obvious because content is
+ * held constant — only typography changes.
+ *
+ * Heading and Subheading each render three H-step rows (H1/H2/H3 and
+ * H4/H5/H6) computed from base size × scale ratio, so the operator sees
+ * the resulting hierarchy at a glance.
+ */
+function TypographySpecimenCard({ fonts }: { fonts: Record<string, ResolvedFontRole> }) {
+  const present = SPECIMEN_ORDER.filter((k) => !!fonts[k]);
+  if (present.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2">
+          <Type className="h-5 w-5" /> Typography
+        </CardTitle>
+        <CardDescription>
+          Each role rendered at the brand's configured family, weight,
+          size, letter-spacing, and case.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-8">
+        {present.map((role) => (
+          <SpecimenRow key={role} role={role} font={fonts[role]} />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SpecimenRow({ role, font }: { role: FontRoleKey; font: ResolvedFontRole }) {
+  const isScaled = role === 'heading' || role === 'subheading';
+  const tags: [string, string, string] = role === 'heading'
+    ? ['H1', 'H2', 'H3']
+    : ['H4', 'H5', 'H6'];
+
+  const baseStyle: React.CSSProperties = {
+    fontFamily: font.stack || `"${font.family}", sans-serif`,
+    fontWeight: Number(font.weight) || 400,
+    fontStyle: font.style,
+    letterSpacing: font.letterSpacing,
+    textTransform: font.textTransform,
+    lineHeight: 1.2,
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          {font.label ?? role} <span className="text-muted-foreground/60">— {font.family}</span>
+        </p>
+        {!isScaled && (
+          <p className="text-[10px] font-mono text-muted-foreground">
+            {font.fontSize} ({remToPx(font.fontSize)})
+          </p>
+        )}
+      </div>
+      {isScaled ? (
+        <div className="space-y-3">
+          {computeScaleStepsClient(font.fontSize, font.scaleRatio).map((size, i) => (
+            <div key={tags[i]} className="flex items-baseline gap-3">
+              <span className="text-[10px] font-mono text-muted-foreground w-14 shrink-0">
+                {tags[i]} · {remToPx(size)}
+              </span>
+              <p style={{ ...baseStyle, fontSize: size }} className="m-0 break-words flex-1">
+                {SPECIMEN_PANGRAM}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p style={{ ...baseStyle, fontSize: font.fontSize }} className="m-0 break-words">
+          {SPECIMEN_PANGRAM}
+        </p>
+      )}
+      {font.usage && (
+        <p className="text-xs text-muted-foreground/80 mt-1">{font.usage}</p>
+      )}
     </div>
   );
 }

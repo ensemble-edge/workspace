@@ -47,12 +47,16 @@ import {
   WEIGHT_LABELS,
   LETTER_SPACING_PRESETS,
   TEXT_TRANSFORM_OPTIONS,
+  FONT_SIZE_PRESETS,
+  SCALE_RATIO_PRESETS,
+  DEFAULT_SCALE_RATIO,
   ROLE_META,
   weightsForFamily,
   familySupportsItalic,
   readRoleTokens,
   writeRoleTokens,
   resolveFamilyStack,
+  computeScaleSteps,
   isSystemFont,
   type FontRole,
   type TextTransform,
@@ -99,17 +103,19 @@ export function TypographyTab() {
     style: 'normal' | 'italic';
     letterSpacing: string;
     textTransform: TextTransform;
+    fontSize: string;
+    scaleRatio: string;
   };
   const [byRole, setByRole] = useState<Record<FontRole, RoleState>>({
-    wordmark:   { family: '',            weight: '700', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
-    display:    { family: 'System Sans', weight: '700', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
-    heading:    { family: 'System Sans', weight: '600', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
-    subheading: { family: '',            weight: '500', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
-    body:       { family: 'System Sans', weight: '400', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
-    eyebrow:    { family: 'System Sans', weight: '600', style: 'normal', letterSpacing: '0.1em',  textTransform: 'uppercase' },
-    label:      { family: 'System Sans', weight: '500', style: 'normal', letterSpacing: '0.01em', textTransform: 'none' },
-    caption:    { family: 'System Sans', weight: '400', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
-    mono:       { family: 'System Mono', weight: '400', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
+    wordmark:   { family: '',            weight: '700', style: 'normal', letterSpacing: '0em',    textTransform: 'none',      fontSize: '2rem',     scaleRatio: DEFAULT_SCALE_RATIO },
+    display:    { family: 'System Sans', weight: '700', style: 'normal', letterSpacing: '0em',    textTransform: 'none',      fontSize: '3rem',     scaleRatio: DEFAULT_SCALE_RATIO },
+    heading:    { family: 'System Sans', weight: '600', style: 'normal', letterSpacing: '0em',    textTransform: 'none',      fontSize: '2.25rem',  scaleRatio: DEFAULT_SCALE_RATIO },
+    subheading: { family: '',            weight: '500', style: 'normal', letterSpacing: '0em',    textTransform: 'none',      fontSize: '1.25rem',  scaleRatio: DEFAULT_SCALE_RATIO },
+    body:       { family: 'System Sans', weight: '400', style: 'normal', letterSpacing: '0em',    textTransform: 'none',      fontSize: '1rem',     scaleRatio: DEFAULT_SCALE_RATIO },
+    eyebrow:    { family: 'System Sans', weight: '600', style: 'normal', letterSpacing: '0.1em',  textTransform: 'uppercase', fontSize: '0.75rem',  scaleRatio: DEFAULT_SCALE_RATIO },
+    label:      { family: 'System Sans', weight: '500', style: 'normal', letterSpacing: '0.01em', textTransform: 'none',      fontSize: '0.875rem', scaleRatio: DEFAULT_SCALE_RATIO },
+    caption:    { family: 'System Sans', weight: '400', style: 'normal', letterSpacing: '0em',    textTransform: 'none',      fontSize: '0.75rem',  scaleRatio: DEFAULT_SCALE_RATIO },
+    mono:       { family: 'System Mono', weight: '400', style: 'normal', letterSpacing: '0em',    textTransform: 'none',      fontSize: '0.875rem', scaleRatio: DEFAULT_SCALE_RATIO },
   });
   const [catalog, setCatalog] = useState<GoogleFontEntry[]>([]);
   // Whether the current catalog is the bundled fallback (curated ~40)
@@ -229,6 +235,8 @@ export function TypographyTab() {
           typographyTokens[`typography_${role}_style`] = '';
           typographyTokens[`typography_${role}_letter_spacing`] = '';
           typographyTokens[`typography_${role}_text_transform`] = '';
+          typographyTokens[`typography_${role}_font_size`] = '';
+          typographyTokens[`typography_${role}_scale_ratio`] = '';
           continue;
         }
         Object.assign(typographyTokens, writeRoleTokens(role, byRole[role]));
@@ -248,6 +256,8 @@ export function TypographyTab() {
         identityTokens['wordmark_style'] = '';
         identityTokens['wordmark_letter_spacing'] = '';
         identityTokens['wordmark_text_transform'] = '';
+        identityTokens['wordmark_font_size'] = '';
+        identityTokens['wordmark_scale_ratio'] = '';
       }
 
       const [typoRes, idRes] = await Promise.all([
@@ -323,7 +333,7 @@ export function TypographyTab() {
               inheritsFrom
                 ? undefined
                 : (key === 'subheading' || key === 'wordmark')
-                  ? () => setRole(key, { family: '', weight: '', style: 'normal', letterSpacing: '0em', textTransform: 'none' })
+                  ? () => setRole(key, { family: '', weight: '', style: 'normal', letterSpacing: '0em', textTransform: 'none', fontSize: '', scaleRatio: DEFAULT_SCALE_RATIO })
                   : undefined
             }
             onFamilyPicked={bumpRecent}
@@ -354,6 +364,8 @@ interface RoleValue {
   style: 'normal' | 'italic';
   letterSpacing: string;
   textTransform: TextTransform;
+  fontSize: string;
+  scaleRatio: string;
 }
 
 function RoleCard({
@@ -513,6 +525,47 @@ function RoleCard({
             </Select>
           </div>
         </div>
+
+        {/* Second row: Size (always) + Scale (only for heading/subheading) */}
+        <div className={`grid gap-4 ${(role === 'heading' || role === 'subheading') ? 'md:grid-cols-2' : 'md:grid-cols-1 md:max-w-xs'}`}>
+          <div className="space-y-1.5">
+            <Label>
+              {role === 'heading' ? 'Size (H1 base)'
+                : role === 'subheading' ? 'Size (H4 base)'
+                : 'Size'}
+            </Label>
+            <Select
+              value={inheriting ? effective.fontSize : value.fontSize}
+              onValueChange={(s) => onChange({ fontSize: s })}
+              disabled={inheriting}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {FONT_SIZE_PRESETS.map((p) => (
+                  <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {(role === 'heading' || role === 'subheading') && (
+            <div className="space-y-1.5">
+              <Label>Scale ratio</Label>
+              <Select
+                value={inheriting ? effective.scaleRatio : value.scaleRatio}
+                onValueChange={(r) => onChange({ scaleRatio: r })}
+                disabled={inheriting}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {SCALE_RATIO_PRESETS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
+
         {onClearOverride && !inheriting && (
           <div className="flex justify-end">
             <Button type="button" variant="ghost" size="sm" onClick={onClearOverride}>
@@ -523,31 +576,78 @@ function RoleCard({
 
         <div className="rounded-md border bg-muted/30 p-4">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Preview</p>
+          {(role === 'heading' || role === 'subheading') ? (
+            <ScaleSpecimen
+              role={role}
+              preview={preview}
+              stack={previewStack}
+              effective={effective}
+            />
+          ) : (
+            <p
+              style={{
+                fontFamily: previewStack,
+                fontWeight: Number(effective.weight) || 400,
+                fontStyle: effective.style,
+                letterSpacing: effective.letterSpacing,
+                textTransform: effective.textTransform,
+                fontSize: effective.fontSize,
+                lineHeight: 1.3,
+              }}
+              className="m-0 break-words"
+            >
+              {preview}
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Heading/Subheading get a three-step specimen showing H1/H2/H3 (or
+ * H4/H5/H6) computed from the base size + scale ratio. Each row is
+ * labeled with its tag so the operator sees the resulting hierarchy.
+ */
+function ScaleSpecimen({
+  role,
+  preview,
+  stack,
+  effective,
+}: {
+  role: 'heading' | 'subheading';
+  preview: string;
+  stack: string;
+  effective: RoleValue;
+}) {
+  const [s1, s2, s3] = computeScaleSteps(effective.fontSize, effective.scaleRatio);
+  const tags: [string, string, string] = role === 'heading'
+    ? ['H1', 'H2', 'H3']
+    : ['H4', 'H5', 'H6'];
+  const sizes: [string, string, string] = [s1, s2, s3];
+
+  return (
+    <div className="space-y-3">
+      {tags.map((tag, i) => (
+        <div key={tag} className="flex items-baseline gap-3">
+          <span className="text-[10px] font-mono text-muted-foreground w-10 shrink-0">{tag}</span>
           <p
             style={{
-              fontFamily: previewStack,
+              fontFamily: stack,
               fontWeight: Number(effective.weight) || 400,
               fontStyle: effective.style,
               letterSpacing: effective.letterSpacing,
               textTransform: effective.textTransform,
-              fontSize:
-                role === 'display' ? '36px'
-                : role === 'wordmark' ? '32px'
-                : role === 'heading' ? '24px'
-                : role === 'subheading' ? '18px'
-                : role === 'eyebrow' ? '12px'
-                : role === 'label' ? '14px'
-                : role === 'caption' ? '12px'
-                : role === 'mono' ? '14px'
-                : '16px',
-              lineHeight: 1.3,
+              fontSize: sizes[i],
+              lineHeight: 1.2,
             }}
-            className="m-0 break-words"
+            className="m-0 break-words flex-1"
           >
             {preview}
           </p>
         </div>
-      </CardContent>
-    </Card>
+      ))}
+    </div>
   );
 }

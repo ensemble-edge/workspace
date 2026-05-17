@@ -142,6 +142,8 @@ interface FontRoleResolved {
   style: 'normal' | 'italic';
   letterSpacing: string;
   textTransform: 'none' | 'uppercase' | 'lowercase';
+  fontSize: string;
+  scaleRatio: string;
   isSystem: boolean;
   stack: string;
   label?: string;

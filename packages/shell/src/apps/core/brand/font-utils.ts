@@ -141,6 +141,24 @@ export const DEFAULT_TEXT_TRANSFORM_FOR_ROLE: Record<FontRole, TextTransform> = 
 };
 
 /**
+ * Per-role default font-size (rem). For heading/subheading this is the
+ * *base* — the H1 size for heading, the H4 size for subheading. The
+ * other levels are derived by dividing by the scale ratio successively
+ * (h2 = h1/ratio, h3 = h2/ratio, etc.).
+ */
+export const DEFAULT_FONT_SIZE_FOR_ROLE: Record<FontRole, string> = {
+  wordmark:   '2rem',      // 32px
+  display:    '3rem',      // 48px
+  heading:    '2.25rem',   // 36px (H1 base)
+  subheading: '1.25rem',   // 20px (H4 base)
+  body:       '1rem',      // 16px
+  eyebrow:    '0.75rem',   // 12px
+  label:      '0.875rem',  // 14px
+  caption:    '0.75rem',   // 12px
+  mono:       '0.875rem',  // 14px
+};
+
+/**
  * Per-role display label + usage description. The label is what the
  * admin UI titles each card; the usage text is shown beneath the
  * label AND exposed via /_ensemble/core/brand/fonts/active for a
@@ -206,6 +224,11 @@ export interface RoleTokens {
   style: 'normal' | 'italic';
   letterSpacing: string;
   textTransform: TextTransform;
+  fontSize: string;
+  /** Only meaningful for heading + subheading — drives H1/H2/H3 (and
+   *  H4/H5/H6) derivation from the base size. Other roles ignore it
+   *  but we keep it on every RoleTokens for shape consistency. */
+  scaleRatio: string;
 }
 
 /**
@@ -233,6 +256,8 @@ export function readRoleTokens(
   const style = tokens[`${newPrefix}style`] as 'normal' | 'italic' | undefined;
   const letterSpacing = tokens[`${newPrefix}letter_spacing`];
   const textTransform = tokens[`${newPrefix}text_transform`] as TextTransform | undefined;
+  const fontSize = tokens[`${newPrefix}font_size`];
+  const scaleRatio = tokens[`${newPrefix}scale_ratio`];
 
   if (family) {
     return {
@@ -241,6 +266,8 @@ export function readRoleTokens(
       style: style ?? 'normal',
       letterSpacing: letterSpacing || DEFAULT_LETTER_SPACING_FOR_ROLE[role],
       textTransform: textTransform || DEFAULT_TEXT_TRANSFORM_FOR_ROLE[role],
+      fontSize: fontSize || DEFAULT_FONT_SIZE_FOR_ROLE[role],
+      scaleRatio: scaleRatio || DEFAULT_SCALE_RATIO,
     };
   }
 
@@ -259,6 +286,8 @@ export function readRoleTokens(
       style: 'normal',
       letterSpacing: DEFAULT_LETTER_SPACING_FOR_ROLE[role],
       textTransform: DEFAULT_TEXT_TRANSFORM_FOR_ROLE[role],
+      fontSize: DEFAULT_FONT_SIZE_FOR_ROLE[role],
+      scaleRatio: DEFAULT_SCALE_RATIO,
     };
   }
   return null;
@@ -276,7 +305,33 @@ export function writeRoleTokens(
     [`${prefix}style`]: rt.style,
     [`${prefix}letter_spacing`]: rt.letterSpacing,
     [`${prefix}text_transform`]: rt.textTransform,
+    [`${prefix}font_size`]: rt.fontSize,
+    [`${prefix}scale_ratio`]: rt.scaleRatio,
   };
+}
+
+/**
+ * Compute the three H-step sizes for a base + ratio. Used by the
+ * heading and subheading roles so H1/H2/H3 (and H4/H5/H6) all flow
+ * from one base size and a single scale knob.
+ *
+ * The base IS the largest step. Successive levels divide by the ratio:
+ *   heading base 2.25rem at ratio 1.25 → H1=2.25, H2=1.8, H3=1.44
+ *
+ * Returns values in rem, rounded to 4 decimal places to keep CSS clean.
+ */
+export function computeScaleSteps(baseRem: string, ratio: string): [string, string, string] {
+  const base = parseFloat(baseRem);
+  const r = parseFloat(ratio);
+  if (!isFinite(base) || !isFinite(r) || r <= 0) {
+    return [baseRem, baseRem, baseRem];
+  }
+  const round = (n: number) => Math.round(n * 10000) / 10000;
+  return [
+    `${round(base)}rem`,
+    `${round(base / r)}rem`,
+    `${round(base / (r * r))}rem`,
+  ];
 }
 
 /**
@@ -333,6 +388,48 @@ export const LETTER_SPACING_PRESETS: Array<{ value: string; label: string }> = [
   { value: '0.1em',    label: 'Wide (0.1em)' },
   { value: '0.2em',    label: 'Widest (0.2em)' },
 ];
+
+/**
+ * Curated type-scale stops. These cover every reasonable size from
+ * caption to display without giving operators every-px-on-the-internet.
+ * Values are stored as rem (root-relative) so workspace zoom + user
+ * accessibility settings still work; labels show the px equivalent at
+ * the standard 16px base for designer-paste-from-Figma sanity.
+ */
+export const FONT_SIZE_PRESETS: Array<{ value: string; label: string }> = [
+  { value: '0.625rem', label: '10px (0.625rem)' },
+  { value: '0.75rem',  label: '12px (0.75rem)' },
+  { value: '0.875rem', label: '14px (0.875rem)' },
+  { value: '1rem',     label: '16px (1rem)' },
+  { value: '1.125rem', label: '18px (1.125rem)' },
+  { value: '1.25rem',  label: '20px (1.25rem)' },
+  { value: '1.5rem',   label: '24px (1.5rem)' },
+  { value: '1.875rem', label: '30px (1.875rem)' },
+  { value: '2.25rem',  label: '36px (2.25rem)' },
+  { value: '3rem',     label: '48px (3rem)' },
+  { value: '3.75rem',  label: '60px (3.75rem)' },
+  { value: '4.5rem',   label: '72px (4.5rem)' },
+  { value: '6rem',     label: '96px (6rem)' },
+];
+
+/**
+ * Type-scale ratios — named after musical intervals, the standard
+ * vocabulary every modular-scale tool uses. 1.25 (Major Third) is a
+ * gentle, broadly flattering default that keeps H1 distinct from H2
+ * without making the hierarchy feel theatrical.
+ */
+export const SCALE_RATIO_PRESETS: Array<{ value: string; label: string }> = [
+  { value: '1.067', label: 'Minor Second (1.067)' },
+  { value: '1.125', label: 'Major Second (1.125)' },
+  { value: '1.2',   label: 'Minor Third (1.2)' },
+  { value: '1.25',  label: 'Major Third (1.25)' },
+  { value: '1.333', label: 'Perfect Fourth (1.333)' },
+  { value: '1.414', label: 'Augmented Fourth (1.414)' },
+  { value: '1.5',   label: 'Perfect Fifth (1.5)' },
+  { value: '1.618', label: 'Golden Ratio (1.618)' },
+];
+
+export const DEFAULT_SCALE_RATIO = '1.25';
 
 export const DEFAULT_LETTER_SPACING = '0em';
 

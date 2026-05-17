@@ -39,6 +39,13 @@ export interface ResolvedRole {
   letterSpacing: string;
   /** CSS text-transform value — eyebrows default to 'uppercase'. */
   textTransform: TextTransform;
+  /** Font size as rem string ('1rem', '2.25rem'). For heading/subheading
+   *  this is the base — H1/H4 — and the other levels are computed via
+   *  scaleRatio. */
+  fontSize: string;
+  /** Type-scale ratio (1.067 → 1.618). Only meaningful for heading +
+   *  subheading; other roles ignore it. */
+  scaleRatio: string;
   /** True if this role is a system stack (no Google Fonts load needed). */
   isSystem: boolean;
   /** When non-null, the role from which this one inherits. */
@@ -132,6 +139,39 @@ const DEFAULT_TEXT_TRANSFORM: Record<FontRole, TextTransform> = {
   mono:       'none',
 };
 
+const DEFAULT_FONT_SIZE: Record<FontRole, string> = {
+  wordmark:   '2rem',
+  display:    '3rem',
+  heading:    '2.25rem',
+  subheading: '1.25rem',
+  body:       '1rem',
+  eyebrow:    '0.75rem',
+  label:      '0.875rem',
+  caption:    '0.75rem',
+  mono:       '0.875rem',
+};
+
+const DEFAULT_SCALE_RATIO = '1.25';
+
+/**
+ * Compute the three H-step sizes from a base + ratio. Server-side
+ * mirror of the shell's computeScaleSteps; values are rem strings
+ * rounded to 4 decimal places.
+ */
+function computeScaleSteps(baseRem: string, ratio: string): [string, string, string] {
+  const base = parseFloat(baseRem);
+  const r = parseFloat(ratio);
+  if (!isFinite(base) || !isFinite(r) || r <= 0) {
+    return [baseRem, baseRem, baseRem];
+  }
+  const round = (n: number) => Math.round(n * 10000) / 10000;
+  return [
+    `${round(base)}rem`,
+    `${round(base / r)}rem`,
+    `${round(base / (r * r))}rem`,
+  ];
+}
+
 /**
  * Resolve all five role triples from a flat token map. Wordmark falls
  * back to display when its family is unset.
@@ -160,6 +200,8 @@ export function resolveAllRoles(tokens: Record<string, string>): Record<FontRole
         style: (tokens['wordmark_style'] as 'normal' | 'italic') || 'normal',
         letterSpacing: tokens['wordmark_letter_spacing'] || DEFAULT_LETTER_SPACING.wordmark,
         textTransform: (tokens['wordmark_text_transform'] as TextTransform) || DEFAULT_TEXT_TRANSFORM.wordmark,
+        fontSize: tokens['wordmark_font_size'] || DEFAULT_FONT_SIZE.wordmark,
+        scaleRatio: tokens['wordmark_scale_ratio'] || DEFAULT_SCALE_RATIO,
         isSystem: isSystem(wordmarkFamily),
       }
     : { ...display, inheritedFrom: 'display' };
@@ -176,6 +218,8 @@ function resolveRole(role: FontRole, tokens: Record<string, string>): ResolvedRo
       style: (tokens[`typography_${role}_style`] as 'normal' | 'italic') || 'normal',
       letterSpacing: tokens[`typography_${role}_letter_spacing`] || DEFAULT_LETTER_SPACING[role],
       textTransform: (tokens[`typography_${role}_text_transform`] as TextTransform) || DEFAULT_TEXT_TRANSFORM[role],
+      fontSize: tokens[`typography_${role}_font_size`] || DEFAULT_FONT_SIZE[role],
+      scaleRatio: tokens[`typography_${role}_scale_ratio`] || DEFAULT_SCALE_RATIO,
       isSystem: isSystem(newFamily),
     };
   }
@@ -189,6 +233,8 @@ function resolveRole(role: FontRole, tokens: Record<string, string>): ResolvedRo
       style: 'normal',
       letterSpacing: DEFAULT_LETTER_SPACING[role],
       textTransform: DEFAULT_TEXT_TRANSFORM[role],
+      fontSize: DEFAULT_FONT_SIZE[role],
+      scaleRatio: DEFAULT_SCALE_RATIO,
       isSystem: isSystem(fam),
     };
   }
@@ -199,6 +245,8 @@ function resolveRole(role: FontRole, tokens: Record<string, string>): ResolvedRo
     style: 'normal',
     letterSpacing: DEFAULT_LETTER_SPACING[role],
     textTransform: DEFAULT_TEXT_TRANSFORM[role],
+    fontSize: DEFAULT_FONT_SIZE[role],
+    scaleRatio: DEFAULT_SCALE_RATIO,
     isSystem: isSystem(fam),
   };
 }
@@ -268,6 +316,24 @@ export function buildFontCssVars(roles: Record<FontRole, ResolvedRole>): string 
     lines.push(`  --font-${role}-style: ${r.style};`);
     lines.push(`  --font-${role}-letter-spacing: ${r.letterSpacing};`);
     lines.push(`  --font-${role}-text-transform: ${r.textTransform};`);
+    lines.push(`  --font-${role}-size: ${r.fontSize};`);
+  }
+  // Compute the H-step sizes for heading and subheading. Operators will
+  // typically reference these directly (`font-size: var(--font-heading-h1)`)
+  // rather than the role base — H1/H2/H3 is what their CSS thinks in.
+  const heading = roles.heading;
+  if (heading) {
+    const [h1, h2, h3] = computeScaleSteps(heading.fontSize, heading.scaleRatio);
+    lines.push(`  --font-heading-h1: ${h1};`);
+    lines.push(`  --font-heading-h2: ${h2};`);
+    lines.push(`  --font-heading-h3: ${h3};`);
+  }
+  const subheading = roles.subheading;
+  if (subheading) {
+    const [h4, h5, h6] = computeScaleSteps(subheading.fontSize, subheading.scaleRatio);
+    lines.push(`  --font-subheading-h4: ${h4};`);
+    lines.push(`  --font-subheading-h5: ${h5};`);
+    lines.push(`  --font-subheading-h6: ${h6};`);
   }
   lines.push('}');
   return lines.join('\n');
