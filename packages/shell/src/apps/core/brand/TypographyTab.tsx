@@ -45,6 +45,7 @@ import {
   SYSTEM_FONTS,
   DEFAULT_WEIGHT_FOR_ROLE,
   WEIGHT_LABELS,
+  LETTER_SPACING_PRESETS,
   weightsForFamily,
   familySupportsItalic,
   readRoleTokens,
@@ -61,9 +62,10 @@ interface GoogleFontEntry {
   popularity?: number;
 }
 
-const ROLES: Array<{ key: FontRole; label: string; description: string; preview: string }> = [
+const ROLES: Array<{ key: FontRole; label: string; description: string; preview: string; previewTransform?: 'uppercase' }> = [
   { key: 'display', label: 'Display',   description: 'Large headlines and hero text', preview: 'Make something beautiful' },
   { key: 'heading', label: 'Heading',   description: 'Section headers and titles',    preview: 'The quick brown fox' },
+  { key: 'eyebrow', label: 'Eyebrow',   description: 'Small all-caps labels above headlines (kickers, categories, section tags)', preview: 'Product update', previewTransform: 'uppercase' },
   { key: 'body',    label: 'Body',      description: 'Long-form reading text',        preview: 'The quick brown fox jumps over the lazy dog. Used for paragraphs, descriptions, and most reading.' },
   { key: 'mono',    label: 'Monospace', description: 'Code and tabular data',         preview: 'const x = 42;' },
 ];
@@ -71,12 +73,16 @@ const ROLES: Array<{ key: FontRole; label: string; description: string; preview:
 const RECENT_KEY = 'ensemble:brand:recent-fonts';
 
 export function TypographyTab() {
-  // Per-role state: family/weight/style triples.
-  const [byRole, setByRole] = useState<Record<FontRole, { family: string; weight: string; style: 'normal' | 'italic' }>>({
-    display:  { family: 'System Sans', weight: '700', style: 'normal' },
-    heading:  { family: 'System Sans', weight: '600', style: 'normal' },
-    body:     { family: 'System Sans', weight: '400', style: 'normal' },
-    mono:     { family: 'System Mono', weight: '400', style: 'normal' },
+  // Per-role state: family/weight/style/letterSpacing per typographic role.
+  // Note: wordmark is owned by LogosTab, not this state — TypographyTab only
+  // touches the four content roles + eyebrow.
+  type RoleState = { family: string; weight: string; style: 'normal' | 'italic'; letterSpacing: string };
+  const [byRole, setByRole] = useState<Record<Exclude<FontRole, 'wordmark'>, RoleState>>({
+    display:  { family: 'System Sans', weight: '700', style: 'normal', letterSpacing: '0em' },
+    heading:  { family: 'System Sans', weight: '600', style: 'normal', letterSpacing: '0em' },
+    eyebrow:  { family: 'System Sans', weight: '600', style: 'normal', letterSpacing: '0.1em' },
+    body:     { family: 'System Sans', weight: '400', style: 'normal', letterSpacing: '0em' },
+    mono:     { family: 'System Mono', weight: '400', style: 'normal', letterSpacing: '0em' },
   });
   const [catalog, setCatalog] = useState<GoogleFontEntry[]>([]);
   // Whether the current catalog is the bundled fallback (curated ~40)
@@ -134,7 +140,7 @@ export function TypographyTab() {
       const map: Record<string, string> = {};
       for (const t of tokRes.data ?? []) map[t.key] = t.value;
       const next: typeof byRole = { ...byRole };
-      for (const role of ['display', 'heading', 'body', 'mono'] as FontRole[]) {
+      for (const role of ['display', 'heading', 'eyebrow', 'body', 'mono'] as Array<Exclude<FontRole, 'wordmark'>>) {
         const rt = readRoleTokens(role, map);
         if (rt) next[role] = rt;
       }
@@ -160,7 +166,7 @@ export function TypographyTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function setRole(role: FontRole, patch: Partial<(typeof byRole)[FontRole]>) {
+  function setRole(role: Exclude<FontRole, 'wordmark'>, patch: Partial<RoleState>) {
     setByRole((prev) => ({ ...prev, [role]: { ...prev[role], ...patch } }));
   }
 
@@ -177,7 +183,7 @@ export function TypographyTab() {
     status.beginSave();
     try {
       const tokens: Record<string, string> = {};
-      for (const role of ['display', 'heading', 'body', 'mono'] as FontRole[]) {
+      for (const role of ['display', 'heading', 'eyebrow', 'body', 'mono'] as Array<Exclude<FontRole, 'wordmark'>>) {
         Object.assign(tokens, writeRoleTokens(role, byRole[role]));
         // Best-effort: clear the legacy slug key so future loads don't
         // see two sources of truth. Empty value → server-side delete.
@@ -223,23 +229,27 @@ export function TypographyTab() {
 
   return (
     <div className="space-y-6">
-      {ROLES.map(({ key, label, description, preview }) => (
-        <RoleCard
-          key={key}
-          role={key}
-          label={label}
-          description={description}
-          preview={preview}
-          value={byRole[key]}
-          onChange={(patch) => setRole(key, patch)}
-          onFamilyPicked={bumpRecent}
-          onFirstSearch={upgradeCatalog}
-          systemOptions={systemOptions}
-          googleOptions={googleOptions}
-          variantsByFamily={variantsByFamily}
-          recent={recent}
-        />
-      ))}
+      {ROLES.map(({ key, label, description, preview, previewTransform }) => {
+        const k = key as Exclude<FontRole, 'wordmark'>;
+        return (
+          <RoleCard
+            key={k}
+            role={k}
+            label={label}
+            description={description}
+            preview={preview}
+            previewTransform={previewTransform}
+            value={byRole[k]}
+            onChange={(patch) => setRole(k, patch)}
+            onFamilyPicked={bumpRecent}
+            onFirstSearch={upgradeCatalog}
+            systemOptions={systemOptions}
+            googleOptions={googleOptions}
+            variantsByFamily={variantsByFamily}
+            recent={recent}
+          />
+        );
+      })}
 
       <div className="flex items-center gap-3">
         <Button onClick={handleSave} disabled={!status.dirty || saving}>
@@ -258,6 +268,7 @@ function RoleCard({
   label,
   description,
   preview,
+  previewTransform,
   value,
   onChange,
   onFamilyPicked,
@@ -267,12 +278,13 @@ function RoleCard({
   variantsByFamily,
   recent,
 }: {
-  role: FontRole;
+  role: Exclude<FontRole, 'wordmark'>;
   label: string;
   description: string;
   preview: string;
-  value: { family: string; weight: string; style: 'normal' | 'italic' };
-  onChange: (patch: Partial<{ family: string; weight: string; style: 'normal' | 'italic' }>) => void;
+  previewTransform?: 'uppercase';
+  value: { family: string; weight: string; style: 'normal' | 'italic'; letterSpacing: string };
+  onChange: (patch: Partial<{ family: string; weight: string; style: 'normal' | 'italic'; letterSpacing: string }>) => void;
   onFamilyPicked: (family: string) => void;
   onFirstSearch?: () => void;
   systemOptions: FontComboboxOption[];
@@ -306,7 +318,7 @@ function RoleCard({
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-[2fr_1fr_1fr]">
+        <div className="grid gap-4 md:grid-cols-[2fr_1fr_1fr_1fr]">
           <div className="space-y-1.5">
             <Label>Family</Label>
             <FontCombobox
@@ -333,33 +345,30 @@ function RoleCard({
             </Select>
           </div>
           <div className="space-y-1.5">
+            <Label>Letter spacing</Label>
+            <Select value={value.letterSpacing} onValueChange={(ls) => onChange({ letterSpacing: ls })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {LETTER_SPACING_PRESETS.map((p) => (
+                  <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
             <Label>Style</Label>
-            <div className="flex rounded-md border p-1">
-              <button
-                type="button"
-                className={
-                  value.style === 'normal'
-                    ? 'flex-1 rounded px-2 py-1 text-xs font-medium bg-primary text-primary-foreground'
-                    : 'flex-1 rounded px-2 py-1 text-xs font-medium hover:bg-muted'
-                }
-                onClick={() => onChange({ style: 'normal' })}
-              >
-                Normal
-              </button>
-              <button
-                type="button"
-                className={
-                  value.style === 'italic'
-                    ? 'flex-1 rounded px-2 py-1 text-xs font-medium bg-primary text-primary-foreground'
-                    : 'flex-1 rounded px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50'
-                }
-                onClick={() => onChange({ style: 'italic' })}
-                disabled={!supportsItalic}
-                title={supportsItalic ? 'Italic' : 'This family has no italic variants'}
-              >
-                Italic
-              </button>
-            </div>
+            <Select
+              value={value.style}
+              onValueChange={(s) => onChange({ style: s as 'normal' | 'italic' })}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="normal">Normal</SelectItem>
+                <SelectItem value="italic" disabled={!supportsItalic}>
+                  Italic{!supportsItalic ? ' (n/a)' : ''}
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -370,7 +379,14 @@ function RoleCard({
               fontFamily: stack,
               fontWeight: Number(value.weight),
               fontStyle: value.style,
-              fontSize: role === 'display' ? '36px' : role === 'heading' ? '24px' : role === 'mono' ? '14px' : '16px',
+              letterSpacing: value.letterSpacing,
+              textTransform: previewTransform,
+              fontSize:
+                role === 'display' ? '36px'
+                : role === 'heading' ? '24px'
+                : role === 'eyebrow' ? '12px'
+                : role === 'mono' ? '14px'
+                : '16px',
               lineHeight: 1.3,
             }}
             className="m-0 break-words"

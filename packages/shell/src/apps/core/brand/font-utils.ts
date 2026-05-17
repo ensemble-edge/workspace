@@ -13,7 +13,7 @@
  *      the FontCombobox.
  */
 
-export type FontRole = 'display' | 'heading' | 'body' | 'mono' | 'wordmark';
+export type FontRole = 'display' | 'heading' | 'eyebrow' | 'body' | 'mono' | 'wordmark';
 
 /** Pinned system defaults — render instantly, no Google network load. */
 export const SYSTEM_FONTS: Array<{
@@ -81,17 +81,33 @@ export function migrateLegacyFontValue(raw: string): string {
 
 /** Sensible per-role default weight when only a legacy slug existed. */
 export const DEFAULT_WEIGHT_FOR_ROLE: Record<FontRole, string> = {
-  display: '700',
-  heading: '600',
-  body:    '400',
-  mono:    '400',
+  display:  '700',
+  heading:  '600',
+  eyebrow:  '600',
+  body:     '400',
+  mono:     '400',
   wordmark: '700',
+};
+
+/**
+ * Sensible per-role default letter-spacing. Eyebrows are wide-tracked
+ * all-caps labels and conventionally want extra spacing; everything
+ * else defaults to neutral.
+ */
+export const DEFAULT_LETTER_SPACING_FOR_ROLE: Record<FontRole, string> = {
+  display:  '0em',
+  heading:  '0em',
+  eyebrow:  '0.1em',
+  body:     '0em',
+  mono:     '0em',
+  wordmark: '0em',
 };
 
 export interface RoleTokens {
   family: string;
   weight: string;
   style: 'normal' | 'italic';
+  letterSpacing: string;
 }
 
 /**
@@ -117,12 +133,14 @@ export function readRoleTokens(
   const family = tokens[`${newPrefix}family`];
   const weight = tokens[`${newPrefix}weight`];
   const style = tokens[`${newPrefix}style`] as 'normal' | 'italic' | undefined;
+  const letterSpacing = tokens[`${newPrefix}letter_spacing`];
 
   if (family) {
     return {
       family,
       weight: weight || DEFAULT_WEIGHT_FOR_ROLE[role],
       style: style ?? 'normal',
+      letterSpacing: letterSpacing || DEFAULT_LETTER_SPACING_FOR_ROLE[role],
     };
   }
 
@@ -138,6 +156,7 @@ export function readRoleTokens(
       family: migrateLegacyFontValue(legacy),
       weight: DEFAULT_WEIGHT_FOR_ROLE[role],
       style: 'normal',
+      letterSpacing: DEFAULT_LETTER_SPACING_FOR_ROLE[role],
     };
   }
   return null;
@@ -153,6 +172,7 @@ export function writeRoleTokens(
     [`${prefix}family`]: rt.family,
     [`${prefix}weight`]: rt.weight,
     [`${prefix}style`]: rt.style,
+    [`${prefix}letter_spacing`]: rt.letterSpacing,
   };
 }
 
@@ -191,6 +211,27 @@ export function parseVariant(v: string): { weight: string; italic: boolean } {
   // Anything else (variable axis tuples, etc.) — fall back to 400 regular.
   return { weight: '400', italic: false };
 }
+
+/**
+ * Letter-spacing presets used by every typography role and the wordmark.
+ * Values are em-based so they scale with font size — what brand guides
+ * conventionally publish. Ordered tightest → widest with `0em` (the
+ * default) sitting in the middle for muscle-memory parity with a Style
+ * dropdown.
+ */
+export const LETTER_SPACING_PRESETS: Array<{ value: string; label: string }> = [
+  { value: '-0.075em', label: 'Tightest' },
+  { value: '-0.05em',  label: 'Tighter' },
+  { value: '-0.025em', label: 'Tight' },
+  { value: '-0.01em',  label: 'Slightly tight' },
+  { value: '0em',      label: 'Normal' },
+  { value: '0.025em',  label: 'Slightly loose' },
+  { value: '0.05em',   label: 'Loose' },
+  { value: '0.1em',    label: 'Wide' },
+  { value: '0.2em',    label: 'Widest' },
+];
+
+export const DEFAULT_LETTER_SPACING = '0em';
 
 /** Human-readable weight name for UI display. */
 export const WEIGHT_LABELS: Record<string, string> = {

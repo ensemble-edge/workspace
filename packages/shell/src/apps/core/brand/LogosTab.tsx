@@ -37,6 +37,7 @@ import {
   SYSTEM_FONTS,
   DEFAULT_WEIGHT_FOR_ROLE,
   WEIGHT_LABELS,
+  LETTER_SPACING_PRESETS,
   weightsForFamily,
   familySupportsItalic,
   resolveFamilyStack,
@@ -177,7 +178,8 @@ export function LogosTab() {
             t.key === 'wordmark_text' ||
             t.key === 'wordmark_family' ||
             t.key === 'wordmark_weight' ||
-            t.key === 'wordmark_style'
+            t.key === 'wordmark_style' ||
+            t.key === 'wordmark_letter_spacing'
           ) {
             loaded[t.key] = t.value;
           }
@@ -339,6 +341,7 @@ function WordmarkCard({
                 family: tokens['wordmark_family'] || undefined,
                 weight: tokens['wordmark_weight'] || undefined,
                 style: (tokens['wordmark_style'] as 'normal' | 'italic') || 'normal',
+                letterSpacing: tokens['wordmark_letter_spacing'] || undefined,
               }}
             />
           </div>
@@ -696,6 +699,7 @@ function WordmarkTypographyControls({
   const family = tokens['wordmark_family'] || '';
   const weight = tokens['wordmark_weight'] || '';
   const style = (tokens['wordmark_style'] as 'normal' | 'italic') || 'normal';
+  const letterSpacing = tokens['wordmark_letter_spacing'] || '0em';
   const inheriting = !family;
 
   const systemOptions: FontComboboxOption[] = SYSTEM_FONTS.map((s) => ({
@@ -726,6 +730,7 @@ function WordmarkTypographyControls({
     onChange('wordmark_family', '');
     onChange('wordmark_weight', '');
     onChange('wordmark_style', '');
+    onChange('wordmark_letter_spacing', '');
   }
 
   return (
@@ -746,7 +751,7 @@ function WordmarkTypographyControls({
         )}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-[2fr_1fr_1fr]">
+      <div className="grid gap-3 md:grid-cols-[2fr_1fr_1fr_1fr]">
         <div className="space-y-1.5">
           <Label className="text-xs">Family</Label>
           <FontCombobox
@@ -776,33 +781,35 @@ function WordmarkTypographyControls({
           </Select>
         </div>
         <div className="space-y-1.5">
+          <Label className="text-xs">Letter spacing</Label>
+          <Select
+            value={letterSpacing}
+            onValueChange={(ls) => onChange('wordmark_letter_spacing', ls)}
+            disabled={inheriting}
+          >
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {LETTER_SPACING_PRESETS.map((p) => (
+                <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
           <Label className="text-xs">Style</Label>
-          <div className="flex rounded-md border p-1">
-            <button
-              type="button"
-              className={
-                style === 'normal'
-                  ? 'flex-1 rounded px-2 py-1 text-xs font-medium bg-primary text-primary-foreground'
-                  : 'flex-1 rounded px-2 py-1 text-xs font-medium hover:bg-muted'
-              }
-              onClick={() => onChange('wordmark_style', 'normal')}
-              disabled={inheriting}
-            >
-              Normal
-            </button>
-            <button
-              type="button"
-              className={
-                style === 'italic'
-                  ? 'flex-1 rounded px-2 py-1 text-xs font-medium bg-primary text-primary-foreground'
-                  : 'flex-1 rounded px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50'
-              }
-              onClick={() => onChange('wordmark_style', 'italic')}
-              disabled={inheriting || !supportsItalic}
-            >
-              Italic
-            </button>
-          </div>
+          <Select
+            value={style}
+            onValueChange={(s) => onChange('wordmark_style', s)}
+            disabled={inheriting}
+          >
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="normal">Normal</SelectItem>
+              <SelectItem value="italic" disabled={!supportsItalic}>
+                Italic{!supportsItalic ? ' (n/a)' : ''}
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
     </div>

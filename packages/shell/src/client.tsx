@@ -140,10 +140,11 @@ interface FontRoleResolved {
   family: string;
   weight: string;
   style: 'normal' | 'italic';
+  letterSpacing: string;
   isSystem: boolean;
   stack: string;
 }
-type ActiveFonts = Record<'display' | 'heading' | 'body' | 'mono' | 'wordmark', FontRoleResolved> | null;
+type ActiveFonts = Record<'display' | 'heading' | 'eyebrow' | 'body' | 'mono' | 'wordmark', FontRoleResolved> | null;
 
 let _fontsCache: ActiveFonts = null;
 let _fontsPromise: Promise<ActiveFonts> | null = null;

@@ -18,12 +18,14 @@
 
 import type { D1Database } from '@cloudflare/workers-types';
 
-export type FontRole = 'display' | 'heading' | 'body' | 'mono' | 'wordmark';
+export type FontRole = 'display' | 'heading' | 'eyebrow' | 'body' | 'mono' | 'wordmark';
 
 export interface ResolvedRole {
   family: string;
   weight: string;
   style: 'normal' | 'italic';
+  /** CSS letter-spacing value (em-based preset, e.g. '0em', '-0.025em'). */
+  letterSpacing: string;
   /** True if this role is a system stack (no Google Fonts load needed). */
   isSystem: boolean;
 }
@@ -50,19 +52,31 @@ const LEGACY_SLUG_TO_FAMILY: Record<string, string> = {
 };
 
 const DEFAULT_WEIGHT: Record<FontRole, string> = {
-  display: '700',
-  heading: '600',
-  body: '400',
-  mono: '400',
+  display:  '700',
+  heading:  '600',
+  eyebrow:  '600',
+  body:     '400',
+  mono:     '400',
   wordmark: '700',
 };
 
 const DEFAULT_FAMILY: Record<FontRole, string> = {
-  display: 'System Sans',
-  heading: 'System Sans',
-  body: 'System Sans',
-  mono: 'System Mono',
+  display:  'System Sans',
+  heading:  'System Sans',
+  eyebrow:  'System Sans',
+  body:     'System Sans',
+  mono:     'System Mono',
   wordmark: '', // Inherits from display
+};
+
+/** Per-role default letter-spacing — eyebrows track wider by convention. */
+const DEFAULT_LETTER_SPACING: Record<FontRole, string> = {
+  display:  '0em',
+  heading:  '0em',
+  eyebrow:  '0.1em',
+  body:     '0em',
+  mono:     '0em',
+  wordmark: '0em',
 };
 
 /**
@@ -72,6 +86,7 @@ const DEFAULT_FAMILY: Record<FontRole, string> = {
 export function resolveAllRoles(tokens: Record<string, string>): Record<FontRole, ResolvedRole> {
   const display = resolveRole('display', tokens);
   const heading = resolveRole('heading', tokens);
+  const eyebrow = resolveRole('eyebrow', tokens);
   const body = resolveRole('body', tokens);
   const mono = resolveRole('mono', tokens);
 
@@ -81,11 +96,12 @@ export function resolveAllRoles(tokens: Record<string, string>): Record<FontRole
         family: wordmarkFamily,
         weight: tokens['wordmark_weight'] || DEFAULT_WEIGHT.wordmark,
         style: (tokens['wordmark_style'] as 'normal' | 'italic') || 'normal',
+        letterSpacing: tokens['wordmark_letter_spacing'] || DEFAULT_LETTER_SPACING.wordmark,
         isSystem: isSystem(wordmarkFamily),
       }
     : { ...display };
 
-  return { display, heading, body, mono, wordmark };
+  return { display, heading, eyebrow, body, mono, wordmark };
 }
 
 function resolveRole(role: FontRole, tokens: Record<string, string>): ResolvedRole {
@@ -95,6 +111,7 @@ function resolveRole(role: FontRole, tokens: Record<string, string>): ResolvedRo
       family: newFamily,
       weight: tokens[`typography_${role}_weight`] || DEFAULT_WEIGHT[role],
       style: (tokens[`typography_${role}_style`] as 'normal' | 'italic') || 'normal',
+      letterSpacing: tokens[`typography_${role}_letter_spacing`] || DEFAULT_LETTER_SPACING[role],
       isSystem: isSystem(newFamily),
     };
   }
@@ -106,6 +123,7 @@ function resolveRole(role: FontRole, tokens: Record<string, string>): ResolvedRo
       family: fam,
       weight: DEFAULT_WEIGHT[role],
       style: 'normal',
+      letterSpacing: DEFAULT_LETTER_SPACING[role],
       isSystem: isSystem(fam),
     };
   }
@@ -114,6 +132,7 @@ function resolveRole(role: FontRole, tokens: Record<string, string>): ResolvedRo
     family: fam,
     weight: DEFAULT_WEIGHT[role],
     style: 'normal',
+    letterSpacing: DEFAULT_LETTER_SPACING[role],
     isSystem: isSystem(fam),
   };
 }
@@ -181,6 +200,7 @@ export function buildFontCssVars(roles: Record<FontRole, ResolvedRole>): string 
     lines.push(`  --font-${role}: ${familyStack(r.family)};`);
     lines.push(`  --font-${role}-weight: ${r.weight};`);
     lines.push(`  --font-${role}-style: ${r.style};`);
+    lines.push(`  --font-${role}-letter-spacing: ${r.letterSpacing};`);
   }
   lines.push('}');
   return lines.join('\n');

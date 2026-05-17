@@ -51,11 +51,12 @@ export const Wordmark = React.forwardRef<HTMLSpanElement, WordmarkProps>(
         fontFamily: "var(--font-wordmark, var(--font-display, inherit))",
         fontWeight: "var(--font-wordmark-weight, var(--font-display-weight, 700))" as React.CSSProperties["fontWeight"],
         fontStyle: "var(--font-wordmark-style, normal)",
+        letterSpacing: "var(--font-wordmark-letter-spacing, var(--font-display-letter-spacing, normal))",
       };
       return (
         <span
           ref={ref}
-          className={cn("inline-flex items-baseline tracking-tight", className)}
+          className={cn("inline-flex items-baseline", className)}
           style={wrapStyle}
           aria-label={name}
           {...rest}

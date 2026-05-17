@@ -70,6 +70,7 @@ export interface WordmarkTypography {
   family?: string;
   weight?: string;
   style?: 'normal' | 'italic';
+  letterSpacing?: string;
 }
 
 export function WordmarkEditor({
@@ -193,10 +194,13 @@ function WordmarkPreview({
         fontFamily: resolveFamilyStack(typography!.family!),
         fontWeight: typography!.weight ? Number(typography!.weight) : 700,
         fontStyle: typography!.style ?? 'normal',
+        letterSpacing: typography!.letterSpacing || '0em',
         fontSize: '1.5rem',
         lineHeight: 1.2,
       }
-    : {};
+    : typography?.letterSpacing
+      ? { letterSpacing: typography.letterSpacing }
+      : {};
   const className = hasTypography
     ? 'tracking-tight'
     : 'text-2xl font-bold tracking-tight';

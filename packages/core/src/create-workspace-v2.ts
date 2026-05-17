@@ -453,13 +453,44 @@ function mountBrandRoutes(
   });
 
   // GET /_ensemble/brand/css - CSS variables (loads ALL tokens including workspace-ui)
+  //
+  // Cache strategy: revalidate on every request, but serve 304 when the
+  // operator hasn't changed any brand tokens since the browser's cached
+  // copy. This makes "save and refresh" feel instant for brand changes
+  // (no 5-minute stale-cache window) while still avoiding a full CSS
+  // regeneration on every page load.
   app.get('/_ensemble/brand/css', async (c) => {
     const workspaceId = c.get('workspace')?.id || '';
+
+    // Cheap ETag: the most recent brand_tokens.updated_at for this
+    // workspace. Any save bumps the timestamp, so any save invalidates
+    // every browser's cached stylesheet.
+    let etag = '"empty"';
+    try {
+      const row = await c.env.DB.prepare(
+        `SELECT MAX(updated_at) AS latest FROM brand_tokens WHERE workspace_id = ?`,
+      ).bind(workspaceId).first<{ latest: string | null }>();
+      if (row?.latest) etag = `"${row.latest.replace(/[^0-9]/g, '')}"`;
+    } catch {
+      // fall through — we'll just always regenerate
+    }
+
+    if (c.req.header('If-None-Match') === etag) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          'ETag': etag,
+          'Cache-Control': 'no-cache, must-revalidate',
+        },
+      });
+    }
+
     const css = await generateBrandCss(c.env.DB, workspaceId, config.brand.accent);
 
     return c.text(css, 200, {
       'Content-Type': 'text/css',
-      'Cache-Control': 'public, max-age=300',
+      'Cache-Control': 'no-cache, must-revalidate',
+      'ETag': etag,
     });
   });
 
