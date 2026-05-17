@@ -12,6 +12,7 @@ import { migration as m004 } from './004_guest_apps_isolation';
 import { migration as m005 } from './005_guest_apps_tier';
 import { migration as m006 } from './006_workspace_credentials';
 import { migration as m007 } from './007_workspace_ai_tiers';
+import { migration as m008 } from './008_ai_tier_last_error';
 
 /**
  * All migrations in order.
@@ -25,4 +26,5 @@ export const migrations: Migration[] = [
   m005,
   m006,
   m007,
+  m008,
 ];

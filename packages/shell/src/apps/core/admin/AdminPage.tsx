@@ -1,7 +1,8 @@
 /**
  * Admin Page — Workspace Settings
  *
- * Hash-based tab routing: /settings#general, /settings#appearance, /settings#danger
+ * Hash-based tab routing:
+ *   /settings#general, /settings#appearance, /settings#connections, /settings#danger
  */
 
 import * as React from 'react';
@@ -16,9 +17,10 @@ import {
 import { useHashTab } from '../../../hooks/useHashTab';
 import { GeneralTab } from './GeneralTab';
 import { AppearanceTab } from './AppearanceTab';
+import { ConnectionsTab } from './ConnectionsTab';
 import { DangerZoneTab } from './DangerZoneTab';
 
-const TABS = ['general', 'appearance', 'danger'] as const;
+const TABS = ['general', 'appearance', 'connections', 'danger'] as const;
 
 export function AdminPage() {
   const [tab, setTab] = useHashTab('general', TABS);
@@ -36,11 +38,13 @@ export function AdminPage() {
         <TabsList variant="line" className="mb-6">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
+          <TabsTrigger value="connections">Connections</TabsTrigger>
           <TabsTrigger value="danger">Danger Zone</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general"><GeneralTab /></TabsContent>
         <TabsContent value="appearance"><AppearanceTab /></TabsContent>
+        <TabsContent value="connections"><ConnectionsTab /></TabsContent>
         <TabsContent value="danger"><DangerZoneTab /></TabsContent>
       </Tabs>
     </div>

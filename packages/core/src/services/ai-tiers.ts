@@ -16,7 +16,7 @@
  * `name`. Unknown tier → falls back to `good` and logs the fallback.
  */
 
-import { getCredential } from './credentials';
+import { getCredential, deleteCredential } from './credentials';
 
 export type TierStatus = 'provisioned' | 'pending' | 'failed';
 
@@ -28,6 +28,7 @@ export interface AiTier {
   is_default: boolean;
   gateway_route: string;
   route_provisioned: boolean;
+  last_error: string | null;
   created_at: string;
 }
 
@@ -39,7 +40,26 @@ interface DbTierRow {
   is_default: number;
   gateway_route: string;
   route_provisioned: number;
+  last_error: string | null;
   created_at: string;
+}
+
+/**
+ * One-shot lazy delete of the legacy `ai_gateway_token` credential.
+ * As of v0.1.14 the AI Gateway uses the same Cloudflare API token as
+ * the Connection section, so the separate token is no longer read.
+ * Removing it on first AI-related read keeps the credentials table tidy.
+ *
+ * Scheduled for removal in v0.1.15 — see project_v0115_cleanup memory.
+ */
+async function lazyDeleteLegacyAiToken(
+  env: Env,
+  workspaceId: string,
+): Promise<void> {
+  const legacy = await getCredential(env, workspaceId, 'ai_gateway_token');
+  if (legacy !== null) {
+    await deleteCredential(env, workspaceId, 'ai_gateway_token');
+  }
 }
 
 interface Env {
@@ -73,9 +93,12 @@ export async function seedDefaultTiers(
 }
 
 export async function listTiers(env: Env, workspaceId: string): Promise<AiTier[]> {
+  // Fire-and-forget legacy cleanup on first read in this request path.
+  await lazyDeleteLegacyAiToken(env, workspaceId);
+
   const result = await env.DB.prepare(
     `SELECT name, display_name, description, icon, is_default,
-            gateway_route, route_provisioned, created_at
+            gateway_route, route_provisioned, last_error, created_at
        FROM workspace_ai_tiers
       WHERE workspace_id = ?
       ORDER BY is_default DESC, created_at ASC`,
@@ -86,7 +109,7 @@ export async function listTiers(env: Env, workspaceId: string): Promise<AiTier[]
 export async function getTier(env: Env, workspaceId: string, name: string): Promise<AiTier | null> {
   const row = await env.DB.prepare(
     `SELECT name, display_name, description, icon, is_default,
-            gateway_route, route_provisioned, created_at
+            gateway_route, route_provisioned, last_error, created_at
        FROM workspace_ai_tiers
       WHERE workspace_id = ? AND name = ?`,
   ).bind(workspaceId, name).first<DbTierRow>();
@@ -210,9 +233,11 @@ export async function provisionTierRoute(
   );
 
   if (r.ok || r.status === 409) {
-    // Mark provisioned. 409 means it already existed — same outcome.
+    // Mark provisioned and clear any prior error. 409 means it already
+    // existed — same outcome.
     await env.DB.prepare(
-      `UPDATE workspace_ai_tiers SET route_provisioned = 1
+      `UPDATE workspace_ai_tiers
+          SET route_provisioned = 1, last_error = NULL
         WHERE workspace_id = ? AND name = ?`,
     ).bind(workspaceId, tierName).run();
     return { ok: true };
@@ -228,6 +253,14 @@ export async function provisionTierRoute(
         ? `AI Gateway "${gatewayName}" not found in account ${accountId}.`
         : `Cloudflare API error ${r.status}: ${body.slice(0, 200)}`;
 
+  // Persist the error so the UI's info tooltip can show what went wrong
+  // without the operator having to retry just to see the failure mode.
+  await env.DB.prepare(
+    `UPDATE workspace_ai_tiers
+        SET route_provisioned = 0, last_error = ?
+      WHERE workspace_id = ? AND name = ?`,
+  ).bind(message, workspaceId, tierName).run();
+
   return { ok: false, status: r.status, message, manual_url: manualUrl };
 }
 
@@ -240,6 +273,7 @@ function rowToTier(row: DbTierRow): AiTier {
     is_default: row.is_default === 1,
     gateway_route: row.gateway_route,
     route_provisioned: row.route_provisioned === 1,
+    last_error: row.last_error ?? null,
     created_at: row.created_at,
   };
 }

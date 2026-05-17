@@ -37,6 +37,80 @@ function requireAdmin(c: AppContext): { ok: true } | Response {
 export function createCredentialsRoutes(): App {
   const app = new Hono<{ Bindings: Env; Variables: ContextVariables }>();
 
+  // ─── Brand asset upload (R2) ──────────────────────────────────────
+  //
+  // Operators upload logos/favicons via Brand → Logos. Files land in
+  // env.R2 under `brand/<workspace>/<kind>/<random>.<ext>` and a public
+  // URL is returned for the brand_tokens table to reference.
+  //
+  // Auth: admin-only. Size limit: 5 MB. Allowed content-types are an
+  // explicit allowlist — we don't want this to become a generic upload.
+
+  const ALLOWED_UPLOAD_TYPES = new Set([
+    'image/png',
+    'image/jpeg',
+    'image/svg+xml',
+    'image/webp',
+    'image/x-icon',
+    'image/vnd.microsoft.icon',
+  ]);
+  const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+  app.post('/_ensemble/brand/upload', async (c) => {
+    const adminCheck = requireAdmin(c);
+    if (adminCheck instanceof Response) return adminCheck;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    if (!c.env.R2) {
+      return c.json({ error: 'R2 bucket not bound. Add the binding in wrangler.toml.' }, 412);
+    }
+
+    const form = await c.req.formData();
+    const file = form.get('file');
+    const kind = (form.get('kind') as string) || 'logo';
+    if (!(file instanceof File)) {
+      return c.json({ error: 'No file provided (form field "file")' }, 400);
+    }
+    if (!ALLOWED_UPLOAD_TYPES.has(file.type)) {
+      return c.json({ error: `Unsupported content-type: ${file.type}` }, 415);
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return c.json({ error: `File too large (max ${MAX_UPLOAD_BYTES / 1024 / 1024}MB)` }, 413);
+    }
+
+    // Generate a non-guessable key; the kind is descriptive only.
+    const ext = extensionFor(file.type);
+    const id = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+    const key = `brand/${workspace.id}/${kind}/${id}${ext}`;
+
+    await c.env.R2.put(key, file.stream(), {
+      httpMetadata: { contentType: file.type },
+    });
+
+    return c.json({
+      ok: true,
+      key,
+      // The workspace serves R2 assets through its own origin so brand
+      // URLs survive R2 access control changes (operator can swap to a
+      // private bucket without re-uploading everything).
+      url: `/_ensemble/brand/asset/${encodeURIComponent(key)}`,
+    });
+  });
+
+  app.get('/_ensemble/brand/asset/:key{.+}', async (c) => {
+    if (!c.env.R2) return c.json({ error: 'R2 not configured' }, 404);
+    const key = decodeURIComponent(c.req.param('key'));
+    // Defense-in-depth: only serve from the brand/ prefix.
+    if (!key.startsWith('brand/')) return c.json({ error: 'Not found' }, 404);
+    const obj = await c.env.R2.get(key);
+    if (!obj) return c.json({ error: 'Not found' }, 404);
+    const headers = new Headers();
+    obj.writeHttpMetadata(headers);
+    headers.set('etag', obj.httpEtag);
+    headers.set('Cache-Control', 'public, max-age=3600');
+    return new Response(obj.body, { headers });
+  });
+
   // ─── Credentials CRUD ─────────────────────────────────────────────
 
   app.get('/_ensemble/credentials', async (c) => {
@@ -74,9 +148,11 @@ export function createCredentialsRoutes(): App {
       updatedBy: user?.id,
     });
 
-    // Side-effect: saving AI Gateway creds seeds default tiers.
+    // Side-effect: saving the AI Gateway namespace seeds default tiers.
+    // (Pre-v0.1.14 also triggered on ai_gateway_token; that key was
+    // dropped — the CF API token serves both Connection + AI Access.)
     const key = c.req.param('key');
-    if (key === 'ai_gateway_name' || key === 'ai_gateway_token') {
+    if (key === 'ai_gateway_name') {
       await seedDefaultTiers(c.env, workspace.id);
     }
 
@@ -94,19 +170,111 @@ export function createCredentialsRoutes(): App {
 
   // ─── Connection-test endpoints ─────────────────────────────────────
 
+  /**
+   * Test the configured Cloudflare API token against each scope the
+   * workspace needs. Returns a list the UI renders as status lights.
+   * Persists the result under `cf_token_scope_status` so the UI can show
+   * the last-known state without re-running tests on every page load.
+   *
+   * Each scope test is a minimally-invasive read against the relevant
+   * API. We don't write anything during a test. A 401/403 means the
+   * scope is missing; any other error is reported with detail so the
+   * operator can debug.
+   */
   app.post('/_ensemble/credentials/test/connection', async (c) => {
     const check = requireAdmin(c);
     if (check instanceof Response) return check;
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
-    const token = await getCredential(c.env, workspace.id, 'cloudflare_api_token');
-    if (!token) return c.json({ ok: false, message: 'No Cloudflare API token set' });
 
-    const r = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', {
-      headers: { Authorization: `Bearer ${token}` },
+    const token = await getCredential(c.env, workspace.id, 'cloudflare_api_token');
+    const accountId = await getCredential(c.env, workspace.id, 'cloudflare_account_id');
+    if (!token) return c.json({ error: 'No Cloudflare API token set' }, 400);
+
+    type ScopeResult = { name: string; ok: boolean; detail: string };
+    const scopes: ScopeResult[] = [];
+    const auth = { Authorization: `Bearer ${token}` };
+
+    // 1. Token validity itself — also tells us the token is alive.
+    const verifyR = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', {
+      headers: auth,
     });
-    if (r.ok) return c.json({ ok: true });
-    return c.json({ ok: false, status: r.status, message: `Cloudflare API ${r.status}` });
+    if (!verifyR.ok) {
+      // Token is invalid/expired — every scope check would fail. Report
+      // a single result and short-circuit.
+      scopes.push({
+        name: 'Token validity',
+        ok: false,
+        detail: `Token rejected by Cloudflare (HTTP ${verifyR.status}).`,
+      });
+      await setCredential(
+        c.env, workspace.id, 'cf_token_scope_status', 'connection',
+        JSON.stringify(scopes), { isSecret: false },
+      );
+      return c.json({ scopes });
+    }
+
+    // 2. Zone DNS:Edit — list zones (read implies the token can target zones).
+    const zonesR = await fetch('https://api.cloudflare.com/client/v4/zones?per_page=1', {
+      headers: auth,
+    });
+    scopes.push({
+      name: 'Zone DNS:Edit',
+      ok: zonesR.ok,
+      detail: zonesR.ok
+        ? 'Token can list zones.'
+        : `HTTP ${zonesR.status} — token likely missing Zone DNS scope.`,
+    });
+
+    // 3. Email Routing — list addresses on the account.
+    if (accountId) {
+      const emailR = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/email/routing/addresses?per_page=1`,
+        { headers: auth },
+      );
+      scopes.push({
+        name: 'Email Routing Addresses:Edit',
+        ok: emailR.ok,
+        detail: emailR.ok
+          ? 'Token can read Email Routing addresses.'
+          : `HTTP ${emailR.status} — token likely missing Email Routing scope.`,
+      });
+    } else {
+      scopes.push({
+        name: 'Email Routing Addresses:Edit',
+        ok: false,
+        detail: 'Cannot test — set the Cloudflare Account ID first.',
+      });
+    }
+
+    // 4. AI Gateway — list gateways on the account.
+    if (accountId) {
+      const aiR = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai-gateway/gateways?per_page=1`,
+        { headers: auth },
+      );
+      scopes.push({
+        name: 'AI Gateway:Edit',
+        ok: aiR.ok,
+        detail: aiR.ok
+          ? 'Token can list AI Gateway namespaces.'
+          : `HTTP ${aiR.status} — token likely missing AI Gateway scope.`,
+      });
+    } else {
+      scopes.push({
+        name: 'AI Gateway:Edit',
+        ok: false,
+        detail: 'Cannot test — set the Cloudflare Account ID first.',
+      });
+    }
+
+    // Persist for the UI to render on next load without retesting.
+    await setCredential(
+      c.env, workspace.id, 'cf_token_scope_status', 'connection',
+      JSON.stringify(scopes), { isSecret: false },
+    );
+
+    return c.json({ scopes });
   });
 
   app.post('/_ensemble/credentials/test/email', async (c) => {
@@ -124,27 +292,37 @@ export function createCredentialsRoutes(): App {
     return c.json(result);
   });
 
+  /**
+   * Test the AI Gateway namespace using the same Cloudflare API token
+   * (single-token model — v0.1.14). Returns ok if the gateway exists and
+   * the token can read it; otherwise a specific failure reason.
+   */
   app.post('/_ensemble/credentials/test/ai', async (c) => {
     const check = requireAdmin(c);
     if (check instanceof Response) return check;
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
-    const accountId = await getCredential(c.env, workspace.id, 'cloudflare_account_id');
+
+    const accountId =
+      (await getCredential(c.env, workspace.id, 'ai_gateway_account_id'))
+      ?? (await getCredential(c.env, workspace.id, 'cloudflare_account_id'));
     const gatewayName = await getCredential(c.env, workspace.id, 'ai_gateway_name');
     const cfToken = await getCredential(c.env, workspace.id, 'cloudflare_api_token');
+
     if (!accountId || !gatewayName || !cfToken) {
       return c.json({ ok: false, message: 'AI Gateway not configured' });
     }
+
     const r = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai-gateway/gateways/${gatewayName}`,
       { headers: { Authorization: `Bearer ${cfToken}` } },
     );
     if (r.ok) return c.json({ ok: true });
     if (r.status === 401 || r.status === 403) {
-      return c.json({ ok: false, status: r.status, message: 'Token lacks AI Gateway permissions' });
+      return c.json({ ok: false, status: r.status, message: 'Token lacks AI Gateway:Edit' });
     }
     if (r.status === 404) {
-      return c.json({ ok: false, status: 404, message: `Gateway "${gatewayName}" not found` });
+      return c.json({ ok: false, status: 404, message: `Gateway namespace "${gatewayName}" not found in this account` });
     }
     return c.json({ ok: false, status: r.status, message: `Cloudflare API ${r.status}` });
   });
@@ -224,11 +402,15 @@ export function createCredentialsRoutes(): App {
       if (!tier) return c.json({ error: 'No fallback tier "good" configured' }, 412);
     }
 
-    const accountId = await getCredential(c.env, workspace.id, 'ai_gateway_account_id')
-      ?? await getCredential(c.env, workspace.id, 'cloudflare_account_id');
+    // Single-token model (v0.1.14): the AI call uses the same Cloudflare
+    // API token configured in the Connection section. There is no
+    // separate ai_gateway_token. The legacy value is lazily deleted in
+    // ai-tiers.ts when first read.
+    const accountId = (await getCredential(c.env, workspace.id, 'ai_gateway_account_id'))
+      ?? (await getCredential(c.env, workspace.id, 'cloudflare_account_id'));
     const gatewayName = await getCredential(c.env, workspace.id, 'ai_gateway_name');
-    const gatewayToken = await getCredential(c.env, workspace.id, 'ai_gateway_token');
-    if (!accountId || !gatewayName || !gatewayToken) {
+    const cfToken = await getCredential(c.env, workspace.id, 'cloudflare_api_token');
+    if (!accountId || !gatewayName || !cfToken) {
       return c.json({ error: 'AI Gateway not configured' }, 412);
     }
 
@@ -238,7 +420,7 @@ export function createCredentialsRoutes(): App {
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${gatewayToken}`,
+          'Authorization': `Bearer ${cfToken}`,
           'Content-Type': c.req.header('Content-Type') ?? 'application/json',
         },
         body,
@@ -265,38 +447,87 @@ export function createCredentialsRoutes(): App {
     const emailProvider = await getCredential(c.env, workspace.id, 'email_provider');
     const emailVerified = await getCredential(c.env, workspace.id, 'email_provider_verified');
     const aiGateway = await getCredential(c.env, workspace.id, 'ai_gateway_name');
-    const aiToken = await getCredential(c.env, workspace.id, 'ai_gateway_token');
 
     const connectionDone = !!(cfAccount && cfToken);
     const emailDone = !!(emailProvider && emailVerified === 'verified');
-    const aiDone = !!(aiGateway && aiToken);
+    // AI is "done" when the gateway namespace is configured AND the
+    // Connection token is present (single-token model — v0.1.14).
+    const aiDone = !!(aiGateway && cfToken);
+
+    // R2 writability — the binding may exist but the bucket might not be
+    // configured/accessible. We check by attempting a tiny put then
+    // delete. If env.R2 is missing entirely, mark pending.
+    let r2Done = false;
+    let r2Detail = 'No R2 bucket bound — add the binding in wrangler.toml.';
+    if (c.env.R2) {
+      try {
+        const probeKey = `_ensemble/setup-probe/${workspace.id}`;
+        await c.env.R2.put(probeKey, 'ok');
+        await c.env.R2.delete(probeKey);
+        r2Done = true;
+        r2Detail = 'Bucket is writable.';
+      } catch (err) {
+        r2Detail = `Bucket bound but write failed: ${String(err).slice(0, 120)}`;
+      }
+    }
+
+    // Favicon — checked as the brand_token `logo_favicon`. If set, done.
+    let faviconDone = false;
+    try {
+      const row = await c.env.DB.prepare(
+        `SELECT value FROM brand_tokens
+         WHERE workspace_id = ? AND category = 'identity' AND key = 'logo_favicon' AND locale = ''`,
+      )
+        .bind(workspace.id)
+        .first<{ value: string }>();
+      faviconDone = !!(row?.value && row.value.trim());
+    } catch {
+      // table may not exist on a very fresh workspace; treat as pending
+    }
 
     return c.json({
       items: [
         {
           id: 'connection',
-          title: 'Connection (Cloudflare)',
-          description: 'Required for DNS management and Cloudflare-based email.',
+          title: 'Cloudflare connection',
+          description: 'Required for DNS, email sending, and AI Gateway management.',
           status: connectionDone ? 'done' : 'pending',
-          href: '/auth#credentials',
+          href: '/settings#connections',
           required: true,
         },
         {
+          id: 'r2',
+          title: 'Asset storage (R2)',
+          description: r2Detail,
+          status: r2Done ? 'done' : 'pending',
+          href: '/settings#connections',
+          required: false,
+        },
+        {
+          id: 'favicon',
+          title: 'Favicon',
+          description:
+            'Upload a favicon under Brand → Logos so the workspace shows your icon in browser tabs.',
+          status: faviconDone ? 'done' : 'pending',
+          href: '/brand#logos',
+          required: false,
+        },
+        {
           id: 'email',
-          title: 'Email',
+          title: 'Email notifications',
           description:
             'Configure Cloudflare or Resend to send invites and enable magic-link login. ' +
             'Without it, admins use one-time invite URLs.',
           status: emailDone ? 'done' : 'pending',
-          href: '/auth#credentials',
+          href: '/settings#connections',
           required: false,
         },
         {
           id: 'ai',
           title: 'AI Access',
-          description: 'Connect a Cloudflare AI Gateway to enable AI features.',
+          description: 'Connect a Cloudflare AI Gateway namespace to enable AI features.',
           status: aiDone ? 'done' : 'pending',
-          href: '/auth#credentials',
+          href: '/settings#connections',
           required: false,
         },
       ],
@@ -393,4 +624,18 @@ export function createCredentialsRoutes(): App {
   });
 
   return app;
+}
+
+/** Pick a stable file extension for our allowlisted upload types. */
+function extensionFor(mime: string): string {
+  switch (mime) {
+    case 'image/png': return '.png';
+    case 'image/jpeg': return '.jpg';
+    case 'image/svg+xml': return '.svg';
+    case 'image/webp': return '.webp';
+    case 'image/x-icon':
+    case 'image/vnd.microsoft.icon':
+      return '.ico';
+    default: return '';
+  }
 }

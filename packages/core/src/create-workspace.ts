@@ -137,6 +137,8 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   app.use('/_ensemble/credentials/*', auth());
   app.use('/_ensemble/ai/*', auth());
   app.use('/_ensemble/users/*', auth());
+  // v0.1.14: brand upload is admin-only (asset GET stays public for img tags).
+  app.use('/_ensemble/brand/upload', auth());
   app.route('/', createCredentialsRoutes());
 
   // Core App API Routes (/_ensemble/core/*)

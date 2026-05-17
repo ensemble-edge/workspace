@@ -1,17 +1,20 @@
 /**
  * Logos Tab — Brand mark uploads and preview.
- * Uses URL input for now (R2 upload will be added later).
+ *
+ * v0.1.14: Uploads go to R2 via POST /_ensemble/brand/upload, which
+ * returns a workspace-served URL stored as a brand_token. An
+ * "or paste an image URL" field remains for operators who'd rather
+ * host their own assets.
  */
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Image, Upload } from 'lucide-react';
 
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
   Button,
@@ -92,16 +95,11 @@ export function LogosTab() {
                 )}
               </div>
 
-              {/* URL Input (R2 upload coming later) */}
-              <div className="space-y-1">
-                <Label className="text-xs">Image URL</Label>
-                <Input
-                  placeholder="https://example.com/logo.svg"
-                  value={logos[field.key] || ''}
-                  onChange={(e) => setLogos((p) => ({ ...p, [field.key]: e.target.value }))}
-                  className="text-sm"
-                />
-              </div>
+              <LogoUploader
+                kind={field.key}
+                value={logos[field.key] || ''}
+                onChange={(v) => setLogos((p) => ({ ...p, [field.key]: v }))}
+              />
             </CardContent>
           </Card>
         ))}
@@ -110,6 +108,100 @@ export function LogosTab() {
       <Button onClick={handleSave} disabled={saving}>
         {saving ? 'Saving...' : 'Save Logos'}
       </Button>
+    </div>
+  );
+}
+
+/**
+ * Inline uploader: file picker + paste-URL fallback. Uploads the file
+ * to /_ensemble/brand/upload and propagates the returned URL upward via
+ * onChange so the parent's "Save Logos" still writes brand_tokens as a
+ * single batched PUT.
+ */
+function LogoUploader({
+  kind,
+  value,
+  onChange,
+}: {
+  kind: string;
+  value: string;
+  onChange: (url: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function handleFile(file: File) {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('kind', kind);
+      const r = await fetch('/_ensemble/brand/upload', {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+      });
+      const body = (await r.json()) as { ok?: boolean; url?: string; error?: string };
+      if (!r.ok || !body.url) {
+        throw new Error(body.error ?? `HTTP ${r.status}`);
+      }
+      onChange(body.url);
+      toast.success('Uploaded');
+    } catch (e) {
+      toast.error('Upload failed', {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setUploading(false);
+      // Reset so re-selecting the same file fires onChange again.
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+        >
+          <Upload className="h-3 w-3 mr-1" />
+          {uploading ? 'Uploading…' : 'Upload'}
+        </Button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/svg+xml,image/webp,image/x-icon,image/vnd.microsoft.icon"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) handleFile(f);
+          }}
+        />
+        {value && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onChange('')}
+            disabled={uploading}
+          >
+            Clear
+          </Button>
+        )}
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Or paste an image URL</Label>
+        <Input
+          placeholder="https://example.com/logo.svg"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="text-sm"
+        />
+      </div>
     </div>
   );
 }

@@ -143,19 +143,30 @@ export async function fetchNav(): Promise<void> {
 }
 
 /**
- * Navigate to a path.
+ * Navigate to a path. Accepts an optional `#fragment` for deep-linking
+ * into tabbed pages (e.g., `/auth#credentials`). The fragment is kept on
+ * `window.location.hash` for hooks like `useHashTab` to read, while the
+ * route signal only carries the path portion so the page registry
+ * resolves correctly.
  */
 export function navigate(path: string): void {
   if (typeof window === 'undefined') return;
 
-  // Update browser history
+  const hashIndex = path.indexOf('#');
+  const pathOnly = hashIndex === -1 ? path : path.slice(0, hashIndex);
+
+  // Update browser history with the full path+hash (URL bar shows it).
   window.history.pushState(null, '', path);
 
-  // Update current path signal
-  currentPath.value = path;
+  // The route signal only carries the path — fragments are not routes.
+  currentPath.value = pathOnly;
 
-  // Dispatch popstate for any listeners
+  // hashchange doesn't fire on pushState, so emit it explicitly when the
+  // fragment changes. Hooks like useHashTab listen for this.
   window.dispatchEvent(new PopStateEvent('popstate'));
+  if (hashIndex !== -1) {
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  }
 }
 
 /**
