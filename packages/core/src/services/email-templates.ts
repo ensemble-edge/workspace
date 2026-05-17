@@ -18,6 +18,10 @@
 
 import { getCredential } from './credentials';
 import { resolveBrandImage } from './brand-images';
+import { parseWordmarkSegments, renderWordmarkHtml } from './wordmark-segments';
+import type { WordmarkSegment } from './wordmark-segments';
+import { loadAndResolveRoles, familyStack } from './font-roles';
+import type { ResolvedRole } from './font-roles';
 
 interface Env {
   DB: D1Database;
@@ -26,6 +30,10 @@ interface Env {
 
 interface BrandContext {
   workspace_name: string;
+  /** Styled-text wordmark segments. Highest precedence in renderEnvelope. */
+  wordmark_segments: WordmarkSegment[];
+  /** Resolved wordmark typography (falls back to display when unset). */
+  wordmark_role: ResolvedRole;
   /** Absolute URL or null. */
   logo_wordmark: string | null;
   /** Absolute URL or null. */
@@ -72,6 +80,8 @@ async function loadBrandContext(env: Env, workspaceId: string): Promise<BrandCon
 
   return {
     workspace_name: wsRow?.name ?? 'Workspace',
+    wordmark_segments: parseWordmarkSegments(tokens['wordmark_text'] ?? ''),
+    wordmark_role: (await loadAndResolveRoles(env.DB, workspaceId)).wordmark,
     logo_wordmark: absolutize(wordmarkRel),
     logo_icon_mark: absolutize(iconRel),
     accent,
@@ -87,11 +97,23 @@ function renderEnvelope(
   brand: BrandContext,
   opts: { heading: string; bodyHtml: string; cta: { url: string; label: string }; footnote: string },
 ): string {
-  const logoImg = brand.logo_wordmark
-    ? `<img src="${brand.logo_wordmark}" alt="${escapeHtml(brand.workspace_name)}" style="max-height:32px;max-width:200px;display:block;" />`
-    : brand.logo_icon_mark
-      ? `<img src="${brand.logo_icon_mark}" alt="${escapeHtml(brand.workspace_name)}" style="max-height:32px;max-width:32px;display:block;" />`
-      : `<span style="font-size:18px;font-weight:600;color:#111827;">${escapeHtml(brand.workspace_name)}</span>`;
+  // Precedence: styled-text wordmark > raster wordmark > icon mark >
+  // plain workspace name. Styled text wins because it scales cleanly
+  // in every email client (no image-loading off by default, no Outlook
+  // sizing surprises).
+  const styledWordmark = renderWordmarkHtml(brand.wordmark_segments, {
+    fontSize: 18,
+    weight: brand.wordmark_role.weight,
+    style: brand.wordmark_role.style,
+    fontFamily: familyStack(brand.wordmark_role.family),
+  });
+  const logoImg = styledWordmark
+    ? styledWordmark
+    : brand.logo_wordmark
+      ? `<img src="${brand.logo_wordmark}" alt="${escapeHtml(brand.workspace_name)}" style="max-height:32px;max-width:200px;display:block;" />`
+      : brand.logo_icon_mark
+        ? `<img src="${brand.logo_icon_mark}" alt="${escapeHtml(brand.workspace_name)}" style="max-height:32px;max-width:32px;display:block;" />`
+        : `<span style="font-size:18px;font-weight:600;color:#111827;">${escapeHtml(brand.workspace_name)}</span>`;
 
   const font = `-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif`;
 

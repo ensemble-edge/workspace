@@ -13,6 +13,11 @@
 
 import { assembleBrandSpec, generateCssFromSpec } from './spec';
 import { getThemePreset } from './themes';
+import {
+  loadAndResolveRoles,
+  buildGoogleFontsHref,
+  buildFontCssVars,
+} from '../../../services/font-roles';
 
 /** Font family map — shared with shell Appearance tab */
 export const FONT_FAMILIES: Record<string, string> = {
@@ -58,7 +63,24 @@ export async function generateBrandCss(
   // Also generate shell CSS (workspace appearance settings from 'custom' category)
   const shellCss = await generateShellCss(db, workspaceId, defaultAccent);
 
-  return `${brandCss}\n\n${shellCss}`;
+  // v0.1.17: resolve all five typographic roles and emit:
+  //   1. An @import for the combined Google Fonts CSS (only families/weights in use)
+  //   2. :root CSS variables consumers reference (--font-display, --font-display-weight, etc.)
+  //   3. A wordmark fallback to display when wordmark family is unset.
+  let fontCss = '';
+  try {
+    const roles = await loadAndResolveRoles(db, workspaceId);
+    const href = buildGoogleFontsHref(roles);
+    const importLine = href ? `@import url('${href}');\n\n` : '';
+    fontCss = importLine + buildFontCssVars(roles);
+  } catch (err) {
+    console.warn('[brand-css] font role resolution failed:', err);
+  }
+
+  // Font CSS must come FIRST so the @import lands at the top of the
+  // stylesheet (CSS @import rules are only valid before any other
+  // declarations).
+  return `${fontCss}\n\n${brandCss}\n\n${shellCss}`;
 }
 
 /**

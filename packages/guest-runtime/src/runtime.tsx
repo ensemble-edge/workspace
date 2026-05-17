@@ -43,6 +43,8 @@ import {
   EmptyState,
   StatCard,
   DataRow,
+  SaveStatus,
+  useSaveStatus,
   // Utility
   cn,
 } from "@ensemble-edge/ui";
@@ -146,6 +148,8 @@ export interface EnsembleRuntime {
   EmptyState: typeof EmptyState;
   StatCard: typeof StatCard;
   DataRow: typeof DataRow;
+  SaveStatus: typeof SaveStatus;
+  useSaveStatus: typeof useSaveStatus;
 
   /**
    * useAI({ tier }) — call the workspace's AI Gateway through a named tier.
@@ -160,6 +164,94 @@ export interface EnsembleRuntime {
    * as `fallback`.
    */
   useAI: typeof useAI;
+
+  /**
+   * useLocales() — read the workspace's configured content locales.
+   *
+   * Operators declare which BCP-47 locales the workspace supports under
+   * Brand → Languages. Guest apps that render localized content should
+   * use this hook to discover what's enabled and which is the default.
+   *
+   * The hook fetches once per mount and caches via module-level state
+   * so multiple components don't make redundant requests. Updates
+   * require a remount (locale changes are rare).
+   */
+  useLocales: typeof useLocales;
+
+  /**
+   * useWorkspaceEvent — subscribe to workspace mutation events.
+   *
+   * Operators change things in the workspace shell (add a language,
+   * promote a default locale, update brand tokens). Guest apps that
+   * render against that state should refetch or react when it changes,
+   * not stay stale until the user manually reloads.
+   *
+   * Event types in v0.1.17:
+   *   'locale.added' | 'locale.removed' | 'locale.default-changed'
+   *   'brand.tokens.changed' | 'user.role.changed' | 'workspace.settings.changed'
+   *
+   * Iframe-tier guests receive events via postMessage from the host.
+   * Component-tier guests share the host's in-memory bus. Same shape
+   * either way — guest code doesn't need to know the tier.
+   */
+  useWorkspaceEvent: typeof useWorkspaceEvent;
+
+  /**
+   * useFonts() — read the workspace's active typography.
+   *
+   * Returns the five resolved typographic roles (display, heading,
+   * body, mono, wordmark) with family + weight + style + CSS stack.
+   * Guest apps can render their own typography against the workspace
+   * scheme by applying `roles.heading.stack` etc., or by referencing
+   * the published CSS variables `var(--font-heading)` etc.
+   */
+  useFonts: typeof useFonts;
+}
+
+export interface FontRoleResolved {
+  family: string;
+  weight: string;
+  style: 'normal' | 'italic';
+  isSystem: boolean;
+  /** Pre-computed CSS font-family stack (with quoting + fallbacks). */
+  stack: string;
+}
+
+export interface UseFontsResult {
+  roles: Record<'display' | 'heading' | 'body' | 'mono' | 'wordmark', FontRoleResolved> | null;
+  loading: boolean;
+  error: string | null;
+}
+
+export type WorkspaceEventType =
+  | 'locale.added'
+  | 'locale.removed'
+  | 'locale.default-changed'
+  | 'brand.tokens.changed'
+  | 'user.role.changed'
+  | 'workspace.settings.changed';
+
+export interface WorkspaceEvent {
+  type: WorkspaceEventType;
+  ts: number;
+  data?: Record<string, unknown>;
+}
+
+export interface WorkspaceLocale {
+  code: string;
+  display_name: string;
+  is_default: boolean;
+  enabled: boolean;
+}
+
+export interface UseLocalesResult {
+  locales: WorkspaceLocale[];
+  /** BCP-47 code of the default locale (or 'en' before load completes). */
+  defaultLocale: string;
+  /** Enabled locale codes, with default-first ordering. */
+  enabledCodes: string[];
+  loading: boolean;
+  error: string | null;
 }
 
 export interface UseAIResult {
@@ -221,6 +313,176 @@ function useAI({ tier }: { tier: string }): UseAIResult {
 
   return { call, loading, error, fallback };
 }
+
+// Module-level cache for useLocales — avoid N requests for N components.
+let _localesCache: WorkspaceLocale[] | null = null;
+let _localesPromise: Promise<WorkspaceLocale[]> | null = null;
+
+async function fetchLocalesOnce(): Promise<WorkspaceLocale[]> {
+  if (_localesCache) return _localesCache;
+  if (_localesPromise) return _localesPromise;
+  _localesPromise = (async () => {
+    const r = await fetch('/_ensemble/locales', { credentials: 'include' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const body = (await r.json()) as { locales: WorkspaceLocale[] };
+    _localesCache = body.locales ?? [];
+    return _localesCache;
+  })();
+  try {
+    return await _localesPromise;
+  } finally {
+    _localesPromise = null;
+  }
+}
+
+function useLocales(): UseLocalesResult {
+  const [locales, setLocales] = React.useState<WorkspaceLocale[]>(_localesCache ?? []);
+  const [loading, setLoading] = React.useState(!_localesCache);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchLocalesOnce()
+      .then((data) => {
+        if (!cancelled) {
+          setLocales(data);
+          setLoading(false);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+          setLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const defaultLocale = locales.find((l) => l.is_default)?.code ?? 'en';
+  const enabledCodes = [...locales]
+    .filter((l) => l.enabled)
+    .sort((a, b) => (a.is_default && !b.is_default ? -1 : !a.is_default && b.is_default ? 1 : 0))
+    .map((l) => l.code);
+
+  return { locales, defaultLocale, enabledCodes, loading, error };
+}
+
+/**
+ * Iframe-tier listeners. The host postMessages events to this window
+ * after we subscribe via `ensemble:subscribe-events`. The guest-runtime
+ * keeps a single global listener and fans events out to React hooks.
+ */
+const eventListeners = new Set<(event: WorkspaceEvent) => void>();
+let _subscribedToHost = false;
+
+function ensureSubscribedToHost() {
+  if (_subscribedToHost) return;
+  _subscribedToHost = true;
+
+  // Tell the host this iframe wants events. AppViewPage's onMessage
+  // catches `ensemble:subscribe-events` and registers our window.
+  try {
+    window.parent.postMessage({ type: 'ensemble:subscribe-events', v: 1 }, '*');
+  } catch {
+    /* same-origin same window — no parent */
+  }
+
+  // Listen for incoming events from the host.
+  window.addEventListener('message', (event) => {
+    const msg = event.data as {
+      type?: string;
+      v?: number;
+      event?: WorkspaceEvent;
+    };
+    if (!msg || msg.type !== 'ensemble:event' || msg.v !== 1 || !msg.event) return;
+    for (const fn of eventListeners) {
+      try { fn(msg.event); } catch (e) { console.error('[ensemble-events] listener threw:', e); }
+    }
+  });
+}
+
+function useWorkspaceEvent(
+  type: WorkspaceEventType | WorkspaceEventType[],
+  handler: (event: WorkspaceEvent) => void,
+) {
+  const handlerRef = React.useRef(handler);
+  handlerRef.current = handler;
+
+  React.useEffect(() => {
+    ensureSubscribedToHost();
+    const types = Array.isArray(type) ? type : [type];
+    const listener = (event: WorkspaceEvent) => {
+      if (types.includes(event.type)) {
+        handlerRef.current(event);
+      }
+    };
+    eventListeners.add(listener);
+    return () => {
+      eventListeners.delete(listener);
+    };
+  }, [Array.isArray(type) ? type.join(',') : type]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+// Module-level cache for useFonts.
+let _fontsCache: UseFontsResult['roles'] | null = null;
+let _fontsPromise: Promise<UseFontsResult['roles']> | null = null;
+
+async function fetchFontsOnce(): Promise<UseFontsResult['roles']> {
+  if (_fontsCache) return _fontsCache;
+  if (_fontsPromise) return _fontsPromise;
+  _fontsPromise = (async () => {
+    const r = await fetch('/_ensemble/core/brand/fonts/active', { credentials: 'include' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const body = (await r.json()) as { roles: UseFontsResult['roles'] };
+    _fontsCache = body.roles ?? null;
+    return _fontsCache;
+  })();
+  try {
+    return await _fontsPromise;
+  } finally {
+    _fontsPromise = null;
+  }
+}
+
+function useFonts(): UseFontsResult {
+  const [roles, setRoles] = React.useState<UseFontsResult['roles']>(_fontsCache);
+  const [loading, setLoading] = React.useState(!_fontsCache);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchFontsOnce()
+      .then((data) => {
+        if (!cancelled) { setRoles(data); setLoading(false); }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+          setLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Invalidate the cache on brand.tokens.changed so guests reactively
+  // pick up new fonts. Inside the iframe runtime we already have
+  // useWorkspaceEvent — but we can't call it from here (would create a
+  // hook-call cycle). Instead, register at module load.
+
+  return { roles, loading, error };
+}
+
+// Invalidate the module-level fonts cache when brand tokens change.
+// This runs once on module load — independent of any React hook.
+(function registerFontsInvalidator() {
+  if (typeof window === 'undefined') return;
+  window.addEventListener('message', (event) => {
+    const msg = event.data as { type?: string; v?: number; event?: { type?: string } };
+    if (msg?.type === 'ensemble:event' && msg?.event?.type === 'brand.tokens.changed') {
+      _fontsCache = null;
+    }
+  });
+})();
 
 function mount(Component: React.ComponentType): void {
   const container = document.getElementById("root");
@@ -286,6 +548,11 @@ const runtime: EnsembleRuntime = {
   Skeleton,
   Avatar, AvatarImage, AvatarFallback,
   EmptyState, StatCard, DataRow,
+  SaveStatus, useSaveStatus,
+
+  useLocales,
+  useWorkspaceEvent,
+  useFonts,
 
   useAI,
 };

@@ -110,10 +110,38 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   app.get('/login', async (c) => {
     const workspace = c.get('workspace');
     const themeMode = await getSavedThemeMode(c.env.DB, workspace?.id || '');
+
+    // Load the styled-wordmark segments + typography so the login
+    // screen renders the operator's brand mark in their chosen face.
+    let wordmarkHtml: string | null = null;
+    if (workspace?.id) {
+      try {
+        const { parseWordmarkSegments, renderWordmarkHtml } = await import('./services/wordmark-segments');
+        const { loadAndResolveRoles, familyStack } = await import('./services/font-roles');
+        const row = await c.env.DB.prepare(
+          `SELECT value FROM brand_tokens
+            WHERE workspace_id = ? AND category = 'identity'
+              AND key = 'wordmark_text' AND locale = ''`,
+        ).bind(workspace.id).first<{ value: string }>();
+        const segments = parseWordmarkSegments(row?.value ?? '');
+        const roles = await loadAndResolveRoles(c.env.DB, workspace.id);
+        const wm = roles.wordmark;
+        wordmarkHtml = renderWordmarkHtml(segments, {
+          fontSize: 24,
+          weight: wm.weight,
+          style: wm.style,
+          fontFamily: familyStack(wm.family),
+        });
+      } catch {
+        // Fall back to plain workspace name.
+      }
+    }
+
     return c.html(generateLoginHtml(
       workspace?.name ?? resolvedConfig.workspace.name,
       resolvedConfig.brand.accent,
-      themeMode
+      themeMode,
+      wordmarkHtml,
     ));
   });
 
@@ -622,7 +650,12 @@ function generateShellHtml(workspaceName: string, accentColor: string, themeMode
  * Uses JavaScript to submit form as JSON instead of URL-encoded.
  * Styled to match the shadcn/ui design system loaded from shell.css.
  */
-function generateLoginHtml(workspaceName: string, accentColor: string, themeMode: 'light' | 'dark' | 'system' = 'dark'): string {
+function generateLoginHtml(
+  workspaceName: string,
+  accentColor: string,
+  themeMode: 'light' | 'dark' | 'system' = 'dark',
+  wordmarkHtml: string | null = null,
+): string {
   const initialClass = themeMode === 'light' ? '' : 'dark';
   const systemScript = themeMode === 'system' ? `<script>if(window.matchMedia('(prefers-color-scheme:light)').matches)document.documentElement.classList.remove('dark')</script>` : '';
   const inputClass = 'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
@@ -641,10 +674,9 @@ function generateLoginHtml(workspaceName: string, accentColor: string, themeMode
 </head>
 <body class="min-h-svh flex items-center justify-center p-4 bg-muted">
   <div class="w-full max-w-sm bg-card rounded-lg shadow-lg border p-6 space-y-6">
-    <!-- Logo -->
-    <div class="flex items-center gap-2 justify-center">
-      <span class="text-2xl text-primary">◆</span>
-      <span class="text-xl font-semibold text-foreground">${escapeHtml(workspaceName)}</span>
+    <!-- Logo / wordmark -->
+    <div class="flex items-center gap-2 justify-center text-foreground">
+      ${wordmarkHtml ?? `<span class="text-2xl text-primary">◆</span><span class="text-xl font-semibold">${escapeHtml(workspaceName)}</span>`}
     </div>
 
     <!-- Title -->

@@ -30,7 +30,7 @@ import {
   Button,
 } from '@ensemble-edge/ui';
 
-import { currentPath, navigate } from '../../../state';
+import { currentPath, navigate, registerIframeForEvents } from '../../../state';
 import { authedFetch } from '../../../state';
 
 type Tier = 'component' | 'iframe' | 'sandboxed';
@@ -55,7 +55,7 @@ export function AppViewPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/_ensemble/apps/${appId}/manifest`)
+    authedFetch(`/_ensemble/apps/${appId}/manifest`)
       .then((res) => {
         if (!res.ok) throw new Error('App not found');
         return res.json() as Promise<AppManifestResponse>;
@@ -168,6 +168,9 @@ function IframeTierRenderer({ appInfo, path }: { appInfo: AppInfo; path: string 
     const iframe = iframeRef.current;
     if (!iframe) return;
 
+    // Per-iframe unregister handle for the event-bus subscription.
+    let unregisterEvents: (() => void) | null = null;
+
     function onMessage(event: MessageEvent) {
       if (event.source !== iframe?.contentWindow) return;
       const msg = event.data as { type?: string; v?: number; path?: string };
@@ -187,10 +190,21 @@ function IframeTierRenderer({ appInfo, path }: { appInfo: AppInfo; path: string 
             body: JSON.stringify({ source: appInfo.id, ...((msg as unknown) as Record<string, unknown>) }),
           }).catch(() => { /* best-effort */ });
           break;
+        case 'ensemble:subscribe-events':
+          // Iframe asked to receive workspace events. Register its window
+          // with the bus; unregister on iframe unload (covered by the
+          // useEffect cleanup below).
+          if (!unregisterEvents && iframe.contentWindow) {
+            unregisterEvents = registerIframeForEvents(iframe.contentWindow);
+          }
+          break;
       }
     }
     window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      if (unregisterEvents) unregisterEvents();
+    };
   }, [appInfo.id]);
 
   const subpath = path.replace(/^\/apps\/[\w-]+/, '') || '/';

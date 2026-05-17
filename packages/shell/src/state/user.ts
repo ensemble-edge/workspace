@@ -164,10 +164,26 @@ export async function fetchUser(): Promise<void> {
   authError.value = null;
 
   try {
-    const response = await fetch('/_ensemble/auth/me');
+    // First attempt: bare fetch (no redirect-on-401 side effects — this
+    // function is *the* "are we logged in?" probe, called on shell mount,
+    // and it must return cleanly on 401 without bouncing to login itself).
+    let response = await fetch('/_ensemble/auth/me', { credentials: 'include' });
+
+    // 401 here is the critical path: it can mean either "real logout"
+    // (refresh token expired or revoked) or "access token expired but
+    // refresh still valid" — and the difference is the entire reason
+    // operators kept getting kicked to login. Try a refresh before
+    // concluding we're logged out.
+    if (response.status === 401) {
+      const refreshed = await attemptRefresh();
+      if (refreshed) {
+        response = await fetch('/_ensemble/auth/me', { credentials: 'include' });
+      }
+    }
 
     if (response.status === 401) {
-      // Not authenticated - this is okay
+      // Real logout: refresh failed or wasn't possible. Caller
+      // (Viewport) decides whether to redirect.
       user.value = null;
       membership.value = null;
       return;

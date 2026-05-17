@@ -256,6 +256,134 @@ export function registerBrandRoutes(
       return c.json({ error: 'Failed to save colors' }, 500);
     }
   });
+
+  // ── Google Fonts catalog (v0.1.17) ─────────────────────────────────
+  //
+  // Proxies fonts.google.com/metadata/fonts and caches the normalized
+  // list in KV for 24h. Operators get the full ~1500-family catalog
+  // in the Typography + Logos pickers without each shell load hitting
+  // Google directly. The endpoint is read-only and doesn't surface any
+  // workspace-specific data, so it's safe to cache cross-workspace.
+
+  /**
+   * Resolved active fonts for this workspace — the five typography
+   * roles (display, heading, body, mono, wordmark) with family +
+   * weight + style. Used by `Ensemble.useFonts()` so guest apps can
+   * opt into the workspace's font scheme without reaching for CSS
+   * variables directly.
+   *
+   * The shape is identical to what the brand CSS endpoint encodes;
+   * this endpoint just hands it back as JSON instead of CSS.
+   */
+  app.get('/_ensemble/core/brand/fonts/active', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    try {
+      const { loadAndResolveRoles, familyStack } = await import('../../../services/font-roles');
+      const roles = await loadAndResolveRoles(c.env.DB, workspace.id);
+      // Augment each role with the CSS stack so guest apps can apply
+      // it without re-resolving system-family names client-side.
+      const augmented = Object.fromEntries(
+        Object.entries(roles).map(([k, r]) => [
+          k,
+          { ...r, stack: familyStack(r.family) },
+        ]),
+      );
+      return c.json({ roles: augmented });
+    } catch (error) {
+      console.error('[fonts/active] failed:', error);
+      return c.json({ roles: {} }, 200);
+    }
+  });
+
+  app.get('/_ensemble/core/fonts/google', async (c) => {
+    try {
+      const fonts = await getCachedGoogleFonts(c.env);
+      return c.json({ fonts }, 200, {
+        // Help the browser cache on the second-tab case as well.
+        'Cache-Control': 'public, max-age=3600',
+      });
+    } catch (err) {
+      console.error('[fonts] catalog fetch failed:', err);
+      return c.json({ fonts: [], error: String(err) }, 200);
+    }
+  });
+}
+
+interface GoogleFontEntry {
+  family: string;
+  category: 'sans-serif' | 'serif' | 'display' | 'handwriting' | 'monospace' | string;
+  /** Available variants — e.g. ['400', '500', '600', '700', 'italic-400', ...]. */
+  variants: string[];
+  /** Popularity rank (1 = most popular). */
+  popularity?: number;
+}
+
+/**
+ * 24h-cached Google Fonts catalog. Cached in workspace KV under
+ * `fonts:google:v1` so concurrent shell loads share one fetch.
+ * Falls back to the previous cache value if a refresh fails.
+ */
+async function getCachedGoogleFonts(env: { KV: KVNamespace }): Promise<GoogleFontEntry[]> {
+  const KEY = 'fonts:google:v1';
+  const TTL = 24 * 60 * 60; // 24h
+
+  const cached = await env.KV.get(KEY);
+  if (cached) {
+    try {
+      const { fetched_at, fonts } = JSON.parse(cached) as {
+        fetched_at: number;
+        fonts: GoogleFontEntry[];
+      };
+      if (Date.now() - fetched_at < TTL * 1000) return fonts;
+    } catch {
+      // fall through to refresh
+    }
+  }
+
+  // No-auth manifest. This is the same source the public fonts.google.com
+  // picker uses. Its shape: { axisRegistry: [...], familyMetadataList: [...] }
+  // with each entry shaped like { family, category, fonts: { '400': {...} }, ... }.
+  const fresh = await fetchGoogleFontsMetadata();
+
+  // Persist (best-effort).
+  try {
+    await env.KV.put(KEY, JSON.stringify({ fetched_at: Date.now(), fonts: fresh }), {
+      expirationTtl: TTL * 7, // keep the cache for a week as fallback
+    });
+  } catch { /* ignore */ }
+
+  return fresh;
+}
+
+async function fetchGoogleFontsMetadata(): Promise<GoogleFontEntry[]> {
+  // Google ships this manifest unauthenticated. The response is
+  // JSON-with-leading-XSSI-prefix (`)]}'` on a line by itself) so we
+  // strip it before parsing.
+  const res = await fetch('https://fonts.google.com/metadata/fonts');
+  if (!res.ok) throw new Error(`Google Fonts metadata HTTP ${res.status}`);
+  let body = await res.text();
+  body = body.replace(/^\)\]\}'?\s*/, '');
+  const parsed = JSON.parse(body) as {
+    familyMetadataList?: Array<{
+      family: string;
+      category?: string;
+      fonts?: Record<string, unknown>;
+      popularity?: number;
+    }>;
+  };
+
+  return (parsed.familyMetadataList ?? []).map((f) => {
+    const variants = Object.keys(f.fonts ?? {});
+    // Normalize category to lowercase, dropping the "SANS_SERIF"-style spelling.
+    const category = (f.category ?? '').toLowerCase().replace('_', '-');
+    return {
+      family: f.family,
+      category: category as GoogleFontEntry['category'],
+      variants,
+      popularity: f.popularity,
+    };
+  });
 }
 
 /** Simple JSON to YAML-ish conversion (no external deps). */

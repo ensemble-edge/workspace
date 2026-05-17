@@ -18,7 +18,7 @@ import {
   toast,
 } from '@ensemble-edge/ui';
 
-import { authedFetch } from '../../../state';
+import { authedFetch, emitWorkspaceEvent } from '../../../state';
 
 interface WorkspaceLocale {
   code: string;
@@ -72,6 +72,7 @@ export function LanguagesTab() {
         const body = (await r.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${r.status}`);
       }
+      emitWorkspaceEvent('locale.default-changed', { code });
       toast.success(`${code} is now the default`);
       await refresh();
     } catch (e) {
@@ -115,6 +116,7 @@ export function LanguagesTab() {
         const body = (await r.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${r.status}`);
       }
+      emitWorkspaceEvent('locale.removed', { code });
       toast.success(`Removed ${displayName}`);
       await refresh();
     } catch (e) {
@@ -246,6 +248,7 @@ function AddLocaleControl({
         const body = (await r.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${r.status}`);
       }
+      emitWorkspaceEvent('locale.added', { code, display_name });
       toast.success(`Added ${display_name}`);
       setOpen(false);
       setPicked('');

@@ -19,7 +19,7 @@ import {
   toast,
 } from '@ensemble-edge/ui';
 
-import { authedFetch } from '../../../state';
+import { authedFetch, emitWorkspaceEvent } from '../../../state';
 
 export function DangerZoneTab() {
   const [confirmText, setConfirmText] = useState('');
@@ -122,6 +122,7 @@ function PublicSurfaceToggles() {
         throw new Error(body.error ?? `HTTP ${r.status}`);
       }
       setLocal(next);
+      emitWorkspaceEvent('workspace.settings.changed', { key, value: next });
       toast.success(next ? 'Enabled' : 'Disabled');
     } catch (e) {
       toast.error('Failed to update', {

@@ -29,9 +29,11 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  SaveStatus,
   toast,
 } from '@ensemble-edge/ui';
-import { authedFetch } from '../../../state';
+import { authedFetch, emitWorkspaceEvent } from '../../../state';
+import { useFormStatus } from '../../../hooks/useFormStatus';
 
 interface CustomField {
   key: string;
@@ -48,8 +50,12 @@ export function IdentityTab() {
   const [website, setWebsite] = useState('');
   const [industry, setIndustry] = useState('');
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
-  const [saving, setSaving] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+
+  const status = useFormStatus({
+    value: { legalName, displayName, foundingYear, headquarters, website, industry, customFields },
+    mode: 'manual',
+  });
 
   const knownKeys = new Set(['legal_name', 'display_name', 'founding_year', 'headquarters', 'website', 'industry']);
 
@@ -75,8 +81,10 @@ export function IdentityTab() {
           }
         }
         setCustomFields(custom);
+        status.resetBaseline();
       })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const addCustomField = () => {
@@ -91,8 +99,10 @@ export function IdentityTab() {
     setCustomFields(customFields.map((f, idx) => idx === i ? { ...f, ...updates } : f));
   };
 
+  const saving = status.state === 'saving';
+
   const handleSave = async () => {
-    setSaving(true);
+    status.beginSave();
     try {
       const tokens: Record<string, string> = {
         legal_name: legalName,
@@ -113,11 +123,12 @@ export function IdentityTab() {
         body: JSON.stringify({ category: 'identity', tokens }),
       });
       if (!res.ok) throw new Error('Failed to save');
+      status.commitSave();
+      emitWorkspaceEvent('brand.tokens.changed', { category: 'identity' });
       toast.success('Identity saved');
-    } catch {
+    } catch (e) {
+      status.failSave(e);
       toast.error('Failed to save identity');
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -158,10 +169,11 @@ export function IdentityTab() {
               <Input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://ownly.com" />
             </div>
           </CardContent>
-          <CardFooter>
-            <Button onClick={handleSave} disabled={saving}>
+          <CardFooter className="gap-3">
+            <Button onClick={handleSave} disabled={!status.dirty || saving}>
               {saving ? 'Saving...' : 'Save Identity'}
             </Button>
+            {status.state !== 'clean' && <SaveStatus state={status.state} />}
           </CardFooter>
         </Card>
 

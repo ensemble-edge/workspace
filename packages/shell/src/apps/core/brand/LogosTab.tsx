@@ -23,11 +23,30 @@ import { Image, Upload, Plus, X, Type, Image as ImageIcon } from 'lucide-react';
 
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
-  Button, Input, Label, toast,
+  Button, Input, Label, SaveStatus, FontCombobox,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  toast,
 } from '@ensemble-edge/ui';
+import type { FontComboboxOption } from '@ensemble-edge/ui';
 
-import { authedFetch } from '../../../state';
+import { authedFetch, emitWorkspaceEvent } from '../../../state';
+import { useFormStatus } from '../../../hooks/useFormStatus';
 import { WordmarkEditor } from './WordmarkEditor';
+import {
+  SYSTEM_FONTS,
+  DEFAULT_WEIGHT_FOR_ROLE,
+  WEIGHT_LABELS,
+  weightsForFamily,
+  familySupportsItalic,
+  resolveFamilyStack,
+} from './font-utils';
+
+interface GoogleFontEntry {
+  family: string;
+  category: string;
+  variants: string[];
+  popularity?: number;
+}
 
 type Variant = 'base' | 'dark' | 'svg' | 'dark_svg';
 
@@ -90,7 +109,16 @@ function tokenKey(slot: string, variant: Variant): string {
 
 export function LogosTab() {
   const [tokens, setTokens] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
+  const [fontCatalog, setFontCatalog] = useState<GoogleFontEntry[]>([]);
+  const status = useFormStatus({ value: tokens, mode: 'manual' });
+
+  // Load the Google Fonts catalog once for the wordmark Family picker.
+  useEffect(() => {
+    authedFetch('/_ensemble/core/fonts/google')
+      .then((r) => r.json() as Promise<{ fonts: GoogleFontEntry[] }>)
+      .then((res) => setFontCatalog(res.fonts ?? []))
+      .catch(() => { /* picker degrades to system defaults only */ });
+  }, []);
 
   useEffect(() => {
     authedFetch('/_ensemble/core/brand/tokens/identity')
@@ -101,13 +129,24 @@ export function LogosTab() {
           // Logos tab owns: all logo_* image variants AND wordmark_text
           // (the structured styled-wordmark JSON). The wordmark slot
           // toggles between the two; both are core brand identity.
-          if (t.key.startsWith('logo_') || t.key === 'wordmark_text') {
+          // Logos tab owns: image variants AND wordmark text/typography.
+          if (
+            t.key.startsWith('logo_') ||
+            t.key === 'wordmark_text' ||
+            t.key === 'wordmark_family' ||
+            t.key === 'wordmark_weight' ||
+            t.key === 'wordmark_style'
+          ) {
             loaded[t.key] = t.value;
           }
         }
         setTokens(loaded);
+        // Snapshot the loaded state as the new baseline so we don't
+        // start out "dirty" relative to the initial empty {}.
+        status.resetBaseline();
       })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function setToken(key: string, value: string) {
@@ -115,7 +154,7 @@ export function LogosTab() {
   }
 
   async function handleSave() {
-    setSaving(true);
+    status.beginSave();
     try {
       const toWrite: Record<string, string> = {};
       for (const [k, v] of Object.entries(tokens)) {
@@ -127,13 +166,16 @@ export function LogosTab() {
         body: JSON.stringify({ category: 'identity', tokens: toWrite }),
       });
       if (!res.ok) throw new Error('Failed to save');
+      status.commitSave();
+      emitWorkspaceEvent('brand.tokens.changed', { category: 'identity' });
       toast.success('Logos saved');
-    } catch {
+    } catch (e) {
+      status.failSave(e);
       toast.error('Failed to save logos');
-    } finally {
-      setSaving(false);
     }
   }
+
+  const saving = status.state === 'saving';
 
   return (
     <div className="space-y-6">
@@ -145,6 +187,7 @@ export function LogosTab() {
               slot={slot}
               tokens={tokens}
               onChange={setToken}
+              fontCatalog={fontCatalog}
             />
           ) : (
             <SlotCard
@@ -157,9 +200,12 @@ export function LogosTab() {
         ))}
       </div>
 
-      <Button onClick={handleSave} disabled={saving}>
-        {saving ? 'Saving…' : 'Save Logos'}
-      </Button>
+      <div className="flex items-center gap-3">
+        <Button onClick={handleSave} disabled={!status.dirty || saving}>
+          {saving ? 'Saving…' : 'Save Logos'}
+        </Button>
+        {status.state !== 'clean' && <SaveStatus state={status.state} />}
+      </div>
     </div>
   );
 }
@@ -178,10 +224,12 @@ function WordmarkCard({
   slot,
   tokens,
   onChange,
+  fontCatalog,
 }: {
   slot: SlotDef;
   tokens: Record<string, string>;
   onChange: (key: string, value: string) => void;
+  fontCatalog: GoogleFontEntry[];
 }) {
   const textValue = tokens['wordmark_text'] || '';
   const imageValue = tokens[tokenKey(slot.key, 'base')] || '';
@@ -230,10 +278,17 @@ function WordmarkCard({
       </CardHeader>
       <CardContent>
         {mode === 'text' ? (
-          <WordmarkEditor
-            value={textValue}
-            onChange={(next) => onChange('wordmark_text', next)}
-          />
+          <div className="space-y-4">
+            <WordmarkTypographyControls
+              tokens={tokens}
+              onChange={onChange}
+              fontCatalog={fontCatalog}
+            />
+            <WordmarkEditor
+              value={textValue}
+              onChange={(next) => onChange('wordmark_text', next)}
+            />
+          </div>
         ) : (
           <ImageVariantBlock slot={slot} tokens={tokens} onChange={onChange} />
         )}
@@ -563,6 +618,137 @@ function VariantSlot({
           onChange={(e) => onChange(e.target.value)}
           className="text-sm"
         />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Family / Weight / Style controls for the styled-text wordmark. Same
+ * UI shape as the four typography roles in TypographyTab. Empty tokens
+ * mean "inherit from --font-display" — operators don't have to set
+ * wordmark typography unless they want it different from display.
+ */
+function WordmarkTypographyControls({
+  tokens,
+  onChange,
+  fontCatalog,
+}: {
+  tokens: Record<string, string>;
+  onChange: (key: string, value: string) => void;
+  fontCatalog: GoogleFontEntry[];
+}) {
+  const family = tokens['wordmark_family'] || '';
+  const weight = tokens['wordmark_weight'] || '';
+  const style = (tokens['wordmark_style'] as 'normal' | 'italic') || 'normal';
+  const inheriting = !family;
+
+  const systemOptions: FontComboboxOption[] = SYSTEM_FONTS.map((s) => ({
+    family: s.family, category: s.category, hint: 'System',
+  }));
+  const googleOptions: FontComboboxOption[] = fontCatalog
+    .filter((f) => f.popularity !== undefined)
+    .sort((a, b) => (a.popularity ?? 9999) - (b.popularity ?? 9999))
+    .map((f) => ({ family: f.family, category: f.category }));
+
+  const variants = fontCatalog.find((f) => f.family === family)?.variants;
+  const availableWeights = weightsForFamily(variants);
+  const supportsItalic = familySupportsItalic(variants);
+
+  // When operator picks a family for the first time, default weight to the
+  // wordmark default (700) if available.
+  function handleFamily(next: string) {
+    onChange('wordmark_family', next);
+    if (!weight || !availableWeights.includes(weight)) {
+      const def = availableWeights.includes(DEFAULT_WEIGHT_FOR_ROLE.wordmark)
+        ? DEFAULT_WEIGHT_FOR_ROLE.wordmark
+        : availableWeights[0];
+      onChange('wordmark_weight', def);
+    }
+    if (!style) onChange('wordmark_style', 'normal');
+  }
+
+  function clearFontOverride() {
+    onChange('wordmark_family', '');
+    onChange('wordmark_weight', '');
+    onChange('wordmark_style', '');
+  }
+
+  return (
+    <div className="rounded-md border p-3 space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium">Wordmark typography</p>
+          <p className="text-xs text-muted-foreground">
+            {inheriting
+              ? 'Inheriting the Display font (from Typography tab).'
+              : 'Using a dedicated font for the wordmark.'}
+          </p>
+        </div>
+        {!inheriting && (
+          <Button type="button" variant="ghost" size="sm" onClick={clearFontOverride}>
+            Reset to inherit
+          </Button>
+        )}
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-[2fr_1fr_1fr]">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Family</Label>
+          <FontCombobox
+            value={family || 'System Sans'}
+            onChange={handleFamily}
+            systemFonts={systemOptions}
+            googleFonts={googleOptions}
+            placeholder="Pick a font…"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Weight</Label>
+          <Select
+            value={weight || DEFAULT_WEIGHT_FOR_ROLE.wordmark}
+            onValueChange={(w) => onChange('wordmark_weight', w)}
+            disabled={inheriting}
+          >
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {availableWeights.map((w) => (
+                <SelectItem key={w} value={w}>
+                  {w} — {WEIGHT_LABELS[w] ?? 'Custom'}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Style</Label>
+          <div className="flex rounded-md border p-1">
+            <button
+              type="button"
+              className={
+                style === 'normal'
+                  ? 'flex-1 rounded px-2 py-1 text-xs font-medium bg-primary text-primary-foreground'
+                  : 'flex-1 rounded px-2 py-1 text-xs font-medium hover:bg-muted'
+              }
+              onClick={() => onChange('wordmark_style', 'normal')}
+              disabled={inheriting}
+            >
+              Normal
+            </button>
+            <button
+              type="button"
+              className={
+                style === 'italic'
+                  ? 'flex-1 rounded px-2 py-1 text-xs font-medium bg-primary text-primary-foreground'
+                  : 'flex-1 rounded px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50'
+              }
+              onClick={() => onChange('wordmark_style', 'italic')}
+              disabled={inheriting || !supportsItalic}
+            >
+              Italic
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

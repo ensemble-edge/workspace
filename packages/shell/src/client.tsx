@@ -13,6 +13,8 @@ import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Shell } from './components/Shell';
 import * as EnsembleUI from '@ensemble-edge/ui';
+import { authedFetch, subscribeWorkspaceEvent, registerIframeForEvents } from './state';
+import type { WorkspaceEvent, WorkspaceEventType } from './state';
 
 /**
  * useAI hook — see guest-runtime/runtime.tsx for the canonical version.
@@ -32,10 +34,13 @@ function useAI({ tier }: { tier: string }) {
       setError(null);
       setFallback(null);
       try {
-        const response = await fetch(`/_ensemble/ai/call/${encodeURIComponent(tier)}`, {
+        // Use authedFetch so an expired access token triggers a refresh
+        // and retry transparently — important because AI calls can be
+        // fired well after page-load, when the original access token
+        // has likely rotated out.
+        const response = await authedFetch(`/_ensemble/ai/call/${encodeURIComponent(tier)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
           body: JSON.stringify(body),
         });
         const fb = response.headers.get('X-Ensemble-Tier-Fallback');
@@ -69,6 +74,149 @@ function useAI({ tier }: { tier: string }) {
 }
 
 /**
+ * useLocales — see guest-runtime/runtime.tsx for the canonical version.
+ * Duplicated here for the same reason as useAI: component-tier guests
+ * run in the host React tree, iframe-tier guests run in the bundled
+ * runtime. Same shape, same behavior.
+ */
+interface WorkspaceLocale {
+  code: string;
+  display_name: string;
+  is_default: boolean;
+  enabled: boolean;
+}
+
+let _localesCache: WorkspaceLocale[] | null = null;
+let _localesPromise: Promise<WorkspaceLocale[]> | null = null;
+
+async function fetchLocalesOnce(): Promise<WorkspaceLocale[]> {
+  if (_localesCache) return _localesCache;
+  if (_localesPromise) return _localesPromise;
+  _localesPromise = (async () => {
+    const r = await authedFetch('/_ensemble/locales');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const body = (await r.json()) as { locales: WorkspaceLocale[] };
+    _localesCache = body.locales ?? [];
+    return _localesCache;
+  })();
+  try {
+    return await _localesPromise;
+  } finally {
+    _localesPromise = null;
+  }
+}
+
+/**
+ * useWorkspaceEvent — subscribe to workspace mutation events.
+ *
+ * Component-tier hook. Calls the handler whenever the workspace emits
+ * an event matching `type` (or an array of types). Handler reference
+ * doesn't need to be stable; the subscription re-registers when it
+ * changes. Returns nothing.
+ *
+ * Event types in v0.1.17:
+ *   'locale.added' | 'locale.removed' | 'locale.default-changed'
+ *   'brand.tokens.changed' | 'user.role.changed' | 'workspace.settings.changed'
+ */
+function useWorkspaceEvent(
+  type: WorkspaceEventType | WorkspaceEventType[],
+  handler: (event: WorkspaceEvent) => void,
+) {
+  const handlerRef = React.useRef(handler);
+  handlerRef.current = handler;
+
+  React.useEffect(() => {
+    const types = Array.isArray(type) ? type : [type];
+    const unsub = subscribeWorkspaceEvent((event) => {
+      if (types.includes(event.type)) {
+        handlerRef.current(event);
+      }
+    });
+    return unsub;
+  }, [Array.isArray(type) ? type.join(',') : type]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+interface FontRoleResolved {
+  family: string;
+  weight: string;
+  style: 'normal' | 'italic';
+  isSystem: boolean;
+  stack: string;
+}
+type ActiveFonts = Record<'display' | 'heading' | 'body' | 'mono' | 'wordmark', FontRoleResolved> | null;
+
+let _fontsCache: ActiveFonts = null;
+let _fontsPromise: Promise<ActiveFonts> | null = null;
+
+async function fetchFontsOnce(): Promise<ActiveFonts> {
+  if (_fontsCache) return _fontsCache;
+  if (_fontsPromise) return _fontsPromise;
+  _fontsPromise = (async () => {
+    const r = await authedFetch('/_ensemble/core/brand/fonts/active');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const body = (await r.json()) as { roles: ActiveFonts };
+    _fontsCache = body.roles ?? null;
+    return _fontsCache;
+  })();
+  try { return await _fontsPromise; } finally { _fontsPromise = null; }
+}
+
+function useFonts() {
+  const [roles, setRoles] = React.useState<ActiveFonts>(_fontsCache);
+  const [loading, setLoading] = React.useState(!_fontsCache);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchFontsOnce()
+      .then((data) => { if (!cancelled) { setRoles(data); setLoading(false); } })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+          setLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  return { roles, loading, error };
+}
+
+// Invalidate the fonts cache when brand tokens change. Component-tier
+// uses the in-memory event bus directly.
+subscribeWorkspaceEvent((event) => {
+  if (event.type === 'brand.tokens.changed') _fontsCache = null;
+});
+
+function useLocales() {
+  const [locales, setLocales] = React.useState<WorkspaceLocale[]>(_localesCache ?? []);
+  const [loading, setLoading] = React.useState(!_localesCache);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchLocalesOnce()
+      .then((data) => {
+        if (!cancelled) { setLocales(data); setLoading(false); }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+          setLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const defaultLocale = locales.find((l) => l.is_default)?.code ?? 'en';
+  const enabledCodes = [...locales]
+    .filter((l) => l.enabled)
+    .sort((a, b) => (a.is_default && !b.is_default ? -1 : !a.is_default && b.is_default ? 1 : 0))
+    .map((l) => l.code);
+  return { locales, defaultLocale, enabledCodes, loading, error };
+}
+
+/**
  * Expose `window.Ensemble` so that dynamically-imported guest component
  * modules (tier: 'component') can render against the same React + UI
  * library the shell uses. The guest's compiled JSX targets
@@ -99,6 +247,9 @@ function installEnsembleGlobal() {
     Section: EnsembleUI.EnsembleSection,
     // AI runtime hook (v0.1.12).
     useAI,
+    useLocales,
+    useWorkspaceEvent,
+    useFonts,
   };
 }
 

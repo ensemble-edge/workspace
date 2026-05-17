@@ -13,10 +13,12 @@ import {
   Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter,
   Button, Label,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+  SaveStatus,
   toast,
 } from '@ensemble-edge/ui';
 
-import { authedFetch } from '../../../state';
+import { authedFetch, emitWorkspaceEvent } from '../../../state';
+import { useFormStatus } from '../../../hooks/useFormStatus';
 
 interface TtlOption {
   value: number;
@@ -27,8 +29,12 @@ export function SessionsTab() {
   const [currentValue, setCurrentValue] = useState<number | null>(null);
   const [draftValue, setDraftValue] = useState<number | null>(null);
   const [options, setOptions] = useState<TtlOption[]>([]);
-  const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Manual-save card: dirty when draft differs from the last saved value.
+  // useFormStatus tracks dirty/saving/saved/error so the header indicator
+  // matches reality without each card hand-rolling the state machine.
+  const status = useFormStatus({ value: draftValue, mode: 'manual' });
 
   useEffect(() => {
     (async () => {
@@ -57,7 +63,7 @@ export function SessionsTab() {
 
   async function save() {
     if (draftValue === null) return;
-    setSaving(true);
+    status.beginSave();
     try {
       const r = await authedFetch('/_ensemble/settings/session_ttl_seconds', {
         method: 'PUT',
@@ -69,32 +75,36 @@ export function SessionsTab() {
         throw new Error(body.error ?? `HTTP ${r.status}`);
       }
       setCurrentValue(draftValue);
+      status.commitSave();
+      emitWorkspaceEvent('workspace.settings.changed', { key: 'session_ttl_seconds', value: draftValue });
       toast.success('Session lifetime saved', {
         description: 'New sign-ins use the new value. Existing sessions are unchanged.',
       });
     } catch (e) {
+      status.failSave(e);
       toast.error('Failed to save', {
         description: e instanceof Error ? e.message : String(e),
       });
-    } finally {
-      setSaving(false);
     }
   }
 
   if (loading) return <div className="text-muted-foreground">Loading…</div>;
 
-  const dirty = draftValue !== currentValue;
-
   return (
     <div className="space-y-6 max-w-2xl">
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Clock className="h-5 w-5" /> Session lifetime
-          </CardTitle>
-          <CardDescription>
-            How long a signed-in session stays valid before the user has to sign in again.
-          </CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Clock className="h-5 w-5" /> Session lifetime
+              </CardTitle>
+              <CardDescription>
+                How long a signed-in session stays valid before the user has to sign in again.
+              </CardDescription>
+            </div>
+            {status.state !== 'clean' && <SaveStatus state={status.state} />}
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-1.5">
@@ -121,8 +131,8 @@ export function SessionsTab() {
           </p>
         </CardContent>
         <CardFooter>
-          <Button onClick={save} disabled={!dirty || saving}>
-            {saving ? 'Saving…' : 'Save'}
+          <Button onClick={save} disabled={!status.dirty || status.state === 'saving'}>
+            {status.state === 'saving' ? 'Saving…' : 'Save'}
           </Button>
         </CardFooter>
       </Card>

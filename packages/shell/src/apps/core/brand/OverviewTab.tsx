@@ -23,8 +23,10 @@ import {
   Badge,
   Skeleton,
   Separator,
+  Wordmark,
   toast,
 } from '@ensemble-edge/ui';
+import type { WordmarkSegment } from '@ensemble-edge/ui';
 
 import { getRelativeLuminance } from './color-utils';
 import { authedFetch } from '../../../state';
@@ -62,12 +64,34 @@ interface BrandSpec {
 
 export function OverviewTab() {
   const [spec, setSpec] = useState<BrandSpec | null>(null);
+  const [wordmarkSegments, setWordmarkSegments] = useState<WordmarkSegment[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    authedFetch('/_ensemble/brand/spec')
-      .then((r) => r.json() as Promise<BrandSpec>)
-      .then((data) => { setSpec(data); setLoading(false); })
+    // Spec + wordmark_text in parallel. The spec doesn't carry the
+    // styled-wordmark JSON today; we fetch it separately to keep the
+    // public spec contract stable.
+    Promise.all([
+      authedFetch('/_ensemble/brand/spec').then((r) => r.json() as Promise<BrandSpec>),
+      authedFetch('/_ensemble/core/brand/tokens/identity')
+        .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
+        .then((res) => {
+          const raw = (res.data ?? []).find((t) => t.key === 'wordmark_text');
+          if (!raw?.value) return [] as WordmarkSegment[];
+          try {
+            const parsed = JSON.parse(raw.value) as WordmarkSegment[];
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        })
+        .catch(() => [] as WordmarkSegment[]),
+    ])
+      .then(([data, segments]) => {
+        setSpec(data);
+        setWordmarkSegments(segments);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, []);
 
@@ -98,7 +122,15 @@ export function OverviewTab() {
         <CardContent className="py-8">
           <div className="flex items-start justify-between">
             <div>
-              <h2 className="text-4xl font-bold tracking-tight">{name}</h2>
+              {/* Renders styled-text segments when configured, image
+                  wordmark when set, or plain name as final fallback. */}
+              <Wordmark
+                segments={wordmarkSegments}
+                imageUrl={spec.logos.wordmark}
+                name={name}
+                imageHeight={48}
+                className="text-4xl"
+              />
               {spec.messaging.tagline && (
                 <p className="mt-2 text-lg text-muted-foreground">{spec.messaging.tagline}</p>
               )}

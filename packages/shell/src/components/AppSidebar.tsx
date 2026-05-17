@@ -44,7 +44,9 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Wordmark,
 } from '@ensemble-edge/ui';
+import type { WordmarkSegment } from '@ensemble-edge/ui';
 
 import {
   workspaceName,
@@ -55,6 +57,7 @@ import {
   displayName,
   userInitials,
   logout,
+  authedFetch,
 } from '../state';
 
 // Icon mapping for nav items
@@ -81,6 +84,33 @@ export function AppSidebar() {
   const userName = displayName.value;
   const initials = userInitials.value;
 
+  // Fetch the styled wordmark segments + raster wordmark image once on
+  // mount. Worth keeping inline rather than threading a brand-state
+  // signal through the whole shell — the sidebar is the only consumer
+  // of this data outside the brand admin tabs, and changes are rare
+  // enough that a reload-to-update is acceptable.
+  const [brandSegments, setBrandSegments] = React.useState<WordmarkSegment[]>([]);
+  const [brandWordmarkImage, setBrandWordmarkImage] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    authedFetch('/_ensemble/core/brand/tokens/identity')
+      .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
+      .then((res) => {
+        if (cancelled) return;
+        for (const t of res.data ?? []) {
+          if (t.key === 'wordmark_text' && t.value) {
+            try {
+              const parsed = JSON.parse(t.value) as WordmarkSegment[];
+              if (Array.isArray(parsed)) setBrandSegments(parsed);
+            } catch { /* noop */ }
+          }
+          if (t.key === 'logo_wordmark' && t.value) setBrandWordmarkImage(t.value);
+        }
+      })
+      .catch(() => { /* fall back to plain name */ });
+    return () => { cancelled = true; };
+  }, []);
+
   const handleNavClick = (itemPath: string, e: React.MouseEvent) => {
     e.preventDefault();
     navigate(itemPath);
@@ -102,7 +132,15 @@ export function AppSidebar() {
                   {name.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex flex-col gap-0.5 leading-none">
-                  <span className="font-semibold">{name}</span>
+                  {/* Renders styled-text wordmark segments when configured,
+                      raster wordmark image when set, or plain name fallback. */}
+                  <Wordmark
+                    segments={brandSegments}
+                    imageUrl={brandWordmarkImage}
+                    name={name}
+                    imageHeight={20}
+                    className="font-semibold"
+                  />
                   <span className="text-xs text-muted-foreground">Workspace</span>
                 </div>
               </a>

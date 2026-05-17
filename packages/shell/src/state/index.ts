@@ -72,6 +72,15 @@ export {
   initNavigation,
 } from './nav';
 
+// Workspace events — pub/sub for guest apps to subscribe to mutations
+export {
+  emitWorkspaceEvent,
+  subscribeWorkspaceEvent,
+  registerIframeForEvents,
+  latestWorkspaceEvent,
+} from './events';
+export type { WorkspaceEvent, WorkspaceEventType } from './events';
+
 // Toast notifications
 export {
   toast,

@@ -1166,3 +1166,355 @@ If route provisioning fails (typically: missing AI Gateway:Edit on the token, or
 
 ---
 
+### Save Patterns & `Ensemble.SaveStatus` (v0.1.17)
+
+Save behavior used to vary tab-by-tab in the workspace itself, which confused operators ("did I have to click Save? Did it autosave?"). v0.1.17 ships a small set of well-defined save modalities and a shared `SaveStatus` indicator. **Guest apps should use the same patterns** — operators carry their save-model expectations across the workspace boundary, so a guest that picks a different pattern feels jarring.
+
+#### The four modalities
+
+| Modality | When to use | UI cue |
+|---|---|---|
+| **Manual save** | Long-form edits with validation (multi-field forms, anything with required-fields or cross-field rules) | Save button + `<SaveStatus state="dirty" />` while pending |
+| **Autosave on blur** | Single-purpose editors with per-field independence (text fields, sliders) | No Save button. `<SaveStatus state="autosaved" />` ambient |
+| **Immediate** | Discrete actions (toggles, deletes, "promote default", item-level mutations) | Action takes effect on click. Optional `<SaveStatus state="immediate" />` label if non-obvious |
+| **Edit mode** | Sensitive fields that need a confirm step (API tokens, dangerous toggles) | Read-only view by default; "Edit" reveals fields + Save/Cancel |
+
+Workspace examples to model from:
+
+- **Manual save**: Settings → Sessions tab, Brand → Identity / Colors / Typography tabs. Long forms with a bottom "Save X" button.
+- **Autosave on blur**: (none yet in workspace as of v0.1.17 — Messaging tab is the first; future v0.1.x will roll more cards over).
+- **Immediate**: Brand → Languages (add/remove/promote-default), Settings → Danger Zone toggles, AI tier provision/test buttons.
+- **Edit mode**: Settings → Connections (Cloudflare token, email provider, AI gateway namespace).
+
+#### `Ensemble.SaveStatus` — the visible indicator
+
+```tsx
+function MyForm() {
+  const [value, setValue] = Ensemble.useState('');
+  const [dirty, setDirty] = Ensemble.useState(false);
+  const [inFlight, setInFlight] = Ensemble.useState(false);
+
+  const status = Ensemble.useSaveStatus({ dirty, inFlight, manual: true });
+
+  async function save() {
+    setInFlight(true);
+    try {
+      await fetch('/api/save', { method: 'POST', body: JSON.stringify({ value }) });
+      setDirty(false);
+    } finally {
+      setInFlight(false);
+    }
+  }
+
+  return (
+    <Ensemble.Card>
+      <Ensemble.CardHeader>
+        <Ensemble.CardTitle>My setting</Ensemble.CardTitle>
+        {status !== 'clean' && <Ensemble.SaveStatus state={status} />}
+      </Ensemble.CardHeader>
+      <Ensemble.CardContent>
+        <Ensemble.Input value={value} onChange={(e) => { setValue(e.target.value); setDirty(true); }} />
+      </Ensemble.CardContent>
+      <Ensemble.CardFooter>
+        <Ensemble.Button onClick={save} disabled={!dirty || inFlight}>
+          {inFlight ? 'Saving…' : 'Save'}
+        </Ensemble.Button>
+      </Ensemble.CardFooter>
+    </Ensemble.Card>
+  );
+}
+```
+
+**States** the component renders:
+
+- `clean` — no changes; manual-save cards typically hide the indicator (`{status !== 'clean' && ...}`)
+- `autosaved` — autosave is active and no edit is pending
+- `dirty` — user edited; click Save (amber, attention-getting)
+- `saving` — write in flight (spinner)
+- `saved` — just wrote (green check; the `useSaveStatus` hook auto-fades back after ~1.5s)
+- `error` — last save failed (destructive tone; clears on next edit)
+- `immediate` — discrete action surface (no save needed)
+
+#### Picking a modality for your guest app
+
+- **Default to manual save** for any form longer than two fields. Operators trust it; the click is a small price for explicit confirmation.
+- **Use autosave on blur** for single-field editors where mistakes are cheap and undo is one keystroke (text notes, free-form labels). Always pair with a visible `<SaveStatus state="autosaved" />` so operators know to expect it.
+- **Use immediate for discrete actions** — buttons, switches, item-level mutations. Don't add a Save button to a Switch.
+- **Use edit mode for credentials or destructive toggles** — operators need a "no, wait, cancel" affordance for high-stakes fields.
+
+**Avoid mixing modalities inside one card.** If a card has any manual-save fields, the whole card should be manual. The exception is *immediate* actions (a Delete button on a row inside a manual-save card is fine — the row mutates immediately, the form below stays dirty until Save).
+
+#### Mirroring the workspace's `useFormStatus` hook
+
+The shell uses a small `useFormStatus({ value, mode })` hook that snapshots the loaded value as a baseline and returns the right `SaveStatusState` based on whether the current value diverges. Guest apps can copy this pattern verbatim — the source is in `packages/shell/src/hooks/useFormStatus.ts`. It's not on the runtime by default (it's a few lines and apps tend to want their own variants), but the underlying primitive (`useSaveStatus`) is exposed on `Ensemble`.
+
+---
+
+### Storage Model (v0.1.17)
+
+Guest apps run as their own Cloudflare Workers — they have their own infrastructure, own their data, and own their lifecycle. The workspace exposes a small set of *services* guests can consume via HTTP, but never gives raw access to its own storage. This section is the canonical reference for "how do I store stuff in a guest app."
+
+#### Guest apps own their own storage
+
+Every guest declares its own bindings in its `wrangler.toml`:
+
+```toml
+# packages/connectors/notes/wrangler.toml
+[[d1_databases]]
+binding = "DB"
+database_name = "notes-db"
+database_id = "abc123..."
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "def456..."
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "notes-files"
+```
+
+Those bindings belong to your guest app. The workspace can't read them; other guest apps can't read them; only your worker code can. Same for Durable Objects, queues, secrets, and any other Cloudflare resource.
+
+#### Scoping data by workspace
+
+The same guest worker serves *every workspace* that installs it. The notes connector is the canonical example — one D1 instance hosts notes for Workspace A, Workspace B, Workspace C, and on. Isolation is **by convention**: every query is scoped by `workspace_id`.
+
+```tsx
+import { requireContext } from '@ensemble-edge/guest';
+
+router.get('/api/notes', async (c) => {
+  const ctx = requireContext(c.req.raw);
+  const result = await c.env.DB.prepare(
+    `SELECT * FROM notes WHERE workspace_id = ?`
+  ).bind(ctx.workspace.workspaceId).all();
+  return c.json({ notes: result.results });
+});
+```
+
+`requireContext()` returns the workspace + user context the runtime injected on the inbound request. Always scope by `workspace.workspaceId`. Scope by `user.userId` too when data is per-user (e.g. drafts). The runtime won't enforce this — that's your responsibility.
+
+**Migrations:** guests own their own. The notes connector uses the lazy-init-on-first-request pattern (`CREATE TABLE IF NOT EXISTS …`), which works for simple schemas. For complex schemas, ship a migration registry similar to the workspace's `packages/core/src/db/migrations/`.
+
+#### What the workspace exposes (read-only HTTP services)
+
+Guests can't reach into the workspace's D1, KV, or R2 directly — that would break the security model. Instead the workspace exposes a small, intentional service surface:
+
+| Surface | What | Hook |
+|---|---|---|
+| AI Gateway | LLM/translation calls through workspace-managed tiers | `Ensemble.useAI({ tier })` |
+| Locales | Configured content languages | `Ensemble.useLocales()` |
+| Auth context | Current user + role | `Ensemble.useUser()` / `/_ensemble/auth/me` |
+| Brand identity | Colors, typography, logos, messaging | `/_ensemble/brand/spec`, `/_ensemble/brand/theme`, etc. |
+| Brand assets | Workspace-uploaded R2-backed images | `/_ensemble/brand/asset/<key>` |
+| Events | Change notifications (see Workspace Events below) | `Ensemble.useWorkspaceEvent(...)` |
+
+Each is an HTTP call. The iframe carries the workspace's session cookie, so requests are authenticated automatically — no token plumbing in the guest worker. Same for component-tier guests in the host React tree.
+
+#### Anti-patterns
+
+- **Don't store secrets in the guest worker without using Cloudflare secrets**. Use `wrangler secret put` for API keys; do not hardcode in `wrangler.toml`.
+- **Don't rely on the workspace's storage existing for your data**. Even if you knew the workspace's D1 binding, your worker can't access it — they're different isolates with different bindings.
+- **Don't skip workspace_id scoping**. A single missing WHERE clause leaks data across workspaces. Always treat `workspaceId` as a required filter, not an optional one.
+- **Don't store per-user data without user_id scoping**. Drafts, preferences, anything user-specific should also key by `user.userId`. Sharing across users within a workspace is fine; mixing is not.
+
+#### What's deferred
+
+Not yet provided by the workspace, but possibly in future releases:
+
+- **Shared KV slot** for tiny guests that don't want to set up their own KV namespace
+- **Workspace R2 upload service** for guests to share file storage
+- **Cross-guest event channel** for guests that want to react to other guests' mutations
+
+If you need any of these today, file it against the `@ensemble-edge/workspace` repo or implement your own.
+
+---
+
+### Workspace Events & `Ensemble.useWorkspaceEvent()` (v0.1.17)
+
+When the operator changes something in the workspace — adds a language, swaps the default locale, updates brand colors, changes a user's role — guest apps that depend on that state need to know. Pre-v0.1.17 guests either polled or stayed stale until a manual reload. v0.1.17 ships a small event bus that solves this cleanly.
+
+#### Subscribing
+
+```tsx
+function MyGuest() {
+  const { locales } = Ensemble.useLocales();
+  const [forceRefresh, setForceRefresh] = Ensemble.useState(0);
+
+  // When the workspace's locale list changes, refetch.
+  Ensemble.useWorkspaceEvent(
+    ['locale.added', 'locale.removed', 'locale.default-changed'],
+    () => setForceRefresh((n) => n + 1),
+  );
+
+  // useLocales caches at module level — bump a state to force its
+  // refetch. The simpler pattern is to keep your *own* state and
+  // refresh it directly on the event.
+  ...
+}
+```
+
+The hook accepts either a single event type or an array. Handler doesn't need a stable reference — the subscription re-registers when it changes.
+
+#### Event catalog (v0.1.17)
+
+| Type | When | Payload |
+|---|---|---|
+| `locale.added` | Operator added a content locale | `{ code, display_name }` |
+| `locale.removed` | Operator removed a locale (data deleted) | `{ code }` |
+| `locale.default-changed` | Default locale promotion | `{ code }` |
+| `brand.tokens.changed` | Brand token mutation (any tab) | `{ category, key?, locale? }` |
+| `user.role.changed` | A user's role in this workspace changed | `{ user_id, role }` |
+| `workspace.settings.changed` | A workspace_setting was updated | `{ key, value }` |
+
+This list is intentionally narrow. Adding new event types is additive; renaming or repurposing an existing one is a breaking change.
+
+#### Transport — how it works under the hood
+
+- **Component-tier guests** (in the host React tree): events flow through an in-memory event bus shared with the shell. Subscription is synchronous.
+- **Iframe-tier guests**: the runtime sends `ensemble:subscribe-events` to the host on first `useWorkspaceEvent` call. The host then `postMessage`s every emitted event to the iframe's window. Same handler shape; same payload format.
+
+Guest code doesn't need to know which tier it's in — both surfaces register against `window.Ensemble.useWorkspaceEvent` and get the same behavior.
+
+#### What events are NOT for
+
+- **Streaming data**: events are coarse pub/sub for "something changed," not a real-time data stream. Don't use them for chat messages, presence, etc. — those need a dedicated WebSocket / Durable Object / SSE channel.
+- **Cross-guest communication**: events only flow workspace → guest. Guest → guest needs a different mechanism (your own backend, or a future cross-guest channel).
+- **Replay / audit log**: events fire and forget. If you missed one, you missed it. Refetch on mount; don't try to reconstruct state from a stream of past events.
+
+#### Anti-patterns
+
+- **Don't subscribe to all event types and switch inside the handler**. Pass an array; the runtime filters before invoking.
+- **Don't trigger heavyweight refetches on every event**. Debounce or coalesce inside your handler. `brand.tokens.changed` can fire several times in a row when an operator is editing the messaging tab field-by-field.
+- **Don't rely on events for security-critical state changes**. A `user.role.changed` event is a hint; always re-verify role on the server side of any privileged operation. The event is the convenience layer, not the source of truth.
+
+---
+
+### Workspace Typography & `Ensemble.useFonts()` (v0.1.17)
+
+Operators configure their brand typography under **Brand → Typography** (five roles: display, heading, body, mono, wordmark). Each role has a family, a weight, and a style. The workspace loads the right Google Fonts CSS at the page-shell layer and publishes CSS variables consumers reference: `--font-display`, `--font-display-weight`, `--font-display-style`, and the same triplet for each other role.
+
+Guest apps should respect this scheme so the operator's brand reads consistently across the entire workspace.
+
+#### Easy path: just use CSS variables
+
+The workspace already loads the right Google Fonts and publishes the variables to every page (shell + iframe contexts inherit the shell CSS). Guest app CSS can reference them directly:
+
+```css
+.guest-heading {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-style: var(--font-heading-style);
+}
+```
+
+For most guest apps this is all you need. The workspace handles font loading, weight selection, and italic toggling — your CSS just inherits.
+
+#### When to use `Ensemble.useFonts()`
+
+When you need the resolved typography in code (e.g. to apply different styling per role, or to detect whether the operator is on a system stack vs a Google Font), call the hook:
+
+```tsx
+function MyGuest() {
+  const { roles, loading } = Ensemble.useFonts();
+  if (loading || !roles) return null;
+
+  return (
+    <div style={{ fontFamily: roles.body.stack, fontWeight: Number(roles.body.weight) }}>
+      <h1 style={{ fontFamily: roles.heading.stack, fontWeight: Number(roles.heading.weight) }}>
+        Hello
+      </h1>
+      {roles.display.isSystem ? (
+        <p>Operator uses a system stack — no Google Fonts load needed.</p>
+      ) : null}
+    </div>
+  );
+}
+```
+
+Each role returns `{ family, weight, style, isSystem, stack }`. The `stack` is the pre-computed `font-family` CSS string (with quoting and fallbacks); apply it directly without further processing.
+
+#### Caching + invalidation
+
+The hook fetches once per module load and caches at module level — multiple components calling it share one request. When the operator changes brand tokens, `brand.tokens.changed` fires (see Workspace Events); the runtime invalidates the cache automatically so the next mount picks up the new values. To force a refetch in-place, listen to the event yourself:
+
+```tsx
+Ensemble.useWorkspaceEvent('brand.tokens.changed', () => {
+  // Trigger your own refetch / re-render
+});
+```
+
+#### What `useFonts` does NOT do
+
+- It doesn't load Google Fonts CSS for you. The workspace already does this — the operator's chosen families are available via system `<link>` tags loaded by the shell.
+- It doesn't include sizes or scale ratios. That's separate from font-role configuration. Guest apps choose their own type scale.
+- It doesn't honor per-role variants beyond family + weight + style. If you need oblique-15° or weight 250, the workspace doesn't track those — your CSS handles them directly.
+
+#### Listing all available Google Fonts
+
+If your guest app needs to expose its own font picker (rare — most guests should match the workspace's typography rather than offer their own), the workspace publishes the cached Google Fonts catalog at `GET /_ensemble/core/fonts/google`. Same data the Brand → Typography picker uses.
+
+---
+
+### Workspace Locales & `Ensemble.useLocales()` (v0.1.17)
+
+Operators configure which BCP-47 content locales their workspace supports under **Brand → Languages**. English is always enabled and serves as the ultimate fallback; other locales are opt-in. Exactly one is the default at any time.
+
+Guest apps that render localized content — translation apps, marketing-copy editors, knowledge-base apps, anything that *speaks* to users — should consume the configured locales rather than ship their own hardcoded list. Operators expect language choices made in one place to apply everywhere.
+
+#### The hook
+
+```tsx
+const { locales, defaultLocale, enabledCodes, loading, error } = Ensemble.useLocales();
+```
+
+Returns:
+- `locales` — full list of `{ code, display_name, is_default, enabled }` rows from the workspace.
+- `defaultLocale` — BCP-47 code of the workspace's default locale (e.g. `'en'`, `'es'`, `'fr-CA'`).
+- `enabledCodes` — convenience array of enabled codes with default-first ordering.
+- `loading` — true on first mount until fetch completes.
+- `error` — message string if the fetch failed (network, permission, etc.).
+
+The data is fetched once per page-load and cached at module level — multiple components calling `useLocales()` share one HTTP request.
+
+#### Worked example: a per-locale picker
+
+```tsx
+function LanguagePicker({ value, onChange }) {
+  const { locales, loading } = Ensemble.useLocales();
+
+  if (loading) return <Ensemble.Skeleton className="h-8 w-32" />;
+
+  return (
+    <Ensemble.Select value={value} onValueChange={onChange}>
+      <Ensemble.SelectTrigger>
+        <Ensemble.SelectValue />
+      </Ensemble.SelectTrigger>
+      <Ensemble.SelectContent>
+        {locales.filter((l) => l.enabled).map((l) => (
+          <Ensemble.SelectItem key={l.code} value={l.code}>
+            {l.display_name}
+            <span className="ml-2 text-xs font-mono text-muted-foreground">{l.code}</span>
+            {l.is_default && <Ensemble.Badge variant="outline" className="ml-2 text-[10px]">Default</Ensemble.Badge>}
+          </Ensemble.SelectItem>
+        ))}
+      </Ensemble.SelectContent>
+    </Ensemble.Select>
+  );
+}
+```
+
+#### Patterns that work
+
+- **Bound to user preference**: persist the user's choice in your guest app's storage, but only offer codes from `enabledCodes`. If a previously-chosen locale gets disabled by the operator, fall back to `defaultLocale`.
+- **Accept-Language negotiation**: when your guest app's API renders localized content, take the user's request `Accept-Language`, match against `enabledCodes`, fall back to `defaultLocale`. Don't render a locale the workspace doesn't claim to support.
+- **Translation guest apps**: combine with `Ensemble.useAI({ tier })` pointing at a `workers-ai` translation model. `enabledCodes` tells you which targets to offer; `defaultLocale` tells you which to use as the default source.
+
+#### What `useLocales` does NOT do
+
+- It doesn't translate anything. Use `Ensemble.useAI({ tier })` pointing at a `workers-ai` tier (typically named `translate`) for that.
+- It doesn't manage the user's *currently selected* locale. That's per-user/per-app state; store it however you like (`localStorage`, your own backend, URL param). The hook only tells you what's *available*.
+- It doesn't push real-time updates when operators change the locale list. Locale changes are rare; a remount picks up the new list. If you need real-time, listen to your own postMessage / refetch on focus.
+
+---
+

@@ -24,11 +24,13 @@ import {
   PopoverContent,
   PopoverTrigger,
   Separator,
+  SaveStatus,
   toast,
 } from '@ensemble-edge/ui';
 
 import { generatePalette, getRelativeLuminance } from './color-utils';
-import { authedFetch } from '../../../state';
+import { authedFetch, emitWorkspaceEvent } from '../../../state';
+import { useFormStatus } from '../../../hooks/useFormStatus';
 
 interface ColorGroup {
   slug: string;
@@ -60,8 +62,12 @@ export function ColorsTab() {
     error: '#C62828',
     'error-light': '#FDEAEA',
   });
-  const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const status = useFormStatus({
+    value: { brandPrimary, brandSecondary, brandAccent, groups, semanticColors },
+    mode: 'manual',
+  });
+  const saving = status.state === 'saving';
 
   // Load saved color groups + tokens from DB
   useEffect(() => {
@@ -99,10 +105,15 @@ export function ColorsTab() {
       const loadedGroups = Array.from(groupMap.values());
       setGroups(loadedGroups.length > 0 ? loadedGroups : getDefaultGroups());
       setLoaded(true);
+      // After async load, snapshot current values as the baseline so
+      // dirty-tracking starts from "saved state."
+      queueMicrotask(() => status.resetBaseline());
     }).catch(() => {
       setGroups(getDefaultGroups());
       setLoaded(true);
+      queueMicrotask(() => status.resetBaseline());
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Save a brand core color + auto-generate its palette as a color group
@@ -199,7 +210,7 @@ export function ColorsTab() {
   };
 
   const handleSave = async () => {
-    setSaving(true);
+    status.beginSave();
     try {
       // Save each color group
       for (const group of groups) {
@@ -228,13 +239,14 @@ export function ColorsTab() {
       });
       if (!semRes.ok) throw new Error('Failed to save semantic colors');
 
+      status.commitSave();
+      emitWorkspaceEvent('brand.tokens.changed', { category: 'colors' });
       toast.success('Colors saved', { description: 'All color groups have been updated.' });
     } catch (err) {
+      status.failSave(err);
       toast.error('Failed to save', {
         description: err instanceof Error ? err.message : 'Unknown error',
       });
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -369,7 +381,8 @@ export function ColorsTab() {
           <Plus className="mr-2 h-4 w-4" /> Add Color Group
         </Button>
         <div className="flex-1" />
-        <Button onClick={handleSave} disabled={saving}>
+        {status.state !== 'clean' && <SaveStatus state={status.state} />}
+        <Button onClick={handleSave} disabled={!status.dirty || saving}>
           {saving ? 'Saving...' : 'Save All Colors'}
         </Button>
       </div>

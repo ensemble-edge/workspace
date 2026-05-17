@@ -1,9 +1,22 @@
 /**
- * Typography Tab — Font selection with live preview.
+ * Typography Tab — Per-role font family + weight + style.
+ *
+ * v0.1.17 rewrite:
+ *   - Pick from ~1500 Google Fonts via typeahead Combobox.
+ *   - Pinned system defaults at top of every picker.
+ *   - Per-role Weight Select (populated from the chosen family's variants).
+ *   - Per-role Style toggle (Normal / Italic), gated on family support.
+ *   - Live preview rendered in the actual chosen face.
+ *
+ * Storage shape (new, in brand_tokens category 'typography'):
+ *   typography_<role>_family / _weight / _style    for role in:
+ *     display, heading, body, mono
+ *
+ * Legacy enum slugs (`display_font='inter'`) are migrated on read.
  */
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   Card,
@@ -14,191 +27,306 @@ import {
   CardTitle,
   Button,
   Label,
-  Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  SaveStatus,
+  FontCombobox,
   toast,
 } from '@ensemble-edge/ui';
-import { authedFetch } from '../../../state';
+import type { FontComboboxOption } from '@ensemble-edge/ui';
 
-const FONT_OPTIONS = [
-  { value: 'system', label: 'System Default', css: 'system-ui, -apple-system, sans-serif' },
-  { value: 'dm-sans', label: 'DM Sans', css: '"DM Sans", sans-serif' },
-  { value: 'inter', label: 'Inter', css: '"Inter", sans-serif' },
-  { value: 'manrope', label: 'Manrope', css: '"Manrope", sans-serif' },
-  { value: 'spectral', label: 'Spectral', css: '"Spectral", serif' },
-  { value: 'gloock', label: 'Gloock', css: '"Gloock", serif' },
-  { value: 'playfair', label: 'Playfair Display', css: '"Playfair Display", serif' },
-  { value: 'geist', label: 'Geist', css: '"Geist", sans-serif' },
-  { value: 'roboto', label: 'Roboto', css: '"Roboto", sans-serif' },
-  { value: 'jetbrains-mono', label: 'JetBrains Mono', css: '"JetBrains Mono", monospace' },
-  { value: 'fira-code', label: 'Fira Code', css: '"Fira Code", monospace' },
+import { authedFetch, emitWorkspaceEvent } from '../../../state';
+import { useFormStatus } from '../../../hooks/useFormStatus';
+import {
+  SYSTEM_FONTS,
+  DEFAULT_WEIGHT_FOR_ROLE,
+  WEIGHT_LABELS,
+  weightsForFamily,
+  familySupportsItalic,
+  readRoleTokens,
+  writeRoleTokens,
+  resolveFamilyStack,
+  isSystemFont,
+  type FontRole,
+} from './font-utils';
+
+interface GoogleFontEntry {
+  family: string;
+  category: string;
+  variants: string[];
+  popularity?: number;
+}
+
+const ROLES: Array<{ key: FontRole; label: string; description: string; preview: string }> = [
+  { key: 'display', label: 'Display',   description: 'Large headlines and hero text', preview: 'Make something beautiful' },
+  { key: 'heading', label: 'Heading',   description: 'Section headers and titles',    preview: 'The quick brown fox' },
+  { key: 'body',    label: 'Body',      description: 'Long-form reading text',        preview: 'The quick brown fox jumps over the lazy dog. Used for paragraphs, descriptions, and most reading.' },
+  { key: 'mono',    label: 'Monospace', description: 'Code and tabular data',         preview: 'const x = 42;' },
 ];
 
-export function TypographyTab() {
-  const [displayFont, setDisplayFont] = useState('system');
-  const [headingFont, setHeadingFont] = useState('system');
-  const [bodyFont, setBodyFont] = useState('system');
-  const [monoFont, setMonoFont] = useState('jetbrains-mono');
-  const [saving, setSaving] = useState(false);
+const RECENT_KEY = 'ensemble:brand:recent-fonts';
 
-  // Load saved typography tokens
+export function TypographyTab() {
+  // Per-role state: family/weight/style triples.
+  const [byRole, setByRole] = useState<Record<FontRole, { family: string; weight: string; style: 'normal' | 'italic' }>>({
+    display:  { family: 'System Sans', weight: '700', style: 'normal' },
+    heading:  { family: 'System Sans', weight: '600', style: 'normal' },
+    body:     { family: 'System Sans', weight: '400', style: 'normal' },
+    mono:     { family: 'System Mono', weight: '400', style: 'normal' },
+  });
+  const [catalog, setCatalog] = useState<GoogleFontEntry[]>([]);
+  const [recent, setRecent] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      return (JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as string[]).slice(0, 8);
+    } catch { return []; }
+  });
+
+  const status = useFormStatus({ value: byRole, mode: 'manual' });
+  const saving = status.state === 'saving';
+
+  // Load typography tokens (with legacy migration) + Google Fonts catalog.
   useEffect(() => {
-    authedFetch('/_ensemble/core/brand/tokens/typography')
-      .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
-      .then((res) => {
-        for (const token of res.data || []) {
-          switch (token.key) {
-            case 'display_font': setDisplayFont(token.value); break;
-            case 'heading_font': setHeadingFont(token.value); break;
-            case 'body_font': setBodyFont(token.value); break;
-            case 'mono_font': setMonoFont(token.value); break;
-          }
-        }
-      })
-      .catch(() => {});
+    Promise.all([
+      authedFetch('/_ensemble/core/brand/tokens/typography')
+        .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
+        .catch(() => ({ data: [] })),
+      authedFetch('/_ensemble/core/fonts/google')
+        .then((r) => r.json() as Promise<{ fonts: GoogleFontEntry[] }>)
+        .catch(() => ({ fonts: [] })),
+    ]).then(([tokRes, fontsRes]) => {
+      const map: Record<string, string> = {};
+      for (const t of tokRes.data ?? []) map[t.key] = t.value;
+      const next: typeof byRole = { ...byRole };
+      for (const role of ['display', 'heading', 'body', 'mono'] as FontRole[]) {
+        const rt = readRoleTokens(role, map);
+        if (rt) next[role] = rt;
+      }
+      setByRole(next);
+      setCatalog(fontsRes.fonts ?? []);
+      // After async load, snapshot as baseline so dirty-tracking
+      // doesn't fire on initial render.
+      queueMicrotask(() => status.resetBaseline());
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const getFontCss = (value: string) =>
-    FONT_OPTIONS.find((f) => f.value === value)?.css || 'system-ui, sans-serif';
+  function setRole(role: FontRole, patch: Partial<(typeof byRole)[FontRole]>) {
+    setByRole((prev) => ({ ...prev, [role]: { ...prev[role], ...patch } }));
+  }
 
-  const handleSave = async () => {
-    setSaving(true);
+  function bumpRecent(family: string) {
+    if (isSystemFont(family)) return;
+    const next = [family, ...recent.filter((f) => f !== family)].slice(0, 8);
+    setRecent(next);
+    if (typeof window !== 'undefined') {
+      try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* noop */ }
+    }
+  }
+
+  async function handleSave() {
+    status.beginSave();
     try {
-      const res = await authedFetch('/_ensemble/brand/tokens', {
+      const tokens: Record<string, string> = {};
+      for (const role of ['display', 'heading', 'body', 'mono'] as FontRole[]) {
+        Object.assign(tokens, writeRoleTokens(role, byRole[role]));
+        // Best-effort: clear the legacy slug key so future loads don't
+        // see two sources of truth. Empty value → server-side delete.
+        tokens[`${role}_font`] = '';
+      }
+      const r = await authedFetch('/_ensemble/brand/tokens', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          category: 'typography',
-          tokens: {
-            display_font: displayFont,
-            heading_font: headingFont,
-            body_font: bodyFont,
-            mono_font: monoFont,
-          },
-        }),
+        body: JSON.stringify({ category: 'typography', tokens }),
       });
-      if (!res.ok) throw new Error('Failed to save');
+      if (!r.ok) throw new Error('Failed to save');
+      status.commitSave();
+      emitWorkspaceEvent('brand.tokens.changed', { category: 'typography' });
       toast.success('Typography saved');
-    } catch {
+    } catch (e) {
+      status.failSave(e);
       toast.error('Failed to save typography');
-    } finally {
-      setSaving(false);
     }
-  };
+  }
+
+  // Catalog → FontCombobox option shape, memoized.
+  const systemOptions: FontComboboxOption[] = useMemo(
+    () => SYSTEM_FONTS.map((s) => ({ family: s.family, category: s.category, hint: 'System' })),
+    [],
+  );
+
+  const googleOptions: FontComboboxOption[] = useMemo(
+    () =>
+      catalog
+        .filter((f) => f.popularity !== undefined)
+        .sort((a, b) => (a.popularity ?? 9999) - (b.popularity ?? 9999))
+        .map((f) => ({ family: f.family, category: f.category })),
+    [catalog],
+  );
+
+  const variantsByFamily = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const f of catalog) map.set(f.family, f.variants);
+    return map;
+  }, [catalog]);
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Font Selection */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Font Families</CardTitle>
-              <CardDescription>Choose fonts for different contexts</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Display Font</Label>
-                <Select value={displayFont} onValueChange={setDisplayFont}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {FONT_OPTIONS.map((f) => (
-                      <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">For hero text, large headings</p>
-              </div>
+      {ROLES.map(({ key, label, description, preview }) => (
+        <RoleCard
+          key={key}
+          role={key}
+          label={label}
+          description={description}
+          preview={preview}
+          value={byRole[key]}
+          onChange={(patch) => setRole(key, patch)}
+          onFamilyPicked={bumpRecent}
+          systemOptions={systemOptions}
+          googleOptions={googleOptions}
+          variantsByFamily={variantsByFamily}
+          recent={recent}
+        />
+      ))}
 
-              <div className="space-y-2">
-                <Label>Heading Font</Label>
-                <Select value={headingFont} onValueChange={setHeadingFont}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {FONT_OPTIONS.map((f) => (
-                      <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">For section headings (h1-h3)</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Body Font</Label>
-                <Select value={bodyFont} onValueChange={setBodyFont}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {FONT_OPTIONS.map((f) => (
-                      <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">For paragraphs and UI text</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Mono Font</Label>
-                <Select value={monoFont} onValueChange={setMonoFont}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {FONT_OPTIONS.filter((f) => f.css.includes('monospace') || f.value === 'system').map((f) => (
-                      <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">For code and data</p>
-              </div>
-            </CardContent>
-            <CardFooter>
-              <Button onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : 'Save Typography'}
-              </Button>
-            </CardFooter>
-          </Card>
-        </div>
-
-        {/* Live Preview */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Preview</CardTitle>
-            <CardDescription>Live preview of your font choices</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Display</p>
-              <p className="text-4xl font-bold" style={{ fontFamily: getFontCss(displayFont) }}>
-                The quick brown fox
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Heading</p>
-              <p className="text-2xl font-semibold" style={{ fontFamily: getFontCss(headingFont) }}>
-                Section Heading Example
-              </p>
-              <p className="text-lg font-medium mt-1" style={{ fontFamily: getFontCss(headingFont) }}>
-                Subsection heading style
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Body</p>
-              <p className="text-base" style={{ fontFamily: getFontCss(bodyFont) }}>
-                This is body text. It should be clear and readable at small sizes.
-                The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Mono</p>
-              <p className="text-sm" style={{ fontFamily: getFontCss(monoFont) }}>
-                const brand = await authedFetch('/_ensemble/brand/css');
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="flex items-center gap-3">
+        <Button onClick={handleSave} disabled={!status.dirty || saving}>
+          {saving ? 'Saving…' : 'Save Typography'}
+        </Button>
+        {status.state !== 'clean' && <SaveStatus state={status.state} />}
       </div>
     </div>
+  );
+}
+
+// ─── RoleCard ──────────────────────────────────────────────────────
+
+function RoleCard({
+  role,
+  label,
+  description,
+  preview,
+  value,
+  onChange,
+  onFamilyPicked,
+  systemOptions,
+  googleOptions,
+  variantsByFamily,
+  recent,
+}: {
+  role: FontRole;
+  label: string;
+  description: string;
+  preview: string;
+  value: { family: string; weight: string; style: 'normal' | 'italic' };
+  onChange: (patch: Partial<{ family: string; weight: string; style: 'normal' | 'italic' }>) => void;
+  onFamilyPicked: (family: string) => void;
+  systemOptions: FontComboboxOption[];
+  googleOptions: FontComboboxOption[];
+  variantsByFamily: Map<string, string[]>;
+  recent: string[];
+}) {
+  // Available weights/style support for the *currently selected* family.
+  const variants = variantsByFamily.get(value.family);
+  const availableWeights = useMemo(() => weightsForFamily(variants), [variants]);
+  const supportsItalic = useMemo(() => familySupportsItalic(variants), [variants]);
+
+  // If the chosen weight isn't available for the new family, snap to
+  // the closest weight (or the role default).
+  useEffect(() => {
+    if (!availableWeights.includes(value.weight)) {
+      const fallback = availableWeights.includes(DEFAULT_WEIGHT_FOR_ROLE[role])
+        ? DEFAULT_WEIGHT_FOR_ROLE[role]
+        : availableWeights[0];
+      onChange({ weight: fallback });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value.family, availableWeights.join(',')]);
+
+  const stack = resolveFamilyStack(value.family);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{label}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-4 md:grid-cols-[2fr_1fr_1fr]">
+          <div className="space-y-1.5">
+            <Label>Family</Label>
+            <FontCombobox
+              value={value.family}
+              onChange={(family) => { onChange({ family }); onFamilyPicked(family); }}
+              systemFonts={systemOptions}
+              googleFonts={googleOptions}
+              recent={recent}
+              placeholder="Pick a font…"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Weight</Label>
+            <Select value={value.weight} onValueChange={(w) => onChange({ weight: w })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {availableWeights.map((w) => (
+                  <SelectItem key={w} value={w}>
+                    {w} — {WEIGHT_LABELS[w] ?? 'Custom'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Style</Label>
+            <div className="flex rounded-md border p-1">
+              <button
+                type="button"
+                className={
+                  value.style === 'normal'
+                    ? 'flex-1 rounded px-2 py-1 text-xs font-medium bg-primary text-primary-foreground'
+                    : 'flex-1 rounded px-2 py-1 text-xs font-medium hover:bg-muted'
+                }
+                onClick={() => onChange({ style: 'normal' })}
+              >
+                Normal
+              </button>
+              <button
+                type="button"
+                className={
+                  value.style === 'italic'
+                    ? 'flex-1 rounded px-2 py-1 text-xs font-medium bg-primary text-primary-foreground'
+                    : 'flex-1 rounded px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50'
+                }
+                onClick={() => onChange({ style: 'italic' })}
+                disabled={!supportsItalic}
+                title={supportsItalic ? 'Italic' : 'This family has no italic variants'}
+              >
+                Italic
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-md border bg-muted/30 p-4">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Preview</p>
+          <p
+            style={{
+              fontFamily: stack,
+              fontWeight: Number(value.weight),
+              fontStyle: value.style,
+              fontSize: role === 'display' ? '36px' : role === 'heading' ? '24px' : role === 'mono' ? '14px' : '16px',
+              lineHeight: 1.3,
+            }}
+            className="m-0 break-words"
+          >
+            {preview}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

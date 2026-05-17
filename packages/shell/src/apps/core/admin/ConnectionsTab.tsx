@@ -1174,7 +1174,7 @@ async function putCred(
   value: string,
   is_secret: boolean,
 ) {
-  const r = await fetch(`/_ensemble/credentials/${key}`, {
+  const r = await authedFetch(`/_ensemble/credentials/${key}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value, category, is_secret }),

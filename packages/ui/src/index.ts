@@ -263,6 +263,18 @@ export type { DataRowProps } from "./components/ensemble/data-row";
 export { EmptyState } from "./components/ensemble/empty-state";
 export type { EmptyStateProps } from "./components/ensemble/empty-state";
 
+// Save Status - visible save-state indicator for forms/cards
+export { SaveStatus, useSaveStatus } from "./components/ensemble/save-status";
+export type { SaveStatusProps, SaveStatusState } from "./components/ensemble/save-status";
+
+// Wordmark - segmented or image-based workspace brand mark
+export { Wordmark } from "./components/ensemble/wordmark";
+export type { WordmarkProps, WordmarkSegment } from "./components/ensemble/wordmark";
+
+// FontCombobox - typeahead picker for font families (system + Google Fonts)
+export { FontCombobox } from "./components/ensemble/font-combobox";
+export type { FontComboboxProps, FontComboboxOption } from "./components/ensemble/font-combobox";
+
 // Future components:
 // export { NavItem } from "./components/ensemble/nav-item";
 // export { FilterBar } from "./components/ensemble/filter-bar";

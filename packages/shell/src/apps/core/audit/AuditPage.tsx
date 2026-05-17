@@ -38,7 +38,7 @@ export function AuditPage() {
     const params = new URLSearchParams({ limit: '100' });
     if (actionFilter) params.set('action', actionFilter);
 
-    fetch(`/_ensemble/core/audit/events?${params}`)
+    authedFetch(`/_ensemble/core/audit/events?${params}`)
       .then((res) => res.json() as Promise<{ data?: AuditEvent[] }>)
       .then((result) => {
         setEvents(result.data || []);

@@ -37,7 +37,7 @@ import {
   toast,
 } from '@ensemble-edge/ui';
 
-import { isOwner, isAdmin } from '../../../state';
+import { isOwner, isAdmin, emitWorkspaceEvent } from '../../../state';
 import { authedFetch } from '../../../state';
 
 interface Member {
@@ -71,7 +71,7 @@ export function PeoplePage() {
 
   const handleRoleChange = async (userId: string, role: string) => {
     try {
-      const res = await fetch(`/_ensemble/core/people/members/${userId}/role`, {
+      const res = await authedFetch(`/_ensemble/core/people/members/${userId}/role`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role }),
@@ -80,6 +80,7 @@ export function PeoplePage() {
         const data = await res.json() as { error?: string };
         throw new Error(data.error || 'Failed');
       }
+      emitWorkspaceEvent('user.role.changed', { user_id: userId, role });
       toast.success('Role updated');
       fetchMembers();
     } catch (err) {
@@ -92,7 +93,7 @@ export function PeoplePage() {
   const handleRemove = async (userId: string, name: string) => {
     if (!confirm(`Remove ${name} from this workspace?`)) return;
     try {
-      const res = await fetch(`/_ensemble/core/people/members/${userId}`, { method: 'DELETE' });
+      const res = await authedFetch(`/_ensemble/core/people/members/${userId}`, { method: 'DELETE' });
       if (!res.ok) {
         const data = await res.json() as { error?: string };
         throw new Error(data.error || 'Failed');
