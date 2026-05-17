@@ -13,7 +13,24 @@
  *      the FontCombobox.
  */
 
-export type FontRole = 'display' | 'heading' | 'eyebrow' | 'body' | 'mono' | 'wordmark';
+export type FontRole =
+  | 'wordmark'
+  | 'display'
+  | 'heading'
+  | 'subheading'
+  | 'body'
+  | 'eyebrow'
+  | 'label'
+  | 'caption'
+  | 'mono';
+
+export type TextTransform = 'none' | 'uppercase' | 'lowercase';
+
+export const TEXT_TRANSFORM_OPTIONS: Array<{ value: TextTransform; label: string }> = [
+  { value: 'none',      label: 'As written' },
+  { value: 'uppercase', label: 'UPPERCASE' },
+  { value: 'lowercase', label: 'lowercase' },
+];
 
 /** Pinned system defaults — render instantly, no Google network load. */
 export const SYSTEM_FONTS: Array<{
@@ -79,28 +96,108 @@ export function migrateLegacyFontValue(raw: string): string {
   return LEGACY_SLUG_TO_FAMILY[raw] ?? raw;
 }
 
-/** Sensible per-role default weight when only a legacy slug existed. */
+/** Sensible per-role default weight. */
 export const DEFAULT_WEIGHT_FOR_ROLE: Record<FontRole, string> = {
-  display:  '700',
-  heading:  '600',
-  eyebrow:  '600',
-  body:     '400',
-  mono:     '400',
-  wordmark: '700',
+  wordmark:   '700',
+  display:    '700',
+  heading:    '600',
+  subheading: '500',
+  body:       '400',
+  eyebrow:    '600',
+  label:      '500',
+  caption:    '400',
+  mono:       '400',
 };
 
 /**
- * Sensible per-role default letter-spacing. Eyebrows are wide-tracked
- * all-caps labels and conventionally want extra spacing; everything
- * else defaults to neutral.
+ * Per-role default letter-spacing. Eyebrows are wide-tracked all-caps
+ * labels and conventionally want extra spacing; labels get a hint of
+ * tracking for clarity at small sizes; everything else defaults to
+ * neutral.
  */
 export const DEFAULT_LETTER_SPACING_FOR_ROLE: Record<FontRole, string> = {
-  display:  '0em',
-  heading:  '0em',
-  eyebrow:  '0.1em',
-  body:     '0em',
-  mono:     '0em',
-  wordmark: '0em',
+  wordmark:   '0em',
+  display:    '0em',
+  heading:    '0em',
+  subheading: '0em',
+  body:       '0em',
+  eyebrow:    '0.1em',
+  label:      '0.01em',
+  caption:    '0em',
+  mono:       '0em',
+};
+
+/** Per-role default text-transform. Eyebrows are conventionally caps. */
+export const DEFAULT_TEXT_TRANSFORM_FOR_ROLE: Record<FontRole, TextTransform> = {
+  wordmark:   'none',
+  display:    'none',
+  heading:    'none',
+  subheading: 'none',
+  body:       'none',
+  eyebrow:    'uppercase',
+  label:      'none',
+  caption:    'none',
+  mono:       'none',
+};
+
+/**
+ * Per-role display label + usage description. The label is what the
+ * admin UI titles each card; the usage text is shown beneath the
+ * label AND exposed via /_ensemble/core/brand/fonts/active for a
+ * brand-guide readout to render verbatim. Edit these here and both
+ * surfaces update together.
+ */
+export interface RoleMeta {
+  label: string;
+  usage: string;
+}
+
+export const ROLE_META: Record<FontRole, RoleMeta> = {
+  wordmark: {
+    label: 'Wordmark',
+    usage:
+      'Reserved exclusively for the brand lockup — appears nowhere else in the UI so the mark stays ownable.',
+  },
+  display: {
+    label: 'Display',
+    usage:
+      'Hero sections, full-screen landing moments, and any headline where maximum visual impact is the primary goal.',
+  },
+  heading: {
+    label: 'Heading (H1–H3)',
+    usage:
+      'Primary page and section titles that structure the main content hierarchy and guide the reader through the experience.',
+  },
+  subheading: {
+    label: 'Subheading (H4–H6)',
+    usage:
+      'Secondary and tertiary groupings such as card titles, sidebar headers, modal titles, and nested section labels.',
+  },
+  body: {
+    label: 'Body',
+    usage:
+      'All paragraph text, article content, product descriptions, and any prose that requires sustained reading comfort.',
+  },
+  eyebrow: {
+    label: 'Eyebrow',
+    usage:
+      'Small all-caps label placed above a heading to signal category, content type, or platform context before the main title.',
+  },
+  label: {
+    label: 'Label',
+    usage:
+      'Buttons, navigation items, form field labels, tags, and all interactive UI elements where clarity at small sizes matters.',
+  },
+  caption: {
+    label: 'Caption',
+    usage:
+      'Image credits, footnotes, legal disclaimers, timestamps, and supporting detail that sits beneath primary content.',
+  },
+  mono: {
+    label: 'Monospace',
+    usage:
+      'Clinical data, patient IDs, dosage figures, API responses, and any content requiring precise fixed-width character alignment.',
+  },
 };
 
 export interface RoleTokens {
@@ -108,6 +205,7 @@ export interface RoleTokens {
   weight: string;
   style: 'normal' | 'italic';
   letterSpacing: string;
+  textTransform: TextTransform;
 }
 
 /**
@@ -134,6 +232,7 @@ export function readRoleTokens(
   const weight = tokens[`${newPrefix}weight`];
   const style = tokens[`${newPrefix}style`] as 'normal' | 'italic' | undefined;
   const letterSpacing = tokens[`${newPrefix}letter_spacing`];
+  const textTransform = tokens[`${newPrefix}text_transform`] as TextTransform | undefined;
 
   if (family) {
     return {
@@ -141,12 +240,14 @@ export function readRoleTokens(
       weight: weight || DEFAULT_WEIGHT_FOR_ROLE[role],
       style: style ?? 'normal',
       letterSpacing: letterSpacing || DEFAULT_LETTER_SPACING_FOR_ROLE[role],
+      textTransform: textTransform || DEFAULT_TEXT_TRANSFORM_FOR_ROLE[role],
     };
   }
 
-  // Wordmark has no legacy form — return null and let the caller
-  // fall back to display.
-  if (role === 'wordmark') return null;
+  // Roles that inherit from another when unset: wordmark → display,
+  // subheading → heading. The caller is responsible for resolving the
+  // inheritance (we just return null here so they know to fall through).
+  if (role === 'wordmark' || role === 'subheading') return null;
 
   // Legacy `<role>_font = 'inter'` style.
   const legacyKey = `${role}_font`;
@@ -157,6 +258,7 @@ export function readRoleTokens(
       weight: DEFAULT_WEIGHT_FOR_ROLE[role],
       style: 'normal',
       letterSpacing: DEFAULT_LETTER_SPACING_FOR_ROLE[role],
+      textTransform: DEFAULT_TEXT_TRANSFORM_FOR_ROLE[role],
     };
   }
   return null;
@@ -173,6 +275,7 @@ export function writeRoleTokens(
     [`${prefix}weight`]: rt.weight,
     [`${prefix}style`]: rt.style,
     [`${prefix}letter_spacing`]: rt.letterSpacing,
+    [`${prefix}text_transform`]: rt.textTransform,
   };
 }
 
@@ -220,15 +323,15 @@ export function parseVariant(v: string): { weight: string; italic: boolean } {
  * dropdown.
  */
 export const LETTER_SPACING_PRESETS: Array<{ value: string; label: string }> = [
-  { value: '-0.075em', label: 'Tightest' },
-  { value: '-0.05em',  label: 'Tighter' },
-  { value: '-0.025em', label: 'Tight' },
-  { value: '-0.01em',  label: 'Slightly tight' },
-  { value: '0em',      label: 'Normal' },
-  { value: '0.025em',  label: 'Slightly loose' },
-  { value: '0.05em',   label: 'Loose' },
-  { value: '0.1em',    label: 'Wide' },
-  { value: '0.2em',    label: 'Widest' },
+  { value: '-0.075em', label: 'Tightest (-0.075em)' },
+  { value: '-0.05em',  label: 'Tighter (-0.05em)' },
+  { value: '-0.025em', label: 'Tight (-0.025em)' },
+  { value: '-0.01em',  label: 'Slightly tight (-0.01em)' },
+  { value: '0em',      label: 'Normal (0em)' },
+  { value: '0.025em',  label: 'Slightly loose (0.025em)' },
+  { value: '0.05em',   label: 'Loose (0.05em)' },
+  { value: '0.1em',    label: 'Wide (0.1em)' },
+  { value: '0.2em',    label: 'Widest (0.2em)' },
 ];
 
 export const DEFAULT_LETTER_SPACING = '0em';

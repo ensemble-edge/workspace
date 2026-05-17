@@ -52,6 +52,7 @@ export const Wordmark = React.forwardRef<HTMLSpanElement, WordmarkProps>(
         fontWeight: "var(--font-wordmark-weight, var(--font-display-weight, 700))" as React.CSSProperties["fontWeight"],
         fontStyle: "var(--font-wordmark-style, normal)",
         letterSpacing: "var(--font-wordmark-letter-spacing, var(--font-display-letter-spacing, normal))",
+        textTransform: "var(--font-wordmark-text-transform, none)" as React.CSSProperties["textTransform"],
       };
       return (
         <span

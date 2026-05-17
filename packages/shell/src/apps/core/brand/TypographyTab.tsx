@@ -46,6 +46,8 @@ import {
   DEFAULT_WEIGHT_FOR_ROLE,
   WEIGHT_LABELS,
   LETTER_SPACING_PRESETS,
+  TEXT_TRANSFORM_OPTIONS,
+  ROLE_META,
   weightsForFamily,
   familySupportsItalic,
   readRoleTokens,
@@ -53,6 +55,7 @@ import {
   resolveFamilyStack,
   isSystemFont,
   type FontRole,
+  type TextTransform,
 } from './font-utils';
 
 interface GoogleFontEntry {
@@ -62,27 +65,51 @@ interface GoogleFontEntry {
   popularity?: number;
 }
 
-const ROLES: Array<{ key: FontRole; label: string; description: string; preview: string; previewTransform?: 'uppercase' }> = [
-  { key: 'display', label: 'Display',   description: 'Large headlines and hero text', preview: 'Make something beautiful' },
-  { key: 'heading', label: 'Heading',   description: 'Section headers and titles',    preview: 'The quick brown fox' },
-  { key: 'eyebrow', label: 'Eyebrow',   description: 'Small all-caps labels above headlines (kickers, categories, section tags)', preview: 'Product update', previewTransform: 'uppercase' },
-  { key: 'body',    label: 'Body',      description: 'Long-form reading text',        preview: 'The quick brown fox jumps over the lazy dog. Used for paragraphs, descriptions, and most reading.' },
-  { key: 'mono',    label: 'Monospace', description: 'Code and tabular data',         preview: 'const x = 42;' },
+/**
+ * Display order for the Typography tab. Wordmark sits first (the brand
+ * lockup deserves prime real estate). Mono lives at the bottom — it's
+ * a specialist role only some workspaces tune.
+ *
+ * `preview` is the sample copy each role renders in its preview block.
+ * The role's `label` and `usage` come from ROLE_META in font-utils so
+ * the brand-guide readout sees identical text.
+ */
+const ROLES: Array<{ key: FontRole; preview: string }> = [
+  { key: 'wordmark',   preview: 'Ensemble' },
+  { key: 'display',    preview: 'Make something beautiful' },
+  { key: 'heading',    preview: 'The quick brown fox' },
+  { key: 'subheading', preview: 'Card title or modal heading' },
+  { key: 'body',       preview: 'The quick brown fox jumps over the lazy dog. Used for paragraphs, descriptions, and most reading.' },
+  { key: 'eyebrow',    preview: 'Product update' },
+  { key: 'label',      preview: 'Save changes' },
+  { key: 'caption',    preview: 'Updated 5 minutes ago. Source: Ensemble v0.1.24 release notes.' },
+  { key: 'mono',       preview: 'const x = 42;' },
 ];
 
 const RECENT_KEY = 'ensemble:brand:recent-fonts';
 
 export function TypographyTab() {
-  // Per-role state: family/weight/style/letterSpacing per typographic role.
-  // Note: wordmark is owned by LogosTab, not this state — TypographyTab only
-  // touches the four content roles + eyebrow.
-  type RoleState = { family: string; weight: string; style: 'normal' | 'italic'; letterSpacing: string };
-  const [byRole, setByRole] = useState<Record<Exclude<FontRole, 'wordmark'>, RoleState>>({
-    display:  { family: 'System Sans', weight: '700', style: 'normal', letterSpacing: '0em' },
-    heading:  { family: 'System Sans', weight: '600', style: 'normal', letterSpacing: '0em' },
-    eyebrow:  { family: 'System Sans', weight: '600', style: 'normal', letterSpacing: '0.1em' },
-    body:     { family: 'System Sans', weight: '400', style: 'normal', letterSpacing: '0em' },
-    mono:     { family: 'System Mono', weight: '400', style: 'normal', letterSpacing: '0em' },
+  // Per-role state. Wordmark now lives here too (the typography part —
+  // LogosTab still owns the wordmark text/image). Subheading defaults
+  // inherit Heading; we surface that as "Inherits from Heading" in the
+  // UI when family is empty.
+  type RoleState = {
+    family: string;
+    weight: string;
+    style: 'normal' | 'italic';
+    letterSpacing: string;
+    textTransform: TextTransform;
+  };
+  const [byRole, setByRole] = useState<Record<FontRole, RoleState>>({
+    wordmark:   { family: '',            weight: '700', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
+    display:    { family: 'System Sans', weight: '700', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
+    heading:    { family: 'System Sans', weight: '600', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
+    subheading: { family: '',            weight: '500', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
+    body:       { family: 'System Sans', weight: '400', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
+    eyebrow:    { family: 'System Sans', weight: '600', style: 'normal', letterSpacing: '0.1em',  textTransform: 'uppercase' },
+    label:      { family: 'System Sans', weight: '500', style: 'normal', letterSpacing: '0.01em', textTransform: 'none' },
+    caption:    { family: 'System Sans', weight: '400', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
+    mono:       { family: 'System Mono', weight: '400', style: 'normal', letterSpacing: '0em',    textTransform: 'none' },
   });
   const [catalog, setCatalog] = useState<GoogleFontEntry[]>([]);
   // Whether the current catalog is the bundled fallback (curated ~40)
@@ -127,20 +154,26 @@ export function TypographyTab() {
   const status = useFormStatus({ value: byRole, mode: 'manual' });
   const saving = status.state === 'saving';
 
-  // Load typography tokens (with legacy migration) + Google Fonts catalog.
+  // Load typography + identity (for wordmark) tokens + Google Fonts catalog.
+  // Wordmark typography lives in category 'identity' alongside the wordmark
+  // text/image (LogosTab's storage); content roles live in 'typography'.
   useEffect(() => {
     Promise.all([
       authedFetch('/_ensemble/core/brand/tokens/typography')
         .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
         .catch(() => ({ data: [] })),
+      authedFetch('/_ensemble/core/brand/tokens/identity')
+        .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
+        .catch(() => ({ data: [] })),
       authedFetch('/_ensemble/core/fonts/google')
         .then((r) => r.json() as Promise<{ fonts: GoogleFontEntry[] }>)
         .catch(() => ({ fonts: [] })),
-    ]).then(([tokRes, fontsRes]) => {
+    ]).then(([typoRes, idRes, fontsRes]) => {
       const map: Record<string, string> = {};
-      for (const t of tokRes.data ?? []) map[t.key] = t.value;
+      for (const t of typoRes.data ?? []) map[t.key] = t.value;
+      for (const t of idRes.data ?? []) map[t.key] = t.value;
       const next: typeof byRole = { ...byRole };
-      for (const role of ['display', 'heading', 'eyebrow', 'body', 'mono'] as Array<Exclude<FontRole, 'wordmark'>>) {
+      for (const role of ['wordmark', 'display', 'heading', 'subheading', 'body', 'eyebrow', 'label', 'caption', 'mono'] as FontRole[]) {
         const rt = readRoleTokens(role, map);
         if (rt) next[role] = rt;
       }
@@ -166,7 +199,7 @@ export function TypographyTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function setRole(role: Exclude<FontRole, 'wordmark'>, patch: Partial<RoleState>) {
+  function setRole(role: FontRole, patch: Partial<RoleState>) {
     setByRole((prev) => ({ ...prev, [role]: { ...prev[role], ...patch } }));
   }
 
@@ -182,21 +215,57 @@ export function TypographyTab() {
   async function handleSave() {
     status.beginSave();
     try {
-      const tokens: Record<string, string> = {};
-      for (const role of ['display', 'heading', 'eyebrow', 'body', 'mono'] as Array<Exclude<FontRole, 'wordmark'>>) {
-        Object.assign(tokens, writeRoleTokens(role, byRole[role]));
-        // Best-effort: clear the legacy slug key so future loads don't
-        // see two sources of truth. Empty value → server-side delete.
-        tokens[`${role}_font`] = '';
+      // Two PUTs — wordmark typography belongs to the `identity` category
+      // (LogosTab co-owns the wordmark text/image there); the other roles
+      // belong to `typography`. Saving in parallel.
+      const typographyTokens: Record<string, string> = {};
+      const contentRoles: FontRole[] = ['display', 'heading', 'subheading', 'body', 'eyebrow', 'label', 'caption', 'mono'];
+      for (const role of contentRoles) {
+        // Subheading is allowed to remain "inherit from heading" — only
+        // write its tokens if the operator explicitly picked a family.
+        if (role === 'subheading' && !byRole[role].family) {
+          typographyTokens[`typography_${role}_family`] = '';
+          typographyTokens[`typography_${role}_weight`] = '';
+          typographyTokens[`typography_${role}_style`] = '';
+          typographyTokens[`typography_${role}_letter_spacing`] = '';
+          typographyTokens[`typography_${role}_text_transform`] = '';
+          continue;
+        }
+        Object.assign(typographyTokens, writeRoleTokens(role, byRole[role]));
+        // Clear the legacy slug key so future loads don't see two
+        // sources of truth. Empty value → server-side delete.
+        typographyTokens[`${role}_font`] = '';
       }
-      const r = await authedFetch('/_ensemble/brand/tokens', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category: 'typography', tokens }),
-      });
-      if (!r.ok) throw new Error('Failed to save');
+
+      const identityTokens: Record<string, string> = {};
+      const wm = byRole.wordmark;
+      if (wm.family) {
+        Object.assign(identityTokens, writeRoleTokens('wordmark', wm));
+      } else {
+        // Operator cleared wordmark — explicit empty → inherit display.
+        identityTokens['wordmark_family'] = '';
+        identityTokens['wordmark_weight'] = '';
+        identityTokens['wordmark_style'] = '';
+        identityTokens['wordmark_letter_spacing'] = '';
+        identityTokens['wordmark_text_transform'] = '';
+      }
+
+      const [typoRes, idRes] = await Promise.all([
+        authedFetch('/_ensemble/brand/tokens', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category: 'typography', tokens: typographyTokens }),
+        }),
+        authedFetch('/_ensemble/brand/tokens', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category: 'identity', tokens: identityTokens }),
+        }),
+      ]);
+      if (!typoRes.ok || !idRes.ok) throw new Error('Failed to save');
       status.commitSave();
       emitWorkspaceEvent('brand.tokens.changed', { category: 'typography' });
+      emitWorkspaceEvent('brand.tokens.changed', { category: 'identity' });
       toast.success('Typography saved');
     } catch (e) {
       status.failSave(e);
@@ -229,18 +298,34 @@ export function TypographyTab() {
 
   return (
     <div className="space-y-6">
-      {ROLES.map(({ key, label, description, preview, previewTransform }) => {
-        const k = key as Exclude<FontRole, 'wordmark'>;
+      {ROLES.map(({ key, preview }) => {
+        const meta = ROLE_META[key];
+        // Subheading inherits Heading when its family is empty. Pass the
+        // resolved (inherited) value to the preview so the operator sees
+        // what the workspace will actually render.
+        const inheritsFrom: FontRole | null =
+          key === 'subheading' && !byRole.subheading.family ? 'heading'
+          : key === 'wordmark' && !byRole.wordmark.family ? 'display'
+          : null;
+        const effective = inheritsFrom ? byRole[inheritsFrom] : byRole[key];
         return (
           <RoleCard
-            key={k}
-            role={k}
-            label={label}
-            description={description}
+            key={key}
+            role={key}
+            label={meta.label}
+            description={meta.usage}
             preview={preview}
-            previewTransform={previewTransform}
-            value={byRole[k]}
-            onChange={(patch) => setRole(k, patch)}
+            value={byRole[key]}
+            effective={effective}
+            inheritsFrom={inheritsFrom}
+            onChange={(patch) => setRole(key, patch)}
+            onClearOverride={
+              inheritsFrom
+                ? undefined
+                : (key === 'subheading' || key === 'wordmark')
+                  ? () => setRole(key, { family: '', weight: '', style: 'normal', letterSpacing: '0em', textTransform: 'none' })
+                  : undefined
+            }
             onFamilyPicked={bumpRecent}
             onFirstSearch={upgradeCatalog}
             systemOptions={systemOptions}
@@ -263,14 +348,24 @@ export function TypographyTab() {
 
 // ─── RoleCard ──────────────────────────────────────────────────────
 
+interface RoleValue {
+  family: string;
+  weight: string;
+  style: 'normal' | 'italic';
+  letterSpacing: string;
+  textTransform: TextTransform;
+}
+
 function RoleCard({
   role,
   label,
   description,
   preview,
-  previewTransform,
   value,
+  effective,
+  inheritsFrom,
   onChange,
+  onClearOverride,
   onFamilyPicked,
   onFirstSearch,
   systemOptions,
@@ -278,13 +373,20 @@ function RoleCard({
   variantsByFamily,
   recent,
 }: {
-  role: Exclude<FontRole, 'wordmark'>;
+  role: FontRole;
   label: string;
   description: string;
   preview: string;
-  previewTransform?: 'uppercase';
-  value: { family: string; weight: string; style: 'normal' | 'italic'; letterSpacing: string };
-  onChange: (patch: Partial<{ family: string; weight: string; style: 'normal' | 'italic'; letterSpacing: string }>) => void;
+  /** The operator's stored value for this role. May have empty family
+   *  if the role inherits from another. */
+  value: RoleValue;
+  /** The resolved value used for the preview (after inheritance). */
+  effective: RoleValue;
+  /** Non-null when this role is currently inheriting from another. */
+  inheritsFrom: FontRole | null;
+  onChange: (patch: Partial<RoleValue>) => void;
+  /** Set when the role supports an inherit-from-parent override clear. */
+  onClearOverride?: () => void;
   onFamilyPicked: (family: string) => void;
   onFirstSearch?: () => void;
   systemOptions: FontComboboxOption[];
@@ -292,14 +394,20 @@ function RoleCard({
   variantsByFamily: Map<string, string[]>;
   recent: string[];
 }) {
+  const inheriting = inheritsFrom !== null;
   // Available weights/style support for the *currently selected* family.
-  const variants = variantsByFamily.get(value.family);
+  // When inheriting, the controls are disabled but we still want to show
+  // the inherited family's variant list so the operator sees what would
+  // apply if they took over.
+  const variants = variantsByFamily.get(effective.family);
   const availableWeights = useMemo(() => weightsForFamily(variants), [variants]);
   const supportsItalic = useMemo(() => familySupportsItalic(variants), [variants]);
 
   // If the chosen weight isn't available for the new family, snap to
-  // the closest weight (or the role default).
+  // the closest weight (or the role default). Only when NOT inheriting —
+  // otherwise we'd be mutating a value the operator hasn't set yet.
   useEffect(() => {
+    if (inheriting) return;
     if (!availableWeights.includes(value.weight)) {
       const fallback = availableWeights.includes(DEFAULT_WEIGHT_FOR_ROLE[role])
         ? DEFAULT_WEIGHT_FOR_ROLE[role]
@@ -307,22 +415,32 @@ function RoleCard({
       onChange({ weight: fallback });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value.family, availableWeights.join(',')]);
+  }, [value.family, availableWeights.join(','), inheriting]);
 
-  const stack = resolveFamilyStack(value.family);
+  // Preview always renders the *effective* values (inherited or own).
+  const previewStack = resolveFamilyStack(effective.family || 'System Sans');
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{label}</CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle>{label}</CardTitle>
+            <CardDescription>{description}</CardDescription>
+          </div>
+          {inheriting && (
+            <span className="shrink-0 text-xs text-muted-foreground rounded-full bg-muted px-2 py-1">
+              Inherits from {ROLE_META[inheritsFrom].label}
+            </span>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-[2fr_1fr_1fr_1fr]">
+        <div className="grid gap-4 md:grid-cols-[2fr_1fr_1fr_1fr_1fr]">
           <div className="space-y-1.5">
             <Label>Family</Label>
             <FontCombobox
-              value={value.family}
+              value={inheriting ? effective.family : value.family}
               onChange={(family) => { onChange({ family }); onFamilyPicked(family); }}
               systemFonts={systemOptions}
               googleFonts={googleOptions}
@@ -333,7 +451,11 @@ function RoleCard({
           </div>
           <div className="space-y-1.5">
             <Label>Weight</Label>
-            <Select value={value.weight} onValueChange={(w) => onChange({ weight: w })}>
+            <Select
+              value={(inheriting ? effective.weight : value.weight)}
+              onValueChange={(w) => onChange({ weight: w })}
+              disabled={inheriting}
+            >
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {availableWeights.map((w) => (
@@ -346,7 +468,11 @@ function RoleCard({
           </div>
           <div className="space-y-1.5">
             <Label>Letter spacing</Label>
-            <Select value={value.letterSpacing} onValueChange={(ls) => onChange({ letterSpacing: ls })}>
+            <Select
+              value={inheriting ? effective.letterSpacing : value.letterSpacing}
+              onValueChange={(ls) => onChange({ letterSpacing: ls })}
+              disabled={inheriting}
+            >
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {LETTER_SPACING_PRESETS.map((p) => (
@@ -358,8 +484,9 @@ function RoleCard({
           <div className="space-y-1.5">
             <Label>Style</Label>
             <Select
-              value={value.style}
+              value={inheriting ? effective.style : value.style}
               onValueChange={(s) => onChange({ style: s as 'normal' | 'italic' })}
+              disabled={inheriting}
             >
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -370,21 +497,47 @@ function RoleCard({
               </SelectContent>
             </Select>
           </div>
+          <div className="space-y-1.5">
+            <Label>Case</Label>
+            <Select
+              value={inheriting ? effective.textTransform : value.textTransform}
+              onValueChange={(t) => onChange({ textTransform: t as TextTransform })}
+              disabled={inheriting}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {TEXT_TRANSFORM_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
+        {onClearOverride && !inheriting && (
+          <div className="flex justify-end">
+            <Button type="button" variant="ghost" size="sm" onClick={onClearOverride}>
+              Reset to inherit
+            </Button>
+          </div>
+        )}
 
         <div className="rounded-md border bg-muted/30 p-4">
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Preview</p>
           <p
             style={{
-              fontFamily: stack,
-              fontWeight: Number(value.weight),
-              fontStyle: value.style,
-              letterSpacing: value.letterSpacing,
-              textTransform: previewTransform,
+              fontFamily: previewStack,
+              fontWeight: Number(effective.weight) || 400,
+              fontStyle: effective.style,
+              letterSpacing: effective.letterSpacing,
+              textTransform: effective.textTransform,
               fontSize:
                 role === 'display' ? '36px'
+                : role === 'wordmark' ? '32px'
                 : role === 'heading' ? '24px'
+                : role === 'subheading' ? '18px'
                 : role === 'eyebrow' ? '12px'
+                : role === 'label' ? '14px'
+                : role === 'caption' ? '12px'
                 : role === 'mono' ? '14px'
                 : '16px',
               lineHeight: 1.3,

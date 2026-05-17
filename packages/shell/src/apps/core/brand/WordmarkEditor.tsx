@@ -71,6 +71,7 @@ export interface WordmarkTypography {
   weight?: string;
   style?: 'normal' | 'italic';
   letterSpacing?: string;
+  textTransform?: 'none' | 'uppercase' | 'lowercase';
 }
 
 export function WordmarkEditor({
@@ -195,12 +196,14 @@ function WordmarkPreview({
         fontWeight: typography!.weight ? Number(typography!.weight) : 700,
         fontStyle: typography!.style ?? 'normal',
         letterSpacing: typography!.letterSpacing || '0em',
+        textTransform: typography!.textTransform ?? 'none',
         fontSize: '1.5rem',
         lineHeight: 1.2,
       }
-    : typography?.letterSpacing
-      ? { letterSpacing: typography.letterSpacing }
-      : {};
+    : {
+        ...(typography?.letterSpacing ? { letterSpacing: typography.letterSpacing } : {}),
+        ...(typography?.textTransform ? { textTransform: typography.textTransform } : {}),
+      };
   const className = hasTypography
     ? 'tracking-tight'
     : 'text-2xl font-bold tracking-tight';

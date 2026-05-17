@@ -279,15 +279,25 @@ export function registerBrandRoutes(
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
     try {
-      const { loadAndResolveRoles, familyStack } = await import('../../../services/font-roles');
+      const { loadAndResolveRoles, familyStack, ROLE_USAGE } = await import('../../../services/font-roles');
       const roles = await loadAndResolveRoles(c.env.DB, workspace.id);
-      // Augment each role with the CSS stack so guest apps can apply
-      // it without re-resolving system-family names client-side.
+      // Augment each role with the CSS stack, plus the human-readable
+      // label and usage description so the brand-guide readout (and
+      // any guest app surfacing brand context) renders identical text
+      // to what operators see in admin.
       const augmented = Object.fromEntries(
-        Object.entries(roles).map(([k, r]) => [
-          k,
-          { ...r, stack: familyStack(r.family) },
-        ]),
+        Object.entries(roles).map(([k, r]) => {
+          const meta = ROLE_USAGE[k as keyof typeof ROLE_USAGE];
+          return [
+            k,
+            {
+              ...r,
+              stack: familyStack(r.family),
+              label: meta?.label,
+              usage: meta?.usage,
+            },
+          ];
+        }),
       );
       return c.json({ roles: augmented });
     } catch (error) {

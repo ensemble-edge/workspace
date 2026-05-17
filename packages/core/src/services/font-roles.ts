@@ -18,7 +18,18 @@
 
 import type { D1Database } from '@cloudflare/workers-types';
 
-export type FontRole = 'display' | 'heading' | 'eyebrow' | 'body' | 'mono' | 'wordmark';
+export type FontRole =
+  | 'wordmark'
+  | 'display'
+  | 'heading'
+  | 'subheading'
+  | 'body'
+  | 'eyebrow'
+  | 'label'
+  | 'caption'
+  | 'mono';
+
+export type TextTransform = 'none' | 'uppercase' | 'lowercase';
 
 export interface ResolvedRole {
   family: string;
@@ -26,9 +37,31 @@ export interface ResolvedRole {
   style: 'normal' | 'italic';
   /** CSS letter-spacing value (em-based preset, e.g. '0em', '-0.025em'). */
   letterSpacing: string;
+  /** CSS text-transform value — eyebrows default to 'uppercase'. */
+  textTransform: TextTransform;
   /** True if this role is a system stack (no Google Fonts load needed). */
   isSystem: boolean;
+  /** When non-null, the role from which this one inherits. */
+  inheritedFrom?: FontRole;
 }
+
+/**
+ * Per-role human-readable label + usage description. Mirrors the
+ * ROLE_META map in the shell so the brand-guide readout and the
+ * admin UI see identical text. Edit the shell's font-utils to change
+ * what operators see — this server copy MUST stay in sync.
+ */
+export const ROLE_USAGE: Record<FontRole, { label: string; usage: string }> = {
+  wordmark:   { label: 'Wordmark',          usage: 'Reserved exclusively for the brand lockup — appears nowhere else in the UI so the mark stays ownable.' },
+  display:    { label: 'Display',           usage: 'Hero sections, full-screen landing moments, and any headline where maximum visual impact is the primary goal.' },
+  heading:    { label: 'Heading (H1–H3)',   usage: 'Primary page and section titles that structure the main content hierarchy and guide the reader through the experience.' },
+  subheading: { label: 'Subheading (H4–H6)', usage: 'Secondary and tertiary groupings such as card titles, sidebar headers, modal titles, and nested section labels.' },
+  body:       { label: 'Body',              usage: 'All paragraph text, article content, product descriptions, and any prose that requires sustained reading comfort.' },
+  eyebrow:    { label: 'Eyebrow',           usage: 'Small all-caps label placed above a heading to signal category, content type, or platform context before the main title.' },
+  label:      { label: 'Label',             usage: 'Buttons, navigation items, form field labels, tags, and all interactive UI elements where clarity at small sizes matters.' },
+  caption:    { label: 'Caption',           usage: 'Image credits, footnotes, legal disclaimers, timestamps, and supporting detail that sits beneath primary content.' },
+  mono:       { label: 'Monospace',         usage: 'Clinical data, patient IDs, dosage figures, API responses, and any content requiring precise fixed-width character alignment.' },
+};
 
 /** Pinned system stacks — must mirror SYSTEM_FONTS in shell/font-utils.ts. */
 const SYSTEM_STACKS: Record<string, string> = {
@@ -52,31 +85,51 @@ const LEGACY_SLUG_TO_FAMILY: Record<string, string> = {
 };
 
 const DEFAULT_WEIGHT: Record<FontRole, string> = {
-  display:  '700',
-  heading:  '600',
-  eyebrow:  '600',
-  body:     '400',
-  mono:     '400',
-  wordmark: '700',
+  wordmark:   '700',
+  display:    '700',
+  heading:    '600',
+  subheading: '500',
+  body:       '400',
+  eyebrow:    '600',
+  label:      '500',
+  caption:    '400',
+  mono:       '400',
 };
 
 const DEFAULT_FAMILY: Record<FontRole, string> = {
-  display:  'System Sans',
-  heading:  'System Sans',
-  eyebrow:  'System Sans',
-  body:     'System Sans',
-  mono:     'System Mono',
-  wordmark: '', // Inherits from display
+  wordmark:   '',   // Inherits from display
+  display:    'System Sans',
+  heading:    'System Sans',
+  subheading: '',   // Inherits from heading
+  body:       'System Sans',
+  eyebrow:    'System Sans',
+  label:      'System Sans',
+  caption:    'System Sans',
+  mono:       'System Mono',
 };
 
-/** Per-role default letter-spacing — eyebrows track wider by convention. */
 const DEFAULT_LETTER_SPACING: Record<FontRole, string> = {
-  display:  '0em',
-  heading:  '0em',
-  eyebrow:  '0.1em',
-  body:     '0em',
-  mono:     '0em',
-  wordmark: '0em',
+  wordmark:   '0em',
+  display:    '0em',
+  heading:    '0em',
+  subheading: '0em',
+  body:       '0em',
+  eyebrow:    '0.1em',
+  label:      '0.01em',
+  caption:    '0em',
+  mono:       '0em',
+};
+
+const DEFAULT_TEXT_TRANSFORM: Record<FontRole, TextTransform> = {
+  wordmark:   'none',
+  display:    'none',
+  heading:    'none',
+  subheading: 'none',
+  body:       'none',
+  eyebrow:    'uppercase',
+  label:      'none',
+  caption:    'none',
+  mono:       'none',
 };
 
 /**
@@ -86,10 +139,19 @@ const DEFAULT_LETTER_SPACING: Record<FontRole, string> = {
 export function resolveAllRoles(tokens: Record<string, string>): Record<FontRole, ResolvedRole> {
   const display = resolveRole('display', tokens);
   const heading = resolveRole('heading', tokens);
-  const eyebrow = resolveRole('eyebrow', tokens);
   const body = resolveRole('body', tokens);
+  const eyebrow = resolveRole('eyebrow', tokens);
+  const label = resolveRole('label', tokens);
+  const caption = resolveRole('caption', tokens);
   const mono = resolveRole('mono', tokens);
 
+  // Subheading inherits Heading when its family is unset.
+  const subheadingFamily = tokens['typography_subheading_family'];
+  const subheading: ResolvedRole = subheadingFamily
+    ? resolveRole('subheading', tokens)
+    : { ...heading, inheritedFrom: 'heading' };
+
+  // Wordmark inherits Display when its family is unset.
   const wordmarkFamily = tokens['wordmark_family'];
   const wordmark: ResolvedRole = wordmarkFamily
     ? {
@@ -97,11 +159,12 @@ export function resolveAllRoles(tokens: Record<string, string>): Record<FontRole
         weight: tokens['wordmark_weight'] || DEFAULT_WEIGHT.wordmark,
         style: (tokens['wordmark_style'] as 'normal' | 'italic') || 'normal',
         letterSpacing: tokens['wordmark_letter_spacing'] || DEFAULT_LETTER_SPACING.wordmark,
+        textTransform: (tokens['wordmark_text_transform'] as TextTransform) || DEFAULT_TEXT_TRANSFORM.wordmark,
         isSystem: isSystem(wordmarkFamily),
       }
-    : { ...display };
+    : { ...display, inheritedFrom: 'display' };
 
-  return { display, heading, eyebrow, body, mono, wordmark };
+  return { wordmark, display, heading, subheading, body, eyebrow, label, caption, mono };
 }
 
 function resolveRole(role: FontRole, tokens: Record<string, string>): ResolvedRole {
@@ -112,6 +175,7 @@ function resolveRole(role: FontRole, tokens: Record<string, string>): ResolvedRo
       weight: tokens[`typography_${role}_weight`] || DEFAULT_WEIGHT[role],
       style: (tokens[`typography_${role}_style`] as 'normal' | 'italic') || 'normal',
       letterSpacing: tokens[`typography_${role}_letter_spacing`] || DEFAULT_LETTER_SPACING[role],
+      textTransform: (tokens[`typography_${role}_text_transform`] as TextTransform) || DEFAULT_TEXT_TRANSFORM[role],
       isSystem: isSystem(newFamily),
     };
   }
@@ -124,6 +188,7 @@ function resolveRole(role: FontRole, tokens: Record<string, string>): ResolvedRo
       weight: DEFAULT_WEIGHT[role],
       style: 'normal',
       letterSpacing: DEFAULT_LETTER_SPACING[role],
+      textTransform: DEFAULT_TEXT_TRANSFORM[role],
       isSystem: isSystem(fam),
     };
   }
@@ -133,6 +198,7 @@ function resolveRole(role: FontRole, tokens: Record<string, string>): ResolvedRo
     weight: DEFAULT_WEIGHT[role],
     style: 'normal',
     letterSpacing: DEFAULT_LETTER_SPACING[role],
+    textTransform: DEFAULT_TEXT_TRANSFORM[role],
     isSystem: isSystem(fam),
   };
 }
@@ -201,6 +267,7 @@ export function buildFontCssVars(roles: Record<FontRole, ResolvedRole>): string 
     lines.push(`  --font-${role}-weight: ${r.weight};`);
     lines.push(`  --font-${role}-style: ${r.style};`);
     lines.push(`  --font-${role}-letter-spacing: ${r.letterSpacing};`);
+    lines.push(`  --font-${role}-text-transform: ${r.textTransform};`);
   }
   lines.push('}');
   return lines.join('\n');

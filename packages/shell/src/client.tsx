@@ -141,10 +141,17 @@ interface FontRoleResolved {
   weight: string;
   style: 'normal' | 'italic';
   letterSpacing: string;
+  textTransform: 'none' | 'uppercase' | 'lowercase';
   isSystem: boolean;
   stack: string;
+  label?: string;
+  usage?: string;
+  inheritedFrom?: string;
 }
-type ActiveFonts = Record<'display' | 'heading' | 'eyebrow' | 'body' | 'mono' | 'wordmark', FontRoleResolved> | null;
+type FontRoleKey =
+  | 'wordmark' | 'display' | 'heading' | 'subheading'
+  | 'body' | 'eyebrow' | 'label' | 'caption' | 'mono';
+type ActiveFonts = Record<FontRoleKey, FontRoleResolved> | null;
 
 let _fontsCache: ActiveFonts = null;
 let _fontsPromise: Promise<ActiveFonts> | null = null;

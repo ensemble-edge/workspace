@@ -179,7 +179,8 @@ export function LogosTab() {
             t.key === 'wordmark_family' ||
             t.key === 'wordmark_weight' ||
             t.key === 'wordmark_style' ||
-            t.key === 'wordmark_letter_spacing'
+            t.key === 'wordmark_letter_spacing' ||
+            t.key === 'wordmark_text_transform'
           ) {
             loaded[t.key] = t.value;
           }
@@ -328,12 +329,11 @@ function WordmarkCard({
       <CardContent>
         {mode === 'text' ? (
           <div className="space-y-4">
-            <WordmarkTypographyControls
-              tokens={tokens}
-              onChange={onChange}
-              fontCatalog={fontCatalog}
-              onFirstSearch={onFirstSearch}
-            />
+            <p className="text-xs text-muted-foreground">
+              Font, weight, letter-spacing, style, and case for the wordmark
+              are configured in <strong>Brand → Typography</strong>. This
+              preview reflects whatever is set there.
+            </p>
             <WordmarkEditor
               value={textValue}
               onChange={(next) => onChange('wordmark_text', next)}
@@ -342,6 +342,7 @@ function WordmarkCard({
                 weight: tokens['wordmark_weight'] || undefined,
                 style: (tokens['wordmark_style'] as 'normal' | 'italic') || 'normal',
                 letterSpacing: tokens['wordmark_letter_spacing'] || undefined,
+                textTransform: (tokens['wordmark_text_transform'] as 'none' | 'uppercase' | 'lowercase') || undefined,
               }}
             />
           </div>
@@ -679,139 +680,3 @@ function VariantSlot({
   );
 }
 
-/**
- * Family / Weight / Style controls for the styled-text wordmark. Same
- * UI shape as the four typography roles in TypographyTab. Empty tokens
- * mean "inherit from --font-display" — operators don't have to set
- * wordmark typography unless they want it different from display.
- */
-function WordmarkTypographyControls({
-  tokens,
-  onChange,
-  fontCatalog,
-  onFirstSearch,
-}: {
-  tokens: Record<string, string>;
-  onChange: (key: string, value: string) => void;
-  fontCatalog: GoogleFontEntry[];
-  onFirstSearch?: () => void;
-}) {
-  const family = tokens['wordmark_family'] || '';
-  const weight = tokens['wordmark_weight'] || '';
-  const style = (tokens['wordmark_style'] as 'normal' | 'italic') || 'normal';
-  const letterSpacing = tokens['wordmark_letter_spacing'] || '0em';
-  const inheriting = !family;
-
-  const systemOptions: FontComboboxOption[] = SYSTEM_FONTS.map((s) => ({
-    family: s.family, category: s.category, hint: 'System',
-  }));
-  const googleOptions: FontComboboxOption[] = [...fontCatalog]
-    .sort((a, b) => (a.popularity ?? 9999) - (b.popularity ?? 9999))
-    .map((f) => ({ family: f.family, category: f.category }));
-
-  const variants = fontCatalog.find((f) => f.family === family)?.variants;
-  const availableWeights = weightsForFamily(variants);
-  const supportsItalic = familySupportsItalic(variants);
-
-  // When operator picks a family for the first time, default weight to the
-  // wordmark default (700) if available.
-  function handleFamily(next: string) {
-    onChange('wordmark_family', next);
-    if (!weight || !availableWeights.includes(weight)) {
-      const def = availableWeights.includes(DEFAULT_WEIGHT_FOR_ROLE.wordmark)
-        ? DEFAULT_WEIGHT_FOR_ROLE.wordmark
-        : availableWeights[0];
-      onChange('wordmark_weight', def);
-    }
-    if (!style) onChange('wordmark_style', 'normal');
-  }
-
-  function clearFontOverride() {
-    onChange('wordmark_family', '');
-    onChange('wordmark_weight', '');
-    onChange('wordmark_style', '');
-    onChange('wordmark_letter_spacing', '');
-  }
-
-  return (
-    <div className="rounded-md border p-3 space-y-3">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium">Wordmark typography</p>
-          <p className="text-xs text-muted-foreground">
-            {inheriting
-              ? 'Inheriting the Display font (from Typography tab).'
-              : 'Using a dedicated font for the wordmark.'}
-          </p>
-        </div>
-        {!inheriting && (
-          <Button type="button" variant="ghost" size="sm" onClick={clearFontOverride}>
-            Reset to inherit
-          </Button>
-        )}
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-[2fr_1fr_1fr_1fr]">
-        <div className="space-y-1.5">
-          <Label className="text-xs">Family</Label>
-          <FontCombobox
-            value={family || 'System Sans'}
-            onChange={handleFamily}
-            systemFonts={systemOptions}
-            googleFonts={googleOptions}
-            onFirstSearch={onFirstSearch}
-            placeholder="Pick a font…"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Weight</Label>
-          <Select
-            value={weight || DEFAULT_WEIGHT_FOR_ROLE.wordmark}
-            onValueChange={(w) => onChange('wordmark_weight', w)}
-            disabled={inheriting}
-          >
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {availableWeights.map((w) => (
-                <SelectItem key={w} value={w}>
-                  {w} — {WEIGHT_LABELS[w] ?? 'Custom'}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Letter spacing</Label>
-          <Select
-            value={letterSpacing}
-            onValueChange={(ls) => onChange('wordmark_letter_spacing', ls)}
-            disabled={inheriting}
-          >
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {LETTER_SPACING_PRESETS.map((p) => (
-                <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Style</Label>
-          <Select
-            value={style}
-            onValueChange={(s) => onChange('wordmark_style', s)}
-            disabled={inheriting}
-          >
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="normal">Normal</SelectItem>
-              <SelectItem value="italic" disabled={!supportsItalic}>
-                Italic{!supportsItalic ? ' (n/a)' : ''}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-    </div>
-  );
-}
