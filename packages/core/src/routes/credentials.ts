@@ -143,30 +143,14 @@ export function createCredentialsRoutes(): App {
     return serveBrandAsset(c, decodeURIComponent(c.req.param('key')));
   });
 
-  /**
-   * Operator-configurable pretty alias for R2-backed brand assets.
-   *
-   * The route shape is intentionally generic — `/:alias/:key{.+}`
-   * matches *any* two-segment URL. The handler checks the request's
-   * first segment against the workspace's configured
-   * `asset_public_alias_path` setting; if it matches (and is
-   * non-empty), it serves the asset. Otherwise it returns 404, which
-   * Hono's router takes as a non-match and proceeds to other handlers
-   * — including the SPA catchall. So this doesn't shadow real
-   * workspace routes; it only intercepts URLs that operators have
-   * explicitly opted into.
-   *
-   * Reserved names are enforced at write time (see validateAliasPath
-   * in workspace-settings.ts).
-   */
-  app.get('/:alias/:key{.+}', async (c) => {
-    const workspace = c.get('workspace');
-    if (!workspace?.id) return c.notFound();
-    const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
-    if (!aliasPath) return c.notFound();
-    if (c.req.param('alias') !== aliasPath) return c.notFound();
-    return serveBrandAsset(c, decodeURIComponent(c.req.param('key')));
-  });
+  // NOTE: The configurable asset alias used to be registered here as
+  // `app.get('/:alias/:key{.+}')`. That route shape matched ANY two-
+  // or-more-segment URL — including `/_ensemble/*`. When the handler
+  // returned `c.notFound()` (because no alias was configured), Hono
+  // committed to the match and stopped routing, so every workspace
+  // API call 404'd. The fix moves alias handling into the SPA
+  // catchall in create-workspace.ts where it can check the path
+  // inline and fall through cleanly to the SPA when no match.
 
   // ─── Credentials CRUD ─────────────────────────────────────────────
 

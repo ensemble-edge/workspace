@@ -515,10 +515,47 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   // ============================================================================
   // Catch-all for SPA routing
   // ============================================================================
+  //
+  // Also handles the operator-configurable R2 asset alias path. We do
+  // this *inside* the SPA catchall instead of as a separate top-level
+  // wildcard route because a top-level `/:alias/:key{.+}` registration
+  // matches every `/_ensemble/*` URL too — Hono's notFound() doesn't
+  // fall through to other handlers, so it would 404 the entire API.
+  // That regression is what broke v0.1.18; it's fixed here in v0.1.19
+  // by colocating the check with the catchall.
 
   app.get('*', async (c) => {
-    // Return shell HTML for client-side routing
     const workspace = c.get('workspace');
+
+    // Check if this URL is the operator-configured asset alias path
+    // before serving the SPA. Shape: /<configured-alias>/<r2-key...>
+    // where <configured-alias> is the operator's chosen path segment
+    // (e.g. 'assets', 'media', 'static-files').
+    if (workspace?.id) {
+      const url = new URL(c.req.url);
+      const segments = url.pathname.split('/').filter(Boolean);
+      if (segments.length >= 2) {
+        const { getSetting } = await import('./services/workspace-settings');
+        const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
+        if (aliasPath && segments[0] === aliasPath) {
+          // Looks like a brand-asset request via the configured alias.
+          // Reuse the credentials/routes serveBrandAsset semantics:
+          // R2 must be bound, key must live under `brand/`.
+          if (!c.env.R2) return c.notFound();
+          const key = decodeURIComponent(segments.slice(1).join('/'));
+          if (!key.startsWith('brand/')) return c.notFound();
+          const obj = await c.env.R2.get(key);
+          if (!obj) return c.notFound();
+          const headers = new Headers();
+          obj.writeHttpMetadata(headers);
+          headers.set('etag', obj.httpEtag);
+          headers.set('Cache-Control', 'public, max-age=3600');
+          return new Response(obj.body, { headers });
+        }
+      }
+    }
+
+    // Default: return shell HTML for client-side routing.
     const themeMode = await getSavedThemeMode(c.env.DB, workspace?.id || '');
     return c.html(generateShellHtml(
       workspace?.name ?? resolvedConfig.workspace.name,
