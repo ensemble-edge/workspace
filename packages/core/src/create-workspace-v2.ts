@@ -129,6 +129,17 @@ function createStandaloneWorkspace(
     Variables: ContextVariables;
   }>();
 
+  // Global error handler — surfaces actual 500 cause instead of bare HTML.
+  app.onError((err, c) => {
+    const reqId = c.get('requestId') || 'no-id';
+    console.error(`[500] ${c.req.method} ${c.req.url} req=${reqId} :: ${err?.name}: ${err?.message}`);
+    if (err?.stack) console.error(err.stack);
+    return c.json(
+      { error: 'internal_error', message: err?.message || 'Internal Server Error', requestId: reqId },
+      500,
+    );
+  });
+
   // ============================================================================
   // Middleware Pipeline (Standalone)
   // ============================================================================
@@ -138,13 +149,21 @@ function createStandaloneWorkspace(
     additionalOrigins: config.cors.brandOrigins,
   }));
 
-  // 2. Run migrations on first request (checks for new migrations each cold start)
-  let migrationsChecked = false;
+  // 2. Run migrations on first request (checks for new migrations each cold start).
+  // The Promise-based guard prevents concurrent requests from both starting
+  // a migration run before either has finished — they share the same Promise
+  // and all await its completion.
+  let migrationsPromise: Promise<unknown> | null = null;
   app.use('*', async (c, next) => {
-    if (!migrationsChecked) {
-      migrationsChecked = true;
-      await runMigrations(c.env.DB, migrations);
+    if (!migrationsPromise) {
+      migrationsPromise = runMigrations(c.env.DB, migrations).catch((err) => {
+        // Reset so the next request can retry, otherwise a transient
+        // migration failure poisons the whole Worker instance.
+        migrationsPromise = null;
+        throw err;
+      });
     }
+    await migrationsPromise;
     await next();
   });
 

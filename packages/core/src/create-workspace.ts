@@ -58,6 +58,27 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   }>();
 
   // ============================================================================
+  // Global error handler — surfaces the actual cause of 500s instead of
+  // a bare "Internal Server Error" page. Logs stack + request context to
+  // the Worker log so production triage doesn't require guessing.
+  // ============================================================================
+  app.onError((err, c) => {
+    const reqId = c.get('requestId') || 'no-id';
+    const url = c.req.url;
+    const method = c.req.method;
+    console.error(`[500] ${method} ${url} req=${reqId} :: ${err?.name}: ${err?.message}`);
+    if (err?.stack) console.error(err.stack);
+    return c.json(
+      {
+        error: 'internal_error',
+        message: err?.message || 'Internal Server Error',
+        requestId: reqId,
+      },
+      500,
+    );
+  });
+
+  // ============================================================================
   // Middleware Pipeline
   // ============================================================================
 
@@ -66,13 +87,19 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
     additionalOrigins: resolvedConfig.cors.brandOrigins,
   }));
 
-  // 2. Run migrations on first request (checks for new migrations each cold start)
-  let migrationsChecked = false;
+  // 2. Run migrations on first request (checks for new migrations each cold start).
+  // Promise-based guard so concurrent first-requests share one run; if it
+  // fails, we reset the guard so the next request can retry rather than
+  // leaving the Worker stuck.
+  let migrationsPromise: Promise<unknown> | null = null;
   app.use('*', async (c, next) => {
-    if (!migrationsChecked) {
-      migrationsChecked = true;
-      await runMigrations(c.env.DB, migrations);
+    if (!migrationsPromise) {
+      migrationsPromise = runMigrations(c.env.DB, migrations).catch((err) => {
+        migrationsPromise = null;
+        throw err;
+      });
     }
+    await migrationsPromise;
     await next();
   });
 
