@@ -28,6 +28,7 @@ import {
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
   toast,
 } from '@ensemble-edge/ui';
+import { authedFetch } from '../../../state';
 
 interface CredentialSummary {
   key: string;
@@ -38,6 +39,8 @@ interface CredentialSummary {
   updated_at: string;
 }
 
+type TierProvider = 'workers-ai' | 'openai-chat' | 'anthropic-messages' | 'custom';
+
 interface AiTier {
   name: string;
   display_name: string;
@@ -47,7 +50,15 @@ interface AiTier {
   gateway_route: string;
   route_provisioned: boolean;
   last_error: string | null;
+  provider: TierProvider;
 }
+
+const PROVIDER_LABELS: Record<TierProvider, string> = {
+  'workers-ai':         'Cloudflare Workers AI',
+  'openai-chat':        'OpenAI Chat (or compatible)',
+  'anthropic-messages': 'Anthropic Messages',
+  'custom':             'Custom (no canary test)',
+};
 
 interface ScopeResult {
   name: string;
@@ -72,7 +83,7 @@ export function ConnectionsTab() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const r = await fetch('/_ensemble/credentials');
+    const r = await authedFetch('/_ensemble/credentials');
     const body = (await r.json()) as { items: CredentialSummary[] };
     const map: Record<string, CredentialSummary> = {};
     for (const item of body.items) map[item.key] = item;
@@ -158,7 +169,7 @@ function ConnectionCard({
   async function runTest() {
     setTesting(true);
     try {
-      const r = await fetch('/_ensemble/credentials/test/connection', { method: 'POST' });
+      const r = await authedFetch('/_ensemble/credentials/test/connection', { method: 'POST' });
       const body = (await r.json()) as { scopes?: ScopeResult[]; error?: string };
       if (!r.ok) {
         toast.error('Token test failed', { description: body.error ?? `HTTP ${r.status}` });
@@ -387,7 +398,7 @@ function NotificationsCard({
   async function runVerify() {
     setVerifying(true);
     try {
-      const r = await fetch('/_ensemble/credentials/test/email', { method: 'POST' });
+      const r = await authedFetch('/_ensemble/credentials/test/email', { method: 'POST' });
       const body = (await r.json()) as { ok: boolean; status?: string; message?: string };
       if (r.ok && body.ok) toast.success('Domain verified');
       else toast.error('Verification failed', { description: body.message ?? body.status });
@@ -541,16 +552,27 @@ function AiAccessCard({
   const [saving, setSaving] = useState(false);
 
   const [tiers, setTiers] = useState<AiTier[]>([]);
+  const [dashboardUrl, setDashboardUrl] = useState<string | null>(null);
   const refreshTiers = useCallback(async () => {
-    const r = await fetch('/_ensemble/ai/tiers');
+    const r = await authedFetch('/_ensemble/ai/tiers');
     if (r.ok) {
       const body = (await r.json()) as { tiers: AiTier[] };
       setTiers(body.tiers);
     }
   }, []);
+  const refreshDashboardUrl = useCallback(async () => {
+    const r = await authedFetch('/_ensemble/ai/dashboard-url');
+    if (r.ok) {
+      const body = (await r.json()) as { url: string | null };
+      setDashboardUrl(body.url);
+    }
+  }, []);
   useEffect(() => {
-    if (status === 'done') refreshTiers();
-  }, [status, refreshTiers]);
+    if (status === 'done') {
+      refreshTiers();
+      refreshDashboardUrl();
+    }
+  }, [status, refreshTiers, refreshDashboardUrl]);
 
   async function save() {
     setSaving(true);
@@ -635,6 +657,24 @@ function AiAccessCard({
             {status === 'done' && (
               <>
                 <Separator />
+                {dashboardUrl && (
+                  <div className="rounded-md border bg-muted/40 p-3 text-xs space-y-1">
+                    <p className="font-medium">Next: configure each tier's model in Cloudflare.</p>
+                    <p className="text-muted-foreground">
+                      Provisioned tiers create a gateway route on the workspace side. Pick the
+                      underlying model (Workers AI, OpenAI, etc.) for each route on the Cloudflare
+                      AI Gateway dashboard.
+                    </p>
+                    <a
+                      className="inline-block underline"
+                      href={dashboardUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      Open this gateway in Cloudflare →
+                    </a>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <h3 className="font-medium">Tiers</h3>
                   <CreateTierButton onCreated={refreshTiers} />
@@ -677,7 +717,7 @@ function TierRow({ tier, onChanged }: { tier: AiTier; onChanged: () => void }) {
   async function saveRename() {
     setBusy(true);
     try {
-      const r = await fetch(`/_ensemble/ai/tiers/${tier.name}`, {
+      const r = await authedFetch(`/_ensemble/ai/tiers/${tier.name}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ display_name: editName }),
@@ -693,10 +733,58 @@ function TierRow({ tier, onChanged }: { tier: AiTier; onChanged: () => void }) {
     }
   }
 
+  async function setProvider(provider: TierProvider) {
+    setBusy(true);
+    try {
+      const r = await authedFetch(`/_ensemble/ai/tiers/${tier.name}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      toast.success(`Provider set to ${PROVIDER_LABELS[provider]}`);
+      onChanged();
+    } catch (e) {
+      toast.error('Failed to set provider', { description: errMsg(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function testTier() {
+    setBusy(true);
+    try {
+      const r = await authedFetch(`/_ensemble/ai/tiers/${tier.name}/test`, {
+        method: 'POST',
+      });
+      const body = (await r.json()) as {
+        ok?: boolean; status?: number; message?: string;
+        response?: unknown;
+      };
+      if (r.ok && body.ok) {
+        toast.success(`${tier.display_name} responded`, {
+          description: 'Open the browser console for the full response.',
+        });
+        // eslint-disable-next-line no-console
+        console.log(`[ensemble] tier "${tier.name}" test response:`, body.response);
+      } else {
+        toast.error('Tier test failed', {
+          description: body.message ?? `HTTP ${body.status ?? r.status}`,
+        });
+        // eslint-disable-next-line no-console
+        console.log(`[ensemble] tier "${tier.name}" test response (error):`, body);
+      }
+    } catch (e) {
+      toast.error('Tier test failed', { description: errMsg(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function provision() {
     setBusy(true);
     try {
-      const r = await fetch(`/_ensemble/ai/tiers/${tier.name}/create-route`, {
+      const r = await authedFetch(`/_ensemble/ai/tiers/${tier.name}/create-route`, {
         method: 'POST',
       });
       const body = (await r.json()) as { ok?: boolean; error?: string };
@@ -725,7 +813,7 @@ function TierRow({ tier, onChanged }: { tier: AiTier; onChanged: () => void }) {
       return;
     setBusy(true);
     try {
-      const r = await fetch(`/_ensemble/ai/tiers/${tier.name}`, { method: 'DELETE' });
+      const r = await authedFetch(`/_ensemble/ai/tiers/${tier.name}`, { method: 'DELETE' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       toast.success(`Removed ${tier.display_name}`);
       onChanged();
@@ -737,63 +825,104 @@ function TierRow({ tier, onChanged }: { tier: AiTier; onChanged: () => void }) {
   }
 
   return (
-    <div className="flex items-center justify-between rounded-md border p-3">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          {renaming ? (
-            <>
-              <Input
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                className="max-w-xs"
-              />
-              <Button size="sm" onClick={saveRename} disabled={busy}>
-                Save
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setRenaming(false)}>
-                Cancel
-              </Button>
-            </>
-          ) : (
-            <>
-              <span className="font-medium">{tier.display_name}</span>
-              <span className="text-xs text-muted-foreground">
-                ({tier.name} → {tier.gateway_route})
-              </span>
-              {tier.is_default && <Badge variant="outline">Default</Badge>}
-              {!tier.route_provisioned && (
-                <ProvisionFailureBadge lastError={tier.last_error} />
-              )}
-            </>
+    <div className="rounded-md border p-3 space-y-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            {renaming ? (
+              <>
+                <Input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="max-w-xs"
+                />
+                <Button size="sm" onClick={saveRename} disabled={busy}>
+                  Save
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setRenaming(false)}>
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <>
+                <span className="font-medium">{tier.display_name}</span>
+                <span className="text-xs text-muted-foreground">
+                  ({tier.name} → {tier.gateway_route})
+                </span>
+                {tier.is_default && <Badge variant="outline">Default</Badge>}
+                {!tier.route_provisioned && (
+                  <ProvisionFailureBadge lastError={tier.last_error} />
+                )}
+              </>
+            )}
+          </div>
+          {tier.description && !renaming && (
+            <p className="text-sm text-muted-foreground mt-1">{tier.description}</p>
           )}
         </div>
-        {tier.description && !renaming && (
-          <p className="text-sm text-muted-foreground mt-1">{tier.description}</p>
+        {!renaming && (
+          <div className="flex items-center gap-2 shrink-0">
+            {!tier.route_provisioned && (
+              <Button size="sm" variant="outline" onClick={provision} disabled={busy}>
+                <RefreshCw className={`h-3 w-3 mr-1 ${busy ? 'animate-spin' : ''}`} />
+                Provision
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setEditName(tier.display_name);
+                setRenaming(true);
+              }}
+            >
+              Rename
+            </Button>
+            {!tier.is_default && (
+              <Button size="sm" variant="outline" onClick={removeTier} disabled={busy}>
+                Remove
+              </Button>
+            )}
+          </div>
         )}
       </div>
+
       {!renaming && (
-        <div className="flex items-center gap-2">
-          {!tier.route_provisioned && (
-            <Button size="sm" variant="outline" onClick={provision} disabled={busy}>
-              <RefreshCw className={`h-3 w-3 mr-1 ${busy ? 'animate-spin' : ''}`} />
-              Provision
-            </Button>
-          )}
+        <div className="flex items-center justify-between gap-3 pt-2 border-t">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Provider:</span>
+            <Select
+              value={tier.provider}
+              onValueChange={(v) => setProvider(v as TierProvider)}
+              disabled={busy}
+            >
+              <SelectTrigger className="h-7 text-xs max-w-[240px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(PROVIDER_LABELS) as TierProvider[]).map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {PROVIDER_LABELS[p]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <Button
             size="sm"
             variant="outline"
-            onClick={() => {
-              setEditName(tier.display_name);
-              setRenaming(true);
-            }}
+            onClick={testTier}
+            disabled={busy || !tier.route_provisioned || tier.provider === 'custom'}
+            title={
+              tier.provider === 'custom'
+                ? 'Pick a non-custom provider to enable Test'
+                : !tier.route_provisioned
+                  ? 'Provision the route first'
+                  : 'Send a small canary call to verify this tier responds'
+            }
           >
-            Rename
+            Test
           </Button>
-          {!tier.is_default && (
-            <Button size="sm" variant="outline" onClick={removeTier} disabled={busy}>
-              Remove
-            </Button>
-          )}
         </div>
       )}
     </div>
@@ -830,20 +959,22 @@ function ProvisionFailureBadge({ lastError }: { lastError: string | null }) {
 function CreateTierButton({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
+  const [provider, setProvider] = useState<TierProvider>('custom');
   const [busy, setBusy] = useState(false);
 
   async function submit() {
     if (!name) return;
     setBusy(true);
     try {
-      const r = await fetch('/_ensemble/ai/tiers', {
+      const r = await authedFetch('/_ensemble/ai/tiers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, provider }),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       toast.success(`Tier "${name}" created`);
       setName('');
+      setProvider('custom');
       setOpen(false);
       onCreated();
     } catch (e) {
@@ -861,13 +992,23 @@ function CreateTierButton({ onCreated }: { onCreated: () => void }) {
     );
   }
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Input
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="tier-name"
-        className="max-w-xs h-8"
+        className="max-w-[180px] h-8"
       />
+      <Select value={provider} onValueChange={(v) => setProvider(v as TierProvider)}>
+        <SelectTrigger className="h-8 text-xs max-w-[220px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {(Object.keys(PROVIDER_LABELS) as TierProvider[]).map((p) => (
+            <SelectItem key={p} value={p}>{PROVIDER_LABELS[p]}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <Button size="sm" onClick={submit} disabled={busy || !name}>
         Create
       </Button>

@@ -6,6 +6,7 @@
 
 import { signal, computed } from '@preact/signals-react';
 import type { NavConfig, NavSection, NavItem } from '../../types';
+import { authedFetch } from './user';
 
 /**
  * Navigation configuration from server.
@@ -129,7 +130,7 @@ export async function fetchNav(): Promise<void> {
   navLoading.value = true;
 
   try {
-    const response = await fetch('/_ensemble/nav');
+    const response = await authedFetch('/_ensemble/nav');
     if (response.ok) {
       const data = (await response.json()) as NavConfig;
       navConfig.value = data;

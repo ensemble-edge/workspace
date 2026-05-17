@@ -1063,6 +1063,101 @@ function MyComponent() {
 - **Don't bypass the gateway.** Calling `api.openai.com` directly from a guest worker means the workspace can't apply rate limits, caching, or cost tracking, and your guest stops working when the operator rotates their gateway.
 - **Don't assume a tier exists.** Always handle the `fallback` case — it means an admin renamed something between deploys.
 
+#### Request/response shapes by provider (v0.1.15)
+
+Tiers carry a `provider` hint so the workspace's "Test tier" button can fire a sensible canary call. Guest apps still POST whatever body they want — the workspace doesn't reshape requests — but knowing the right shape per provider saves you from trial-and-error.
+
+##### `workers-ai` (Cloudflare Workers AI)
+
+Cloudflare AI Gateway can route to many Workers AI models. Each model accepts a different body. Common shapes:
+
+| Model family | Example | Request shape | Response shape |
+|--------------|---------|----------------|----------------|
+| Text generation (instruct/chat) | `@cf/meta/llama-3.1-8b-instruct` | `{ prompt: string, max_tokens?: number }` or `{ messages: [{role, content}], max_tokens?: number }` | `{ result: { response: string } }` |
+| Translation | `@cf/meta/m2m100-1.2b`, `@cf/meta/nllb-200-3.3b` | `{ text: string, source_lang: string, target_lang: string }` | `{ result: { translated_text: string } }` |
+| Embeddings | `@cf/baai/bge-base-en-v1.5` | `{ text: string \| string[] }` | `{ result: { data: number[][] } }` |
+| Summarization | `@cf/facebook/bart-large-cnn` | `{ input_text: string, max_length?: number }` | `{ result: { summary: string } }` |
+
+```tsx
+function TranslateButton({ text, target }) {
+  const { call, loading } = Ensemble.useAI({ tier: 'translate' });
+
+  async function go() {
+    const { data } = await call({
+      text,
+      source_lang: 'english',
+      target_lang: target, // 'spanish', 'french', etc. — Workers AI uses
+                            // human-readable names for m2m100/nllb.
+    });
+    // data.result.translated_text
+    return data;
+  }
+
+  return <button disabled={loading} onClick={go}>Translate</button>;
+}
+```
+
+##### `openai-chat` (OpenAI Chat Completions, or compatible)
+
+The AI Gateway can also front OpenAI directly or compatible providers (Azure OpenAI, Together, etc.). All of them use the OpenAI Chat Completions shape:
+
+```ts
+// Request
+{
+  model?: string,             // optional if the gateway route pins it
+  messages: [{ role: 'system' | 'user' | 'assistant', content: string }],
+  max_tokens?: number,
+  temperature?: number,
+}
+
+// Response
+{
+  choices: [{ message: { role: 'assistant', content: string }, finish_reason: string }],
+  usage: { prompt_tokens, completion_tokens, total_tokens },
+  // ...
+}
+```
+
+```tsx
+function Summarize({ text }) {
+  const { call, loading } = Ensemble.useAI({ tier: 'good' });
+  const onClick = async () => {
+    const { data } = await call({
+      messages: [
+        { role: 'system', content: 'Summarize the user message in one sentence.' },
+        { role: 'user', content: text },
+      ],
+      max_tokens: 80,
+    });
+    // data.choices[0].message.content
+  };
+  return <button disabled={loading} onClick={onClick}>Summarize</button>;
+}
+```
+
+##### `anthropic-messages` (Anthropic Messages API)
+
+```ts
+// Request
+{
+  model: string,              // e.g. 'claude-3-haiku-20240307'
+  max_tokens: number,         // required
+  messages: [{ role: 'user' | 'assistant', content: string }],
+  system?: string,
+}
+
+// Response
+{
+  content: [{ type: 'text', text: string }],
+  stop_reason: string,
+  usage: { input_tokens, output_tokens },
+}
+```
+
+##### `custom`
+
+Pick this when no canary applies. The "Test tier" button will be disabled — operators verify the tier directly from their guest app. Use `custom` for: models with bespoke request shapes (Stable Diffusion, etc.), gateway routes wired to your own backend behind the gateway, or anything the workspace can't validate generically.
+
 #### Provisioning Notes (for app authors who also write activation flows)
 
 Custom tiers can be created by admins via the UI. The first time the workspace saves an AI Gateway name + token, it seeds the default tiers (`smart`/`good`/`simple`) and provisions the corresponding dynamic routes via the Cloudflare API. Tier route provisioning is idempotent — re-running it on an existing route succeeds.

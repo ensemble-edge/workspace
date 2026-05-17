@@ -11,6 +11,7 @@ import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
   Badge,
 } from '@ensemble-edge/ui';
+import { authedFetch } from '../../../state';
 
 interface AuthMethods {
   password: boolean;
@@ -21,7 +22,7 @@ export function OverviewTab() {
   const [methods, setMethods] = useState<AuthMethods | null>(null);
 
   useEffect(() => {
-    fetch('/_ensemble/auth/methods')
+    authedFetch('/_ensemble/auth/methods')
       .then((r) => r.json() as Promise<AuthMethods>)
       .then(setMethods)
       .catch(() => setMethods({ password: true, magic_link: false }));

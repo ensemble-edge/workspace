@@ -38,6 +38,7 @@ import {
 } from '@ensemble-edge/ui';
 
 import { isOwner, isAdmin } from '../../../state';
+import { authedFetch } from '../../../state';
 
 interface Member {
   id: string;
@@ -57,7 +58,7 @@ export function PeoplePage() {
   const canManage = isOwner.value || isAdmin.value;
 
   const fetchMembers = () => {
-    fetch('/_ensemble/core/people/members')
+    authedFetch('/_ensemble/core/people/members')
       .then((res) => res.json() as Promise<{ data?: Member[] }>)
       .then((result) => {
         setMembers(result.data || []);
@@ -236,7 +237,7 @@ function InviteForm({ onSuccess }: { onSuccess: () => void }) {
 
     setSaving(true);
     try {
-      const res = await fetch('/_ensemble/core/people/invite', {
+      const res = await authedFetch('/_ensemble/core/people/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, displayName: displayName || undefined, role }),

@@ -139,6 +139,10 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   app.use('/_ensemble/users/*', auth());
   // v0.1.14: brand upload is admin-only (asset GET stays public for img tags).
   app.use('/_ensemble/brand/upload', auth());
+  // v0.1.15: workspace policy (settings) and content locales.
+  app.use('/_ensemble/settings/*', auth());
+  app.use('/_ensemble/locales/*', auth());
+  app.use('/_ensemble/locales', auth());
   app.route('/', createCredentialsRoutes());
 
   // Core App API Routes (/_ensemble/core/*)
@@ -778,8 +782,14 @@ function generateLoginHtml(workspaceName: string, accentColor: string, themeMode
           throw new Error(data.error || 'Login failed');
         }
 
-        // Success - redirect to home
-        window.location.href = '/';
+        // Success — bounce to ?from= if present (set when an expired
+        // session redirected here), otherwise home.
+        const params = new URLSearchParams(window.location.search);
+        const from = params.get('from');
+        const dest = from && from.startsWith('/') && !from.startsWith('//')
+          ? from
+          : '/';
+        window.location.href = dest;
       } catch (error) {
         errorMessage.textContent = error.message;
         errorMessage.classList.remove('hidden');

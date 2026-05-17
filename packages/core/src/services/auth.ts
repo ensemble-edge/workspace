@@ -14,6 +14,7 @@ import {
   verifyAccessToken,
   verifyRefreshToken,
 } from '../utils/jwt';
+import { getSetting, parseSessionTtl } from './workspace-settings';
 
 /**
  * Auth service configuration.
@@ -293,6 +294,36 @@ export class AuthService {
   }
 
   /**
+   * Sign in a known user, bypassing password verification. Used by the
+   * magic-link consume path after the one-time token has been redeemed.
+   * Caller has already verified the user exists in this workspace.
+   */
+  async loginAsKnownUser(input: {
+    userId: string;
+    email: string;
+    handle: string | null;
+    workspaceId: string;
+    role: Role;
+  }): Promise<{ accessToken: string; refreshToken: string }> {
+    const sessionId = generateId();
+    const { accessToken, refreshToken, tokenHash, expiresAt } = await this.createSession(
+      input.userId,
+      input.email,
+      input.handle,
+      input.workspaceId,
+      input.role,
+    );
+    await this.db
+      .prepare(
+        `INSERT INTO sessions (id, user_id, workspace_id, token_hash, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+      )
+      .bind(sessionId, input.userId, input.workspaceId, tokenHash, expiresAt)
+      .run();
+    return { accessToken, refreshToken };
+  }
+
+  /**
    * Logout and invalidate session.
    *
    * @param refreshToken - Refresh token to invalidate
@@ -476,13 +507,22 @@ export class AuthService {
       this.jwtSecret
     );
 
-    const refreshToken = await signRefreshToken(sessionId, this.jwtSecret);
+    // Resolve the operator-configured session lifetime (Auth → Sessions
+    // tab). Defaults to 7 days when unset; clamped to [15m, 365d] by
+    // parseSessionTtl. Existing sessions keep their original expiry —
+    // this only affects newly-issued ones.
+    const ttlSeconds = parseSessionTtl(
+      await getSetting({ DB: this.db }, workspaceId, 'session_ttl_seconds'),
+    );
+
+    const refreshToken = await signRefreshToken(sessionId, this.jwtSecret, ttlSeconds);
 
     // Hash the refresh token for storage
     const tokenHash = await hashToken(refreshToken);
 
-    // Calculate expiry (7 days from now)
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    // Session row expiry mirrors the refresh-token expiry so server-side
+    // revocation aligns with token validity.
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
 
     return { accessToken, refreshToken, tokenHash, expiresAt };
   }

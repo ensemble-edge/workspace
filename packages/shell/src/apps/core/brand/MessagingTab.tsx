@@ -25,6 +25,7 @@ import {
   Separator,
   toast,
 } from '@ensemble-edge/ui';
+import { authedFetch } from '../../../state';
 
 interface ValueProp {
   headline: string;
@@ -54,7 +55,7 @@ export function MessagingTab() {
   const knownKeys = new Set(['tagline', 'elevator_pitch', 'mission', 'boilerplate', 'legal_footer', 'value_props', 'tone_descriptors', 'tone_avoid', 'voice_guidelines']);
 
   useEffect(() => {
-    fetch('/_ensemble/core/brand/tokens/messaging')
+    authedFetch('/_ensemble/core/brand/tokens/messaging')
       .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string; type?: string; label?: string }> }>)
       .then((res) => {
         const custom: CustomField[] = [];
@@ -91,7 +92,7 @@ export function MessagingTab() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch('/_ensemble/brand/tokens', {
+      const res = await authedFetch('/_ensemble/brand/tokens', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

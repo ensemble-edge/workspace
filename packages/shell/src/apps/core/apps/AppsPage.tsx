@@ -15,6 +15,7 @@ import {
 } from '@ensemble-edge/ui';
 
 import { navigate } from '../../../state';
+import { authedFetch } from '../../../state';
 
 export function AppsPage() {
   const [apps, setApps] = useState<Array<{
@@ -28,7 +29,7 @@ export function AppsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/_ensemble/apps')
+    authedFetch('/_ensemble/apps')
       .then((res) => res.json() as Promise<{ data?: typeof apps }>)
       .then((data) => {
         setApps(data.data || []);

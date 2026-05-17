@@ -27,6 +27,7 @@ import {
 } from '@ensemble-edge/ui';
 
 import { getRelativeLuminance } from './color-utils';
+import { authedFetch } from '../../../state';
 
 interface BrandSpec {
   ensemble_brand: string;
@@ -64,7 +65,7 @@ export function OverviewTab() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/_ensemble/brand/spec')
+    authedFetch('/_ensemble/brand/spec')
       .then((r) => r.json() as Promise<BrandSpec>)
       .then((data) => { setSpec(data); setLoading(false); })
       .catch(() => setLoading(false));

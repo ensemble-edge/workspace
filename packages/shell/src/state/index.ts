@@ -30,6 +30,7 @@ export {
   displayName,
   userInitials,
   fetchUser,
+  authedFetch,
   login,
   logout,
   register,

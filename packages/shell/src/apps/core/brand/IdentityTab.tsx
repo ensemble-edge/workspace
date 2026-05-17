@@ -31,6 +31,8 @@ import {
   DialogTrigger,
   toast,
 } from '@ensemble-edge/ui';
+import { authedFetch } from '../../../state';
+import { WordmarkEditor } from './WordmarkEditor';
 
 interface CustomField {
   key: string;
@@ -53,7 +55,7 @@ export function IdentityTab() {
   const knownKeys = new Set(['legal_name', 'display_name', 'founding_year', 'headquarters', 'website', 'industry']);
 
   useEffect(() => {
-    fetch('/_ensemble/core/brand/tokens/identity')
+    authedFetch('/_ensemble/core/brand/tokens/identity')
       .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string; type: string; label: string | null }> }>)
       .then((res) => {
         const custom: CustomField[] = [];
@@ -105,7 +107,7 @@ export function IdentityTab() {
         if (field.key && field.value) tokens[field.key] = field.value;
       }
 
-      const res = await fetch('/_ensemble/brand/tokens', {
+      const res = await authedFetch('/_ensemble/brand/tokens', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category: 'identity', tokens }),
@@ -121,6 +123,8 @@ export function IdentityTab() {
 
   return (
     <div className="space-y-6">
+      <WordmarkEditor />
+
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Company Info */}
         <Card>
@@ -172,7 +176,7 @@ export function IdentityTab() {
             </CardHeader>
             <CardContent className="space-y-3">
               <Button variant="outline" className="w-full justify-start" onClick={() => {
-                fetch('/_ensemble/brand/spec')
+                authedFetch('/_ensemble/brand/spec')
                   .then((r) => r.json())
                   .then((spec) => {
                     const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
@@ -284,7 +288,7 @@ function ImportForm({ onSuccess }: { onSuccess: () => void }) {
         body.spec = fileSpec;
       }
 
-      const res = await fetch('/_ensemble/brand/import', {
+      const res = await authedFetch('/_ensemble/brand/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

@@ -33,6 +33,7 @@ import {
   toast,
 } from '@ensemble-edge/ui';
 import type { ColorPreset } from '@ensemble-edge/ui';
+import { authedFetch } from '../../../state';
 
 // Theme preset data (shared with CSS endpoint)
 const THEME_PRESETS = [
@@ -141,7 +142,7 @@ export function AppearanceTab() {
   // Load saved settings + brand colors
   useEffect(() => {
     // Load brand colors for the "Brand" preset
-    fetch('/_ensemble/core/brand/tokens/colors')
+    authedFetch('/_ensemble/core/brand/tokens/colors')
       .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
       .then((result) => {
         const bc = { ...brandColors };
@@ -154,7 +155,7 @@ export function AppearanceTab() {
       })
       .catch(() => {});
 
-    fetch('/_ensemble/core/brand/tokens/custom')
+    authedFetch('/_ensemble/core/brand/tokens/custom')
       .then((res) => res.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
       .then((result) => {
         for (const token of result.data || []) {
@@ -187,7 +188,7 @@ export function AppearanceTab() {
     if (saveTimeout.current) clearTimeout(saveTimeout.current);
     saveTimeout.current = setTimeout(async () => {
       try {
-        const res = await fetch('/_ensemble/brand/tokens', {
+        const res = await authedFetch('/_ensemble/brand/tokens', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ category: 'custom', tokens }),
@@ -332,7 +333,7 @@ export function AppearanceTab() {
   const saveAndReload = async (tokens: Record<string, string>) => {
     if (saveTimeout.current) clearTimeout(saveTimeout.current);
     try {
-      const res = await fetch('/_ensemble/brand/tokens', {
+      const res = await authedFetch('/_ensemble/brand/tokens', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category: 'custom', tokens }),

@@ -70,6 +70,43 @@ export const userInitials = computed(() => {
 });
 
 /**
+ * Authenticated fetch wrapper — use this for ALL shell-internal calls
+ * to `/_ensemble/*`. Centralizes 401 handling so an expired session is
+ * detected the moment any page fires its API call, instead of pages
+ * rendering against a stale `isAuthenticated` signal until refresh.
+ *
+ * On 401: flips the user signal to null and redirects to /login,
+ * preserving the current path as `?from=` so the user lands back where
+ * they were after re-signing in.
+ *
+ * Why this shape: doing a `fetchUser()` ping on every navigate would
+ * add a round-trip per click. Most pages fetch their own data on mount;
+ * letting *those* fetches be the trigger means zero overhead in the
+ * happy path and instant detection when the cookie has actually expired.
+ */
+export async function authedFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  const response = await fetch(input, { credentials: 'include', ...init });
+  if (response.status === 401) {
+    // Only act on auth-flavored 401s — if a specific endpoint returns
+    // 401 for a non-session reason, the caller still gets the response
+    // and can render its own error. But we always flip the signal so
+    // the rest of the shell knows we're logged out.
+    user.value = null;
+    membership.value = null;
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      const from = encodeURIComponent(
+        window.location.pathname + window.location.search + window.location.hash,
+      );
+      window.location.href = `/login?from=${from}`;
+    }
+  }
+  return response;
+}
+
+/**
  * Fetch current user data from API.
  */
 export async function fetchUser(): Promise<void> {

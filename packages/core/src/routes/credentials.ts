@@ -18,9 +18,20 @@ import {
 } from '../services/credentials';
 import { verifyEmailDomain, sendEmail } from '../services/email';
 import {
+  renderMagicLinkEmail, renderInviteEmail, renderPasswordResetEmail,
+} from '../services/email-templates';
+import {
   listTiers, getTier, createTier, patchTier, deleteTier,
   provisionTierRoute, seedDefaultTiers,
+  canaryForProvider, gatewayDashboardUrl,
 } from '../services/ai-tiers';
+import {
+  listLocales, addLocale, patchLocale, setDefaultLocale, removeLocale,
+} from '../services/locales';
+import {
+  getSetting, setSetting, parseSessionTtl, SESSION_TTL_OPTIONS,
+  type SettingKey,
+} from '../services/workspace-settings';
 
 type AppEnv = { Bindings: Env; Variables: ContextVariables };
 type AppContext = Context<AppEnv>;
@@ -375,6 +386,84 @@ export function createCredentialsRoutes(): App {
     }
   });
 
+  /**
+   * Test a tier with a canary payload appropriate for its provider.
+   * Returns whatever the gateway returned plus a 'fallback' field when
+   * the requested tier didn't exist. Operators use this from the AI
+   * Access card to confirm a tier is wired up correctly before a guest
+   * app depends on it.
+   */
+  app.post('/_ensemble/ai/tiers/:name/test', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+
+    const tier = await getTier(c.env, workspace.id, c.req.param('name'));
+    if (!tier) return c.json({ error: `Tier "${c.req.param('name')}" not found` }, 404);
+
+    const body = canaryForProvider(tier.provider);
+    if (body === null) {
+      return c.json({
+        ok: false,
+        message:
+          'No canary available for provider "custom". Pick a provider on the tier first, ' +
+          'or test from your guest app directly.',
+      }, 400);
+    }
+
+    const accountId = (await getCredential(c.env, workspace.id, 'ai_gateway_account_id'))
+      ?? (await getCredential(c.env, workspace.id, 'cloudflare_account_id'));
+    const gatewayName = await getCredential(c.env, workspace.id, 'ai_gateway_name');
+    const cfToken = await getCredential(c.env, workspace.id, 'cloudflare_api_token');
+    if (!accountId || !gatewayName || !cfToken) {
+      return c.json({ ok: false, message: 'AI Gateway not configured' }, 412);
+    }
+
+    const r = await fetch(
+      `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayName}/${tier.gateway_route}`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${cfToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      },
+    );
+
+    let responseBody: unknown = null;
+    try {
+      responseBody = await r.json();
+    } catch {
+      try { responseBody = await r.text(); } catch { /* ignore */ }
+    }
+
+    return c.json({
+      ok: r.ok,
+      status: r.status,
+      provider: tier.provider,
+      request_sent: body,
+      response: responseBody,
+    });
+  });
+
+  /**
+   * Surfaces the Cloudflare AI Gateway dashboard URL so the UI can deep-link
+   * the operator to the page where they wire routes to models.
+   */
+  app.get('/_ensemble/ai/dashboard-url', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const accountId = (await getCredential(c.env, workspace.id, 'ai_gateway_account_id'))
+      ?? (await getCredential(c.env, workspace.id, 'cloudflare_account_id'));
+    const gatewayName = await getCredential(c.env, workspace.id, 'ai_gateway_name');
+    if (!accountId || !gatewayName) {
+      return c.json({ url: null });
+    }
+    return c.json({ url: gatewayDashboardUrl(accountId, gatewayName) });
+  });
+
   app.post('/_ensemble/ai/tiers/:name/create-route', async (c) => {
     const check = requireAdmin(c);
     if (check instanceof Response) return check;
@@ -576,10 +665,17 @@ export function createCredentialsRoutes(): App {
     let sent_via_email = false;
     const verified = await getCredential(c.env, workspace.id, 'email_provider_verified');
     if (verified === 'verified') {
+      const inviter = c.get('user');
+      const rendered = await renderInviteEmail(c.env, workspace.id, {
+        url,
+        inviter_name: inviter?.handle ?? inviter?.email,
+        expires_in_days: 7,
+      });
       const result = await sendEmail(c.env, workspace.id, {
         to: body.email,
-        subject: `You're invited to ${workspace.name ?? 'a workspace'}`,
-        text: `Hi,\n\nYou've been invited to join ${workspace.name ?? 'a workspace'}.\n\nAccept here: ${url}\n\nThis link expires in 7 days.`,
+        subject: rendered.subject,
+        text: rendered.text,
+        html: rendered.html,
       });
       sent_via_email = result.ok;
     }
@@ -612,15 +708,135 @@ export function createCredentialsRoutes(): App {
     let sent_via_email = false;
     const verified = await getCredential(c.env, workspace.id, 'email_provider_verified');
     if (verified === 'verified') {
+      const rendered = await renderPasswordResetEmail(c.env, workspace.id, {
+        url,
+        expires_in_minutes: 60,
+      });
       const result = await sendEmail(c.env, workspace.id, {
         to: target.email,
-        subject: `Password reset`,
-        text: `A password reset was requested for your account.\n\nReset link: ${url}\n\nThis link expires in 1 hour.`,
+        subject: rendered.subject,
+        text: rendered.text,
+        html: rendered.html,
       });
       sent_via_email = result.ok;
     }
 
     return c.json({ url: sent_via_email ? null : url, sent_via_email });
+  });
+
+  // ─── Workspace settings (v0.1.15) ──────────────────────────────────
+  //
+  // GET is open to any authenticated member (some settings, like
+  // session_ttl, affect everyone). Writes require admin.
+
+  const SETTING_KEYS: SettingKey[] = ['session_ttl_seconds'];
+  function isSettingKey(k: string): k is SettingKey {
+    return (SETTING_KEYS as string[]).includes(k);
+  }
+
+  app.get('/_ensemble/settings/:key', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const key = c.req.param('key');
+    if (!isSettingKey(key)) return c.json({ error: `Unknown setting "${key}"` }, 404);
+    const value = await getSetting(c.env, workspace.id, key);
+    return c.json({ key, value });
+  });
+
+  app.get('/_ensemble/settings/session/options', async (c) => {
+    // Static, but lives behind auth like the rest of the settings API.
+    return c.json({ options: SESSION_TTL_OPTIONS });
+  });
+
+  app.put('/_ensemble/settings/:key', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const key = c.req.param('key');
+    if (!isSettingKey(key)) return c.json({ error: `Unknown setting "${key}"` }, 404);
+    const body = await c.req.json<{ value: string }>();
+    if (typeof body.value !== 'string') {
+      return c.json({ error: 'value must be a string' }, 400);
+    }
+    // Per-key validation. Today we only have session_ttl_seconds.
+    if (key === 'session_ttl_seconds') {
+      const n = Number(body.value);
+      if (!Number.isFinite(n)) return c.json({ error: 'session_ttl_seconds must be a number' }, 400);
+      // parseSessionTtl clamps further; the explicit check here gives
+      // a clear error rather than silent clamping when the admin
+      // typed a totally invalid value.
+      if (n < 60) return c.json({ error: 'session_ttl_seconds must be >= 60' }, 400);
+    }
+    const user = c.get('user');
+    await setSetting(c.env, workspace.id, key, body.value, user?.id);
+    // Echo the parsed/clamped value back so the UI sees what we actually stored.
+    const stored = key === 'session_ttl_seconds'
+      ? String(parseSessionTtl(body.value))
+      : body.value;
+    return c.json({ key, value: stored });
+  });
+
+  // ─── Workspace locales (v0.1.15) ───────────────────────────────────
+
+  app.get('/_ensemble/locales', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const locales = await listLocales(c.env, workspace.id);
+    return c.json({ locales });
+  });
+
+  app.post('/_ensemble/locales', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const body = await c.req.json<{ code: string; display_name: string }>();
+    if (!body.code || !body.display_name) {
+      return c.json({ error: 'code and display_name are required' }, 400);
+    }
+    try {
+      const locale = await addLocale(c.env, workspace.id, body);
+      return c.json({ locale });
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+  });
+
+  app.patch('/_ensemble/locales/:code', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const code = c.req.param('code');
+    const body = await c.req.json<{
+      display_name?: string;
+      enabled?: boolean;
+      make_default?: boolean;
+    }>();
+    try {
+      if (body.make_default) {
+        await setDefaultLocale(c.env, workspace.id, code);
+      } else if (body.display_name !== undefined || body.enabled !== undefined) {
+        await patchLocale(c.env, workspace.id, code, body);
+      }
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: String(err) }, 400);
+    }
+  });
+
+  app.delete('/_ensemble/locales/:code', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    try {
+      await removeLocale(c.env, workspace.id, c.req.param('code'));
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: String(err) }, 409);
+    }
   });
 
   return app;

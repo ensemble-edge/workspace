@@ -25,6 +25,7 @@ import {
 } from '@ensemble-edge/ui';
 
 import { workspace, fetchWorkspace } from '../../../state';
+import { authedFetch } from '../../../state';
 
 export function GeneralTab() {
   useSignals();
@@ -50,7 +51,7 @@ export function GeneralTab() {
     setSaving(true);
     try {
       // Save workspace name via identity brand token
-      const response = await fetch('/_ensemble/brand/tokens', {
+      const response = await authedFetch('/_ensemble/brand/tokens', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

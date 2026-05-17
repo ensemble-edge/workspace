@@ -22,6 +22,7 @@ import {
   SelectValue,
   toast,
 } from '@ensemble-edge/ui';
+import { authedFetch } from '../../../state';
 
 const FONT_OPTIONS = [
   { value: 'system', label: 'System Default', css: 'system-ui, -apple-system, sans-serif' },
@@ -46,7 +47,7 @@ export function TypographyTab() {
 
   // Load saved typography tokens
   useEffect(() => {
-    fetch('/_ensemble/core/brand/tokens/typography')
+    authedFetch('/_ensemble/core/brand/tokens/typography')
       .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
       .then((res) => {
         for (const token of res.data || []) {
@@ -67,7 +68,7 @@ export function TypographyTab() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch('/_ensemble/brand/tokens', {
+      const res = await authedFetch('/_ensemble/brand/tokens', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -192,7 +193,7 @@ export function TypographyTab() {
             <div>
               <p className="text-xs text-muted-foreground mb-1">Mono</p>
               <p className="text-sm" style={{ fontFamily: getFontCss(monoFont) }}>
-                const brand = await fetch('/_ensemble/brand/css');
+                const brand = await authedFetch('/_ensemble/brand/css');
               </p>
             </div>
           </CardContent>

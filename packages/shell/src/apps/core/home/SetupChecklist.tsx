@@ -23,6 +23,7 @@ import {
 } from '@ensemble-edge/ui';
 
 import { navigate } from '../../../state';
+import { authedFetch } from '../../../state';
 
 type SetupStatus = 'done' | 'pending';
 
@@ -47,7 +48,7 @@ export function SetupChecklist() {
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch('/_ensemble/setup/status', {
+        const r = await authedFetch('/_ensemble/setup/status', {
           credentials: 'include',
         });
         if (!r.ok) {

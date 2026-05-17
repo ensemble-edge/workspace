@@ -7,6 +7,7 @@
 
 import { signal, computed } from '@preact/signals-react';
 import type { Workspace, WorkspaceSettings } from '../../types';
+import { authedFetch } from './user';
 
 /**
  * Current workspace data.
@@ -53,7 +54,7 @@ export async function fetchWorkspace(): Promise<void> {
   workspaceError.value = null;
 
   try {
-    const response = await fetch('/_ensemble/workspace');
+    const response = await authedFetch('/_ensemble/workspace');
     if (!response.ok) {
       throw new Error('Failed to load workspace');
     }

@@ -109,11 +109,16 @@ export async function signAccessToken(
  *
  * @param sessionId - Session ID to encode
  * @param secret - JWT signing secret from environment
- * @returns Signed JWT string
+ * @param ttlSeconds - Optional override for the refresh token lifetime.
+ *   When provided, used in place of REFRESH_TOKEN_EXPIRY. Lets
+ *   per-workspace session lifetime (configured in Auth → Sessions)
+ *   apply to newly-issued sessions. Existing sessions keep their
+ *   original expiry; the setting only affects future sign-ins.
  */
 export async function signRefreshToken(
   sessionId: string,
-  secret: string
+  secret: string,
+  ttlSeconds?: number,
 ): Promise<string> {
   const key = createSecretKey(secret);
 
@@ -123,7 +128,7 @@ export async function signRefreshToken(
   })
     .setProtectedHeader({ alg: JWT_ALGORITHM })
     .setIssuedAt()
-    .setExpirationTime(REFRESH_TOKEN_EXPIRY)
+    .setExpirationTime(ttlSeconds ? `${ttlSeconds}s` : REFRESH_TOKEN_EXPIRY)
     .sign(key);
 
   return token;

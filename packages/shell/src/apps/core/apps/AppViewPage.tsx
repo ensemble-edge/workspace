@@ -31,6 +31,7 @@ import {
 } from '@ensemble-edge/ui';
 
 import { currentPath, navigate } from '../../../state';
+import { authedFetch } from '../../../state';
 
 type Tier = 'component' | 'iframe' | 'sandboxed';
 
@@ -180,7 +181,7 @@ function IframeTierRenderer({ appInfo, path }: { appInfo: AppInfo; path: string 
           if (typeof msg.path === 'string' && msg.path.startsWith('/')) navigate(msg.path);
           break;
         case 'ensemble:audit':
-          fetch('/_ensemble/audit/event', {
+          authedFetch('/_ensemble/audit/event', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ source: appInfo.id, ...((msg as unknown) as Record<string, unknown>) }),

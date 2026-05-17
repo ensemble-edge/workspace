@@ -28,6 +28,7 @@ import {
 } from '@ensemble-edge/ui';
 
 import { generatePalette, getRelativeLuminance } from './color-utils';
+import { authedFetch } from '../../../state';
 
 interface ColorGroup {
   slug: string;
@@ -65,8 +66,8 @@ export function ColorsTab() {
   // Load saved color groups + tokens from DB
   useEffect(() => {
     Promise.all([
-      fetch('/_ensemble/core/brand/groups').then((r) => r.json() as Promise<{ data?: Array<{ slug: string; label: string; category: string }> }>),
-      fetch('/_ensemble/core/brand/tokens/colors').then((r) => r.json() as Promise<{ data?: SavedToken[] }>),
+      authedFetch('/_ensemble/core/brand/groups').then((r) => r.json() as Promise<{ data?: Array<{ slug: string; label: string; category: string }> }>),
+      authedFetch('/_ensemble/core/brand/tokens/colors').then((r) => r.json() as Promise<{ data?: SavedToken[] }>),
     ]).then(([groupsRes, tokensRes]) => {
       const savedGroups = (groupsRes.data || []).filter((g) => g.category === 'colors');
       const savedTokens = tokensRes.data || [];
@@ -109,7 +110,7 @@ export function ColorsTab() {
     setter(value);
     try {
       // Save the token
-      await fetch('/_ensemble/brand/tokens', {
+      await authedFetch('/_ensemble/brand/tokens', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category: 'colors', tokens: { [key]: value } }),
@@ -118,7 +119,7 @@ export function ColorsTab() {
       const palette = generatePalette(value);
       const slug = key.replace('brand-', '');
       const label = slug.charAt(0).toUpperCase() + slug.slice(1);
-      await fetch('/_ensemble/core/brand/colors', {
+      await authedFetch('/_ensemble/core/brand/colors', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ group: slug, label, colors: palette }),
@@ -202,7 +203,7 @@ export function ColorsTab() {
     try {
       // Save each color group
       for (const group of groups) {
-        const res = await fetch('/_ensemble/core/brand/colors', {
+        const res = await authedFetch('/_ensemble/core/brand/colors', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -215,7 +216,7 @@ export function ColorsTab() {
       }
 
       // Save semantic colors
-      const semRes = await fetch('/_ensemble/brand/tokens', {
+      const semRes = await authedFetch('/_ensemble/brand/tokens', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

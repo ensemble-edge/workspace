@@ -9,6 +9,7 @@
  */
 
 import { signal } from '@preact/signals-react';
+import { authedFetch } from './user';
 
 interface ThemeData {
   colors: Record<string, string>;
@@ -36,7 +37,7 @@ export async function fetchTheme(): Promise<void> {
   themeError.value = null;
 
   try {
-    const response = await fetch('/_ensemble/brand/theme');
+    const response = await authedFetch('/_ensemble/brand/theme');
     if (!response.ok) throw new Error('Failed to load theme');
 
     const data = await response.json() as ThemeData;

@@ -16,9 +16,29 @@
  * `name`. Unknown tier → falls back to `good` and logs the fallback.
  */
 
-import { getCredential, deleteCredential } from './credentials';
+import { getCredential } from './credentials';
 
 export type TierStatus = 'provisioned' | 'pending' | 'failed';
+
+/**
+ * Provider hint — describes the request/response shape that flows
+ * through this tier's gateway route. Used by the "Test tier" button to
+ * pick a canary payload that's actually meaningful for the underlying
+ * model. Guest apps still POST whatever they want; the workspace
+ * doesn't reshape requests.
+ */
+export type TierProvider =
+  | 'workers-ai'         // Cloudflare Workers AI (inputs vary per model — see canary builder)
+  | 'openai-chat'        // OpenAI chat.completions or compatible
+  | 'anthropic-messages' // Anthropic /v1/messages
+  | 'custom';            // Unknown shape — no canary available
+
+export const TIER_PROVIDERS: TierProvider[] = [
+  'workers-ai',
+  'openai-chat',
+  'anthropic-messages',
+  'custom',
+];
 
 export interface AiTier {
   name: string;
@@ -29,6 +49,7 @@ export interface AiTier {
   gateway_route: string;
   route_provisioned: boolean;
   last_error: string | null;
+  provider: TierProvider;
   created_at: string;
 }
 
@@ -41,26 +62,10 @@ interface DbTierRow {
   gateway_route: string;
   route_provisioned: number;
   last_error: string | null;
+  provider: string | null;
   created_at: string;
 }
 
-/**
- * One-shot lazy delete of the legacy `ai_gateway_token` credential.
- * As of v0.1.14 the AI Gateway uses the same Cloudflare API token as
- * the Connection section, so the separate token is no longer read.
- * Removing it on first AI-related read keeps the credentials table tidy.
- *
- * Scheduled for removal in v0.1.15 — see project_v0115_cleanup memory.
- */
-async function lazyDeleteLegacyAiToken(
-  env: Env,
-  workspaceId: string,
-): Promise<void> {
-  const legacy = await getCredential(env, workspaceId, 'ai_gateway_token');
-  if (legacy !== null) {
-    await deleteCredential(env, workspaceId, 'ai_gateway_token');
-  }
-}
 
 interface Env {
   DB: D1Database;
@@ -93,12 +98,9 @@ export async function seedDefaultTiers(
 }
 
 export async function listTiers(env: Env, workspaceId: string): Promise<AiTier[]> {
-  // Fire-and-forget legacy cleanup on first read in this request path.
-  await lazyDeleteLegacyAiToken(env, workspaceId);
-
   const result = await env.DB.prepare(
     `SELECT name, display_name, description, icon, is_default,
-            gateway_route, route_provisioned, last_error, created_at
+            gateway_route, route_provisioned, last_error, provider, created_at
        FROM workspace_ai_tiers
       WHERE workspace_id = ?
       ORDER BY is_default DESC, created_at ASC`,
@@ -109,7 +111,7 @@ export async function listTiers(env: Env, workspaceId: string): Promise<AiTier[]
 export async function getTier(env: Env, workspaceId: string, name: string): Promise<AiTier | null> {
   const row = await env.DB.prepare(
     `SELECT name, display_name, description, icon, is_default,
-            gateway_route, route_provisioned, last_error, created_at
+            gateway_route, route_provisioned, last_error, provider, created_at
        FROM workspace_ai_tiers
       WHERE workspace_id = ? AND name = ?`,
   ).bind(workspaceId, name).first<DbTierRow>();
@@ -119,15 +121,23 @@ export async function getTier(env: Env, workspaceId: string, name: string): Prom
 export async function createTier(
   env: Env,
   workspaceId: string,
-  input: { name: string; display_name?: string; description?: string; icon?: string },
+  input: {
+    name: string;
+    display_name?: string;
+    description?: string;
+    icon?: string;
+    provider?: TierProvider;
+  },
 ): Promise<AiTier> {
   if (!/^[a-z][a-z0-9-]*$/.test(input.name)) {
     throw new Error('Tier name must be kebab-case (lowercase letters, digits, hyphens; must start with a letter)');
   }
+  const provider: TierProvider =
+    input.provider && TIER_PROVIDERS.includes(input.provider) ? input.provider : 'custom';
   await env.DB.prepare(
     `INSERT INTO workspace_ai_tiers
-       (workspace_id, name, display_name, description, icon, is_default, gateway_route, route_provisioned)
-     VALUES (?, ?, ?, ?, ?, 0, ?, 0)`,
+       (workspace_id, name, display_name, description, icon, is_default, gateway_route, route_provisioned, provider)
+     VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?)`,
   ).bind(
     workspaceId,
     input.name,
@@ -135,6 +145,7 @@ export async function createTier(
     input.description ?? null,
     input.icon ?? 'sparkles',
     `ws/${input.name}`,
+    provider,
   ).run();
   const created = await getTier(env, workspaceId, input.name);
   if (!created) throw new Error('Failed to read back created tier');
@@ -145,14 +156,24 @@ export async function patchTier(
   env: Env,
   workspaceId: string,
   name: string,
-  patch: { display_name?: string; description?: string; icon?: string },
+  patch: {
+    display_name?: string;
+    description?: string;
+    icon?: string;
+    provider?: TierProvider;
+  },
 ): Promise<void> {
-  // Only display_name/description/icon are mutable; name is the contract.
+  // Only display_name/description/icon/provider are mutable; `name` is
+  // the stable contract referenced by guest apps.
   const fields: string[] = [];
   const values: unknown[] = [];
   if (patch.display_name !== undefined) { fields.push('display_name = ?'); values.push(patch.display_name); }
   if (patch.description !== undefined) { fields.push('description = ?'); values.push(patch.description); }
   if (patch.icon !== undefined) { fields.push('icon = ?'); values.push(patch.icon); }
+  if (patch.provider !== undefined && TIER_PROVIDERS.includes(patch.provider)) {
+    fields.push('provider = ?');
+    values.push(patch.provider);
+  }
   if (fields.length === 0) return;
   values.push(workspaceId, name);
   await env.DB.prepare(
@@ -265,6 +286,7 @@ export async function provisionTierRoute(
 }
 
 function rowToTier(row: DbTierRow): AiTier {
+  const provider = (row.provider ?? 'custom') as TierProvider;
   return {
     name: row.name,
     display_name: row.display_name ?? row.name,
@@ -274,6 +296,47 @@ function rowToTier(row: DbTierRow): AiTier {
     gateway_route: row.gateway_route,
     route_provisioned: row.route_provisioned === 1,
     last_error: row.last_error ?? null,
+    provider: TIER_PROVIDERS.includes(provider) ? provider : 'custom',
     created_at: row.created_at,
   };
+}
+
+/**
+ * Build a tiny canary payload appropriate for the tier's declared
+ * provider. Returns null for 'custom' — the operator must wire it up
+ * themselves in their guest app. The shapes here come straight from
+ * each provider's published API.
+ */
+export function canaryForProvider(provider: TierProvider): unknown | null {
+  switch (provider) {
+    case 'workers-ai':
+      // Most generation models accept {prompt}; translation models want
+      // {text, source_lang, target_lang}. We pick a prompt-style canary
+      // since it works for chat/instruct models; translation tiers
+      // operator-test in their actual guest app.
+      return { prompt: 'Say hello in one short sentence.', max_tokens: 32 };
+    case 'openai-chat':
+      return {
+        messages: [{ role: 'user', content: 'Say hello in one short sentence.' }],
+        max_tokens: 32,
+      };
+    case 'anthropic-messages':
+      return {
+        model: 'claude-3-haiku-20240307',
+        max_tokens: 32,
+        messages: [{ role: 'user', content: 'Say hello in one short sentence.' }],
+      };
+    case 'custom':
+    default:
+      return null;
+  }
+}
+
+/**
+ * Build the Cloudflare dashboard URL the AI Access card uses for its
+ * "Configure model in Cloudflare" deep link. Lands the operator on the
+ * gateway namespace's route page where they pick the underlying model.
+ */
+export function gatewayDashboardUrl(accountId: string, gatewayName: string): string {
+  return `https://dash.cloudflare.com/${accountId}/ai/ai-gateway/configuration/${gatewayName}`;
 }
