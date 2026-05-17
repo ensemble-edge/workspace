@@ -79,6 +79,28 @@ export function TypographyTab() {
     mono:     { family: 'System Mono', weight: '400', style: 'normal' },
   });
   const [catalog, setCatalog] = useState<GoogleFontEntry[]>([]);
+  // Whether the current catalog is the bundled fallback (curated ~40)
+  // rather than the live full Google Fonts list (~1934). When true,
+  // we trigger a one-shot upgrade fetch the first time the operator
+  // types in a font picker — so typeahead reaches *every* family even
+  // though the visible default list is intentionally short.
+  const [catalogIsFallback, setCatalogIsFallback] = useState(false);
+  const upgradingRef = React.useRef(false);
+
+  const upgradeCatalog = React.useCallback(() => {
+    if (!catalogIsFallback || upgradingRef.current) return;
+    upgradingRef.current = true;
+    authedFetch('/_ensemble/core/fonts/google')
+      .then((r) => r.json() as Promise<{ fonts: GoogleFontEntry[] }>)
+      .then((res) => {
+        const fonts = res.fonts ?? [];
+        if (fonts.length > 0) {
+          setCatalog(fonts);
+          setCatalogIsFallback(false);
+        }
+      })
+      .catch(() => { /* keep fallback */ });
+  }, [catalogIsFallback]);
   const [recent, setRecent] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
     try {
@@ -113,9 +135,11 @@ export function TypographyTab() {
       const fonts = fontsRes.fonts ?? [];
       if (fonts.length === 0) {
         setCatalog(FALLBACK_GOOGLE_FONTS);
+        setCatalogIsFallback(true);
         console.warn('[fonts] live catalog empty; using bundled fallback (~40 families).');
       } else {
         setCatalog(fonts);
+        setCatalogIsFallback(false);
       }
       // After async load, snapshot the *loaded* byRole shape as the
       // dirty-tracking baseline. Pass explicitly because the closure-
@@ -199,6 +223,7 @@ export function TypographyTab() {
           value={byRole[key]}
           onChange={(patch) => setRole(key, patch)}
           onFamilyPicked={bumpRecent}
+          onFirstSearch={upgradeCatalog}
           systemOptions={systemOptions}
           googleOptions={googleOptions}
           variantsByFamily={variantsByFamily}
@@ -226,6 +251,7 @@ function RoleCard({
   value,
   onChange,
   onFamilyPicked,
+  onFirstSearch,
   systemOptions,
   googleOptions,
   variantsByFamily,
@@ -238,6 +264,7 @@ function RoleCard({
   value: { family: string; weight: string; style: 'normal' | 'italic' };
   onChange: (patch: Partial<{ family: string; weight: string; style: 'normal' | 'italic' }>) => void;
   onFamilyPicked: (family: string) => void;
+  onFirstSearch?: () => void;
   systemOptions: FontComboboxOption[];
   googleOptions: FontComboboxOption[];
   variantsByFamily: Map<string, string[]>;
@@ -278,6 +305,7 @@ function RoleCard({
               systemFonts={systemOptions}
               googleFonts={googleOptions}
               recent={recent}
+              onFirstSearch={onFirstSearch}
               placeholder="Pick a font…"
             />
           </div>

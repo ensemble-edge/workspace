@@ -205,21 +205,31 @@ export const WEIGHT_LABELS: Record<string, string> = {
   '900': 'Black',
 };
 
+/**
+ * The full standard CSS weight axis. Used for system fonts (which on
+ * every modern OS expose the whole range) and for any family with no
+ * known variant list — better to offer the operator a real choice than
+ * lock them to 400.
+ */
+const STANDARD_WEIGHTS = ['100', '200', '300', '400', '500', '600', '700', '800', '900'];
+
 /** Extract the distinct numeric weights a family supports (sorted ascending). */
 export function weightsForFamily(variants: string[] | undefined): string[] {
-  if (!variants || variants.length === 0) return ['400'];
+  // No variant info — could be a system font or an as-yet-unloaded
+  // Google font. Expose the full standard weight axis so the operator
+  // sees a real picker instead of a one-item dropdown.
+  if (!variants || variants.length === 0) return [...STANDARD_WEIGHTS];
   const set = new Set<string>();
   for (const v of variants) {
     const { weight } = parseVariant(v);
     set.add(weight);
   }
-  // System families don't ship variant lists from Google — accept any weight.
-  if (set.size === 0) return ['400'];
+  if (set.size === 0) return [...STANDARD_WEIGHTS];
   return Array.from(set).sort((a, b) => Number(a) - Number(b));
 }
 
 /** Whether a family has italic variants. */
 export function familySupportsItalic(variants: string[] | undefined): boolean {
   if (!variants) return true; // System fonts always support italic
-  return variants.some((v) => v.includes('italic'));
+  return variants.some((v) => /italic|i$/.test(v));
 }

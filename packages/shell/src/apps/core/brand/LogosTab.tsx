@@ -111,6 +111,8 @@ function tokenKey(slot: string, variant: Variant): string {
 export function LogosTab() {
   const [tokens, setTokens] = useState<Record<string, string>>({});
   const [fontCatalog, setFontCatalog] = useState<GoogleFontEntry[]>([]);
+  const [catalogIsFallback, setCatalogIsFallback] = useState(false);
+  const upgradingRef = React.useRef(false);
   const status = useFormStatus({ value: tokens, mode: 'manual' });
 
   // Load the Google Fonts catalog once for the wordmark Family picker.
@@ -122,16 +124,37 @@ export function LogosTab() {
         const fonts = res.fonts ?? [];
         if (fonts.length === 0) {
           setFontCatalog(FALLBACK_GOOGLE_FONTS);
+          setCatalogIsFallback(true);
           console.warn('[fonts] live catalog empty; using bundled fallback (~40 families).');
         } else {
           setFontCatalog(fonts);
+          setCatalogIsFallback(false);
         }
       })
       .catch(() => {
         // Network/parse error — same fallback.
         setFontCatalog(FALLBACK_GOOGLE_FONTS);
+        setCatalogIsFallback(true);
       });
   }, []);
+
+  // Hybrid typeahead: when the operator starts searching in the wordmark
+  // font picker and we're still on the curated fallback, retry the proxy
+  // so search reaches the full ~1900-font catalog.
+  const upgradeCatalog = React.useCallback(() => {
+    if (!catalogIsFallback || upgradingRef.current) return;
+    upgradingRef.current = true;
+    authedFetch('/_ensemble/core/fonts/google')
+      .then((r) => r.json() as Promise<{ fonts: GoogleFontEntry[] }>)
+      .then((res) => {
+        const fonts = res.fonts ?? [];
+        if (fonts.length > 0) {
+          setFontCatalog(fonts);
+          setCatalogIsFallback(false);
+        }
+      })
+      .catch(() => { /* keep fallback */ });
+  }, [catalogIsFallback]);
 
   useEffect(() => {
     authedFetch('/_ensemble/core/brand/tokens/identity')
@@ -203,6 +226,7 @@ export function LogosTab() {
               tokens={tokens}
               onChange={setToken}
               fontCatalog={fontCatalog}
+              onFirstSearch={upgradeCatalog}
             />
           ) : (
             <SlotCard
@@ -240,11 +264,13 @@ function WordmarkCard({
   tokens,
   onChange,
   fontCatalog,
+  onFirstSearch,
 }: {
   slot: SlotDef;
   tokens: Record<string, string>;
   onChange: (key: string, value: string) => void;
   fontCatalog: GoogleFontEntry[];
+  onFirstSearch?: () => void;
 }) {
   const textValue = tokens['wordmark_text'] || '';
   const imageValue = tokens[tokenKey(slot.key, 'base')] || '';
@@ -298,6 +324,7 @@ function WordmarkCard({
               tokens={tokens}
               onChange={onChange}
               fontCatalog={fontCatalog}
+              onFirstSearch={onFirstSearch}
             />
             <WordmarkEditor
               value={textValue}
@@ -648,10 +675,12 @@ function WordmarkTypographyControls({
   tokens,
   onChange,
   fontCatalog,
+  onFirstSearch,
 }: {
   tokens: Record<string, string>;
   onChange: (key: string, value: string) => void;
   fontCatalog: GoogleFontEntry[];
+  onFirstSearch?: () => void;
 }) {
   const family = tokens['wordmark_family'] || '';
   const weight = tokens['wordmark_weight'] || '';
@@ -714,6 +743,7 @@ function WordmarkTypographyControls({
             onChange={handleFamily}
             systemFonts={systemOptions}
             googleFonts={googleOptions}
+            onFirstSearch={onFirstSearch}
             placeholder="Pick a font…"
           />
         </div>

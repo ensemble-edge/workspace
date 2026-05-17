@@ -48,6 +48,13 @@ export interface FontComboboxProps {
   googleFonts: FontComboboxOption[];
   /** Recently picked families to highlight. */
   recent?: string[];
+  /**
+   * Optional hook: fired on first non-empty search input. Parents wire
+   * this to a live catalog fetch so typeahead reaches the full Google
+   * Fonts list even when the visible `googleFonts` prop is a curated
+   * subset (e.g. the bundled top-40 fallback). Called at most once.
+   */
+  onFirstSearch?: () => void;
   /** Disable the combobox. */
   disabled?: boolean;
   placeholder?: string;
@@ -131,8 +138,19 @@ function OptionRow({
 // ─── Combobox ──────────────────────────────────────────────────────
 
 export const FontCombobox = React.forwardRef<HTMLButtonElement, FontComboboxProps>(
-  ({ value, onChange, systemFonts, googleFonts, recent, disabled, placeholder, className }, ref) => {
+  ({ value, onChange, systemFonts, googleFonts, recent, onFirstSearch, disabled, placeholder, className }, ref) => {
     const [open, setOpen] = React.useState(false);
+    const firstSearchFired = React.useRef(false);
+
+    const handleSearchInput = React.useCallback(
+      (next: string) => {
+        if (!firstSearchFired.current && next.trim().length > 0 && onFirstSearch) {
+          firstSearchFired.current = true;
+          onFirstSearch();
+        }
+      },
+      [onFirstSearch],
+    );
 
     // Group Google Fonts by category for browsability.
     const groupedGoogle = React.useMemo(() => {
@@ -197,7 +215,10 @@ export const FontCombobox = React.forwardRef<HTMLButtonElement, FontComboboxProp
         </PopoverTrigger>
         <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
           <Command>
-            <CommandInput placeholder="Search fonts…" />
+            <CommandInput
+              placeholder="Search fonts…"
+              onValueChange={handleSearchInput}
+            />
             <CommandList className="max-h-80">
               <CommandEmpty>No fonts match.</CommandEmpty>
 
