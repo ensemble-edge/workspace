@@ -31,6 +31,7 @@ import { generateBrandCss, getSavedThemeMode } from './apps/core/brand/css';
 // Shell assets are built by @ensemble-edge/shell and exported as strings
 import { SHELL_JS, SHELL_CSS } from '@ensemble-edge/shell/assets';
 import { RUNTIME_JS, RUNTIME_CSS, RUNTIME_VERSION } from '@ensemble-edge/guest-runtime/assets';
+import { createCredentialsRoutes } from './routes/credentials';
 
 /**
  * Cloudflare Worker instance returned by createWorkspace.
@@ -129,6 +130,14 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   // Guest App Gateway (/_ensemble/apps/*) - requires authentication
   app.use('/_ensemble/apps/*', auth());
   app.route('/_ensemble/apps', createGuestGatewayRoutes());
+
+  // Credentials, AI tiers, setup/status, auth/methods, invite/reset
+  // (v0.1.12). These need auth for any mutation; the route handlers
+  // gate admin actions internally.
+  app.use('/_ensemble/credentials/*', auth());
+  app.use('/_ensemble/ai/*', auth());
+  app.use('/_ensemble/users/*', auth());
+  app.route('/', createCredentialsRoutes());
 
   // Core App API Routes (/_ensemble/core/*)
   registerCoreApps(app);
@@ -620,6 +629,24 @@ function generateLoginHtml(workspaceName: string, accentColor: string, themeMode
       </button>
     </form>
 
+    <!-- Magic link (revealed only when email is configured) -->
+    <div id="magicLinkSection" hidden class="space-y-2">
+      <div class="relative">
+        <div class="absolute inset-0 flex items-center"><span class="w-full border-t"></span></div>
+        <div class="relative flex justify-center text-xs uppercase">
+          <span class="bg-card px-2 text-muted-foreground">or</span>
+        </div>
+      </div>
+      <button
+        type="button"
+        id="magicLinkBtn"
+        class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 w-full"
+      >
+        Email me a sign-in link
+      </button>
+      <p id="magicLinkStatus" class="hidden text-center text-xs text-muted-foreground"></p>
+    </div>
+
     <!-- Footer -->
     <p class="text-center text-xs text-muted-foreground">
       Don't have an account? <a href="#" class="text-primary hover:underline">Contact your admin</a>
@@ -636,6 +663,53 @@ function generateLoginHtml(workspaceName: string, accentColor: string, themeMode
     const passwordError = document.getElementById('passwordError');
 
     const inputErrorClass = '${inputErrorClass}';
+
+    // Reveal magic-link option only if email is configured & verified.
+    // The endpoint is workspace-scoped, so this respects per-deployment
+    // configuration without baking it into the HTML.
+    (async () => {
+      try {
+        const r = await fetch('/_ensemble/auth/methods', { credentials: 'include' });
+        if (!r.ok) return;
+        const m = await r.json();
+        if (m && m.magic_link) {
+          document.getElementById('magicLinkSection').hidden = false;
+        }
+      } catch (_) {
+        // Silently skip — magic link just stays hidden.
+      }
+    })();
+
+    const magicBtn = document.getElementById('magicLinkBtn');
+    const magicStatus = document.getElementById('magicLinkStatus');
+    if (magicBtn) {
+      magicBtn.addEventListener('click', async () => {
+        const email = emailInput.value.trim();
+        if (!email) {
+          showFieldError(emailInput, emailError, 'Enter your email first');
+          return;
+        }
+        magicBtn.disabled = true;
+        magicBtn.textContent = 'Sending...';
+        try {
+          const r = await fetch('/_ensemble/auth/magic-link', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+          });
+          // Always show a generic success message — don't leak which
+          // emails exist in this workspace.
+          magicStatus.textContent = 'If that email is registered, a sign-in link is on its way.';
+          magicStatus.classList.remove('hidden');
+        } catch (_) {
+          magicStatus.textContent = 'Could not send link. Try again later.';
+          magicStatus.classList.remove('hidden');
+        } finally {
+          magicBtn.disabled = false;
+          magicBtn.textContent = 'Email me a sign-in link';
+        }
+      });
+    }
 
     // Clear field error on input
     emailInput.addEventListener('input', () => {

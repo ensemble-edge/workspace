@@ -23,6 +23,7 @@ import {
   isAuthenticated,
   navigate,
 } from '../../../state';
+import { SetupChecklist } from './SetupChecklist';
 
 export function HomePage() {
   useSignals();
@@ -50,6 +51,8 @@ export function HomePage() {
           <a href="/login">Log in</a>
         </Button>
       )}
+
+      {authenticated && <SetupChecklist />}
 
       {authenticated && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

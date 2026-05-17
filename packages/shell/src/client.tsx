@@ -15,6 +15,60 @@ import { Shell } from './components/Shell';
 import * as EnsembleUI from '@ensemble-edge/ui';
 
 /**
+ * useAI hook — see guest-runtime/runtime.tsx for the canonical version.
+ * Duplicated here intentionally: the shell's runtime exposure is for
+ * component-tier guests imported into the host React tree, while
+ * guest-runtime is for iframe-tier guests. Same shape, same behavior,
+ * different host context.
+ */
+function useAI({ tier }: { tier: string }) {
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [fallback, setFallback] = React.useState<string | null>(null);
+
+  const call = React.useCallback(
+    async (body: unknown) => {
+      setLoading(true);
+      setError(null);
+      setFallback(null);
+      try {
+        const response = await fetch(`/_ensemble/ai/call/${encodeURIComponent(tier)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        const fb = response.headers.get('X-Ensemble-Tier-Fallback');
+        if (fb) setFallback(fb);
+        let data: unknown = null;
+        try {
+          data = await response.clone().json();
+        } catch {
+          data = await response.clone().text();
+        }
+        if (!response.ok) {
+          const msg =
+            typeof data === 'object' && data && 'error' in data
+              ? String((data as { error: unknown }).error)
+              : `AI call failed: ${response.status}`;
+          setError(msg);
+        }
+        return { response, data, fallback: fb };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'AI call failed';
+        setError(msg);
+        throw e;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [tier],
+  );
+
+  return { call, loading, error, fallback };
+}
+
+/**
  * Expose `window.Ensemble` so that dynamically-imported guest component
  * modules (tier: 'component') can render against the same React + UI
  * library the shell uses. The guest's compiled JSX targets
@@ -43,6 +97,8 @@ function installEnsembleGlobal() {
     // Layout primitives re-exported under their short names.
     Page: EnsembleUI.EnsemblePage,
     Section: EnsembleUI.EnsembleSection,
+    // AI runtime hook (v0.1.12).
+    useAI,
   };
 }
 

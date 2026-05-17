@@ -146,6 +146,80 @@ export interface EnsembleRuntime {
   EmptyState: typeof EmptyState;
   StatCard: typeof StatCard;
   DataRow: typeof DataRow;
+
+  /**
+   * useAI({ tier }) — call the workspace's AI Gateway through a named tier.
+   *
+   * Tier names map 1:1 to dynamic gateway routes the workspace admin
+   * configured under Settings → Auth & Security → Credentials. Default
+   * tiers are 'smart' | 'good' | 'simple'; admins may add more.
+   *
+   * If the requested tier doesn't exist, the workspace falls back to the
+   * default tier and returns the response with header
+   * `X-Ensemble-Tier-Fallback: <real-tier-used>`; the hook surfaces this
+   * as `fallback`.
+   */
+  useAI: typeof useAI;
+}
+
+export interface UseAIResult {
+  /** Send a chat-completion body (provider-shaped) and return the response. */
+  call: (body: unknown) => Promise<{
+    response: Response;
+    data: unknown;
+    fallback: string | null;
+  }>;
+  loading: boolean;
+  error: string | null;
+  /** If the workspace fell back from the requested tier, name of the tier used. */
+  fallback: string | null;
+}
+
+function useAI({ tier }: { tier: string }): UseAIResult {
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [fallback, setFallback] = React.useState<string | null>(null);
+
+  const call = React.useCallback(
+    async (body: unknown) => {
+      setLoading(true);
+      setError(null);
+      setFallback(null);
+      try {
+        const response = await fetch(`/_ensemble/ai/call/${encodeURIComponent(tier)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        const fb = response.headers.get('X-Ensemble-Tier-Fallback');
+        if (fb) setFallback(fb);
+        let data: unknown = null;
+        try {
+          data = await response.clone().json();
+        } catch {
+          data = await response.clone().text();
+        }
+        if (!response.ok) {
+          const msg =
+            typeof data === 'object' && data && 'error' in data
+              ? String((data as { error: unknown }).error)
+              : `AI call failed: ${response.status}`;
+          setError(msg);
+        }
+        return { response, data, fallback: fb };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'AI call failed';
+        setError(msg);
+        throw e;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [tier],
+  );
+
+  return { call, loading, error, fallback };
 }
 
 function mount(Component: React.ComponentType): void {
@@ -212,6 +286,8 @@ const runtime: EnsembleRuntime = {
   Skeleton,
   Avatar, AvatarImage, AvatarFallback,
   EmptyState, StatCard, DataRow,
+
+  useAI,
 };
 
 // Attach to window so the guest's HTML shell can find it.

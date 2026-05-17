@@ -461,5 +461,23 @@ Custom roles are defined in the People & Teams core app. They're permission bund
 
 ---
 
+### Magic-Link, Invite, and Reset — Email Availability (v0.1.12)
+
+Magic-link login, invite emails, and admin password resets all depend on the workspace having a *verified* email provider configured under **Settings → Auth & Security → Credentials**. The behavior is graceful in both states:
+
+| Operation | Email configured & verified | Email not configured |
+|-----------|----------------------------|----------------------|
+| **Magic link** | Login screen shows "Email me a sign-in link"; user receives email with token. | Login screen hides the magic-link affordance entirely; password is the only option. |
+| **User invite** | Invite email is sent to the invitee. Admin response contains `{ url, sent_via_email: true }`. | No email sent. Admin response contains `{ url, sent_via_email: false }` — admin manually shares the one-time URL. |
+| **Admin password reset** | Reset link emailed to user. Admin response contains `{ url, sent_via_email: true }`. | No email sent. Admin response contains `{ url, sent_via_email: false }` — admin shares the URL out-of-band. |
+
+**Why this matters for app authors:** Guest apps don't normally trigger user invites, but any admin tooling you ship should handle both response shapes. Check `sent_via_email` and show the `url` to the admin when false, so they can copy it to Slack/SMS/whatever.
+
+**Why this matters for operators:** Email is *optional* but recommended. A workspace can function end-to-end with no email provider — invites just become a copy-paste workflow. The home-page setup checklist marks email as "Optional" to make this clear.
+
+The shell discovers available auth methods via `GET /_ensemble/auth/methods`, which returns `{ password: true, magic_link: boolean }`. The login page reads this on load and toggles the magic-link UI accordingly. There is no separate "enable magic link" toggle — it is enabled iff a verified email provider is configured.
+
+---
+
 ---
 

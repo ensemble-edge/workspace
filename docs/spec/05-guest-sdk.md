@@ -988,3 +988,86 @@ This is why Ensemble isn't just "a shell for apps" — it's a workspace where ev
 
 ---
 
+### Workspace Credentials & AI Tiers (v0.1.12)
+
+Workspace operators configure cross-cutting integrations under **Settings → Auth & Security → Credentials**. Guest apps don't see those secrets directly — they consume the *capabilities* the workspace exposes. This section documents what's available and how to use it.
+
+#### Mental Model
+
+The workspace stores three kinds of integration credentials:
+
+- **Connection** — Cloudflare account ID + API token + the workspace's own public URL. Used for DNS, AI Gateway provisioning, and outbound email when Cloudflare is the email provider.
+- **Notifications** — A single email provider (Cloudflare *or* Resend) plus sending domain + from address. There is no failover by design; the operator picks one.
+- **AI Access** — A Cloudflare AI Gateway (named gateway + token) and a set of **tiers**.
+
+Secrets are encrypted at rest using HKDF-derived keys from the workspace's `JWT_SECRET`. The list endpoint never returns secret values — only an "is set" flag. Guest apps never receive raw API keys; they call workspace-scoped endpoints that proxy through.
+
+#### AI Tiers
+
+A **tier** is a stable, kebab-case name that maps to a dynamic AI Gateway route (`ws/<tier-name>`). Each workspace ships with three defaults:
+
+| Tier name | Default display name | Purpose |
+|-----------|----------------------|---------|
+| `smart`   | "Smart" | High-capability model — reasoning, analysis, complex synthesis. |
+| `good`    | "Good" | General-purpose default — drafts, summaries, classification. |
+| `simple`  | "Simple" | Fast and cheap — short rewrites, extraction, classification at scale. |
+
+Operators can rename tiers (display name is cosmetic) and add custom tiers. The **`name` is the API contract** that guest apps reference; the **`display_name` is the label** users see in admin UIs.
+
+When a guest app requests a tier that does not exist, the workspace falls back to the configured default tier and surfaces the substitution via the `X-Ensemble-Tier-Fallback` response header. This is intentional: a tier rename should never break a deployed guest app.
+
+#### `Ensemble.useAI({ tier })`
+
+The runtime exposes a single hook for AI access:
+
+```tsx
+function MyComponent() {
+  const { call, loading, error, fallback } = Ensemble.useAI({ tier: 'good' });
+
+  const handleSummarize = async (text: string) => {
+    const { data } = await call({
+      messages: [
+        { role: 'system', content: 'Summarize the following text in one sentence.' },
+        { role: 'user', content: text },
+      ],
+      max_tokens: 200,
+    });
+    // data is the AI Gateway response — provider-shaped (OpenAI-compatible).
+  };
+
+  return (
+    <Ensemble.Button disabled={loading} onClick={() => handleSummarize(input)}>
+      {loading ? 'Thinking…' : 'Summarize'}
+      {fallback && <Ensemble.Badge variant="outline">used {fallback}</Ensemble.Badge>}
+    </Ensemble.Button>
+  );
+}
+```
+
+**Behavior:**
+
+- The hook returns `{ call, loading, error, fallback }`. It does **not** auto-fire on mount — call it from a user action or effect.
+- `call(body)` POSTs `body` to `/_ensemble/ai/call/<tier>` on the workspace origin. The body is forwarded verbatim to the configured AI Gateway route, so the schema matches whatever model that route is configured to call (typically the OpenAI chat-completions shape).
+- `credentials: 'include'` is set automatically. Component-tier guests share the host's session; iframe-tier guests use their same-origin cookie.
+- If the workspace has no AI Gateway configured, `call` returns an `error` response and `error` is set. Always render a graceful fallback.
+- `fallback` is the name of the actual tier used when the requested tier was missing. Treat it as informational; the guest does not need to switch behavior.
+
+**The hook works in both tiers:**
+
+- **Component tier** — `window.Ensemble.useAI` is installed by the shell client. The host's React reconciler tracks state.
+- **Iframe tier** — `window.Ensemble.useAI` is installed by the bundled runtime served at `/_ensemble/runtime/v1/runtime.js`. The iframe's own React reconciler tracks state.
+
+#### What Guest Apps Should *Not* Do
+
+- **Don't store provider API keys in your guest app's KV/D1.** If your app needs AI, use `useAI`. If you genuinely need a provider key the workspace doesn't broker (e.g., a vendor without an AI Gateway route), declare it as a *required admin setting* in your manifest and let the operator enter it once.
+- **Don't bypass the gateway.** Calling `api.openai.com` directly from a guest worker means the workspace can't apply rate limits, caching, or cost tracking, and your guest stops working when the operator rotates their gateway.
+- **Don't assume a tier exists.** Always handle the `fallback` case — it means an admin renamed something between deploys.
+
+#### Provisioning Notes (for app authors who also write activation flows)
+
+Custom tiers can be created by admins via the UI. The first time the workspace saves an AI Gateway name + token, it seeds the default tiers (`smart`/`good`/`simple`) and provisions the corresponding dynamic routes via the Cloudflare API. Tier route provisioning is idempotent — re-running it on an existing route succeeds.
+
+If route provisioning fails (typically: missing AI Gateway:Edit on the token, or the gateway name doesn't exist), the tier is created in the workspace DB but marked `route_provisioned: false`. The admin UI surfaces a "Retry" affordance. Guest apps calling such a tier get an error response with the underlying CF error in the body.
+
+---
+
