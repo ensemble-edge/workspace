@@ -1,5 +1,5 @@
 /**
- * WordmarkEditor — segmented wordmark builder.
+ * WordmarkEditor — segmented wordmark builder (controlled component).
  *
  * Stored shape (JSON-stringified in brand_token `wordmark_text`):
  *   [{ text: 'Cura', color: '#137774' }, { text: 'listo', color: '#F2795D' }]
@@ -11,18 +11,18 @@
  *
  * MVP intentionally avoids contenteditable: simpler to reason about,
  * easier to debug, no cursor/selection edge cases.
+ *
+ * Controlled component — parent owns the JSON string value and the
+ * save trigger (LogosTab batches all logo + wordmark saves into one
+ * brand_tokens PUT).
  */
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
 import { Plus, Trash2, GripVertical } from 'lucide-react';
 
 import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
-  Button, Input, Label, toast,
+  Button, Input, Label,
 } from '@ensemble-edge/ui';
-
-import { authedFetch } from '../../../state';
 
 export interface WordmarkSegment {
   text: string;
@@ -31,12 +31,12 @@ export interface WordmarkSegment {
 
 const HEX_RE = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
 
-function isValidColor(c: string): boolean {
-  if (!c) return true; // empty means "use default"
+export function isValidWordmarkColor(c: string): boolean {
+  if (!c) return true;
   return HEX_RE.test(c.trim());
 }
 
-function parseSegments(raw: string): WordmarkSegment[] {
+export function parseWordmarkSegments(raw: string): WordmarkSegment[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -52,112 +52,66 @@ function parseSegments(raw: string): WordmarkSegment[] {
   }
 }
 
-export function WordmarkEditor() {
-  const [segments, setSegments] = useState<WordmarkSegment[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
+export function serializeWordmarkSegments(segments: WordmarkSegment[]): string {
+  const cleaned = segments
+    .map((s) => ({ text: s.text, color: s.color?.trim() || undefined }))
+    .filter((s) => s.text);
+  if (cleaned.length === 0) return '';
+  return JSON.stringify(cleaned);
+}
 
-  useEffect(() => {
-    authedFetch('/_ensemble/core/brand/tokens/identity')
-      .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
-      .then((res) => {
-        const raw = (res.data ?? []).find((t) => t.key === 'wordmark_text');
-        setSegments(parseSegments(raw?.value ?? ''));
-        setLoaded(true);
-      })
-      .catch(() => setLoaded(true));
-  }, []);
+/**
+ * Controlled editor. Parent passes the raw JSON `value` and gets back
+ * a new JSON string via `onChange` whenever segments change.
+ */
+export function WordmarkEditor({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const segments = parseWordmarkSegments(value);
+
+  function commit(next: WordmarkSegment[]) {
+    onChange(serializeWordmarkSegments(next));
+  }
 
   function update(i: number, patch: Partial<WordmarkSegment>) {
-    setSegments((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
+    commit(segments.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
   }
 
   function removeSegment(i: number) {
-    setSegments((prev) => prev.filter((_, idx) => idx !== i));
+    commit(segments.filter((_, idx) => idx !== i));
   }
 
   function addSegment() {
-    setSegments((prev) => [...prev, { text: '', color: undefined }]);
+    commit([...segments, { text: '', color: undefined }]);
   }
-
-  async function save() {
-    // Drop empty-text segments before save.
-    const cleaned = segments
-      .map((s) => ({ text: s.text, color: s.color?.trim() || undefined }))
-      .filter((s) => s.text);
-
-    // Validate colors.
-    for (const s of cleaned) {
-      if (s.color && !isValidColor(s.color)) {
-        toast.error(`Invalid color "${s.color}"`, {
-          description: 'Use a hex like #137774.',
-        });
-        return;
-      }
-    }
-
-    setSaving(true);
-    try {
-      const tokens: Record<string, string> = {
-        wordmark_text: JSON.stringify(cleaned),
-      };
-      const r = await authedFetch('/_ensemble/brand/tokens', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category: 'identity', tokens }),
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      toast.success('Wordmark saved');
-    } catch (e) {
-      toast.error('Failed to save wordmark', {
-        description: e instanceof Error ? e.message : String(e),
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (!loaded) return null;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Styled wordmark</CardTitle>
-        <CardDescription>
-          Split your wordmark into colored segments. For example, "Cura" in #137774 and
-          "listo" in #F2795D renders as a two-color wordmark wherever the workspace shows
-          your brand name (sidebar, login, emails, brand guide).
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {segments.length > 0 && (
-          <div className="rounded-md border bg-muted/30 p-4">
-            <p className="text-xs text-muted-foreground mb-2">Preview</p>
-            <WordmarkPreview segments={segments} />
-          </div>
-        )}
-
-        <div className="space-y-2">
-          {segments.map((seg, i) => (
-            <SegmentRow
-              key={i}
-              segment={seg}
-              onChange={(patch) => update(i, patch)}
-              onRemove={() => removeSegment(i)}
-            />
-          ))}
-          <Button type="button" variant="outline" size="sm" onClick={addSegment}>
-            <Plus className="h-3 w-3 mr-1" /> Add segment
-          </Button>
+    <div className="space-y-3">
+      {segments.length > 0 && (
+        <div className="rounded-md border bg-muted/30 p-4">
+          <p className="text-xs text-muted-foreground mb-2">Preview</p>
+          <WordmarkPreview segments={segments} />
         </div>
+      )}
 
-        <div>
-          <Button onClick={save} disabled={saving}>
-            {saving ? 'Saving…' : 'Save wordmark'}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+      <div className="space-y-2">
+        {segments.map((seg, i) => (
+          <SegmentRow
+            key={i}
+            segment={seg}
+            onChange={(patch) => update(i, patch)}
+            onRemove={() => removeSegment(i)}
+          />
+        ))}
+        <Button type="button" variant="outline" size="sm" onClick={addSegment}>
+          <Plus className="h-3 w-3 mr-1" /> Add segment
+        </Button>
+      </div>
+    </div>
   );
 }
 

@@ -32,7 +32,6 @@ import {
   toast,
 } from '@ensemble-edge/ui';
 import { authedFetch } from '../../../state';
-import { WordmarkEditor } from './WordmarkEditor';
 
 interface CustomField {
   key: string;
@@ -61,6 +60,7 @@ export function IdentityTab() {
         const custom: CustomField[] = [];
         for (const token of res.data || []) {
           if (token.key.startsWith('logo_')) continue; // handled by Logos tab
+          if (token.key === 'wordmark_text') continue; // handled by Logos tab (styled wordmark)
           switch (token.key) {
             case 'legal_name': setLegalName(token.value); break;
             case 'display_name': setDisplayName(token.value); break;
@@ -123,8 +123,6 @@ export function IdentityTab() {
 
   return (
     <div className="space-y-6">
-      <WordmarkEditor />
-
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Company Info */}
         <Card>

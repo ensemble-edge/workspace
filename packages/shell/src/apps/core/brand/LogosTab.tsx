@@ -19,7 +19,7 @@
 
 import * as React from 'react';
 import { useState, useEffect, useRef } from 'react';
-import { Image, Upload, Plus, X } from 'lucide-react';
+import { Image, Upload, Plus, X, Type, Image as ImageIcon } from 'lucide-react';
 
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -27,6 +27,7 @@ import {
 } from '@ensemble-edge/ui';
 
 import { authedFetch } from '../../../state';
+import { WordmarkEditor } from './WordmarkEditor';
 
 type Variant = 'base' | 'dark' | 'svg' | 'dark_svg';
 
@@ -97,7 +98,12 @@ export function LogosTab() {
       .then((res) => {
         const loaded: Record<string, string> = {};
         for (const t of res.data || []) {
-          if (t.key.startsWith('logo_')) loaded[t.key] = t.value;
+          // Logos tab owns: all logo_* image variants AND wordmark_text
+          // (the structured styled-wordmark JSON). The wordmark slot
+          // toggles between the two; both are core brand identity.
+          if (t.key.startsWith('logo_') || t.key === 'wordmark_text') {
+            loaded[t.key] = t.value;
+          }
         }
         setTokens(loaded);
       })
@@ -133,18 +139,197 @@ export function LogosTab() {
     <div className="space-y-6">
       <div className="grid gap-6 lg:grid-cols-2">
         {SLOTS.map((slot) => (
-          <SlotCard
-            key={slot.key}
-            slot={slot}
-            tokens={tokens}
-            onChange={setToken}
-          />
+          slot.key === 'wordmark' ? (
+            <WordmarkCard
+              key={slot.key}
+              slot={slot}
+              tokens={tokens}
+              onChange={setToken}
+            />
+          ) : (
+            <SlotCard
+              key={slot.key}
+              slot={slot}
+              tokens={tokens}
+              onChange={setToken}
+            />
+          )
         ))}
       </div>
 
       <Button onClick={handleSave} disabled={saving}>
         {saving ? 'Saving…' : 'Save Logos'}
       </Button>
+    </div>
+  );
+}
+
+/**
+ * Wordmark slot has two interchangeable modes:
+ *   - Styled text: structured `wordmark_text` token (segments + colors)
+ *   - Image: same variant slots as other logos (light/dark/SVG)
+ *
+ * Operators usually pick one; the renderer (server-side, in core)
+ * prefers styled text when set, falls back to image, falls back to
+ * plain workspace name. Both can coexist if the operator wants
+ * separate text and image representations for different contexts.
+ */
+function WordmarkCard({
+  slot,
+  tokens,
+  onChange,
+}: {
+  slot: SlotDef;
+  tokens: Record<string, string>;
+  onChange: (key: string, value: string) => void;
+}) {
+  const textValue = tokens['wordmark_text'] || '';
+  const imageValue = tokens[tokenKey(slot.key, 'base')] || '';
+
+  // Initial mode: prefer whichever one already has content. If both empty,
+  // default to "text" (the lighter-weight option).
+  const [mode, setMode] = useState<'text' | 'image'>(() => {
+    if (textValue) return 'text';
+    if (imageValue) return 'image';
+    return 'text';
+  });
+
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="text-base">{slot.label}</CardTitle>
+            <CardDescription>
+              {slot.description}. Pick styled text (renders live wherever the workspace name
+              appears) or an image (used where text rendering is brittle — emails, OG cards).
+              Both can coexist; styled text wins where both apply.
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-1 rounded-md border p-1 shrink-0">
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === 'text' ? 'default' : 'ghost'}
+              className="h-7 px-2"
+              onClick={() => setMode('text')}
+            >
+              <Type className="h-3 w-3 mr-1" /> Styled text
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === 'image' ? 'default' : 'ghost'}
+              className="h-7 px-2"
+              onClick={() => setMode('image')}
+            >
+              <ImageIcon className="h-3 w-3 mr-1" /> Image
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {mode === 'text' ? (
+          <WordmarkEditor
+            value={textValue}
+            onChange={(next) => onChange('wordmark_text', next)}
+          />
+        ) : (
+          <ImageVariantBlock slot={slot} tokens={tokens} onChange={onChange} />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Image-mode block for the Wordmark slot — same variant-slot UI as
+ * other logos, factored out so WordmarkCard can render it conditionally.
+ */
+function ImageVariantBlock({
+  slot,
+  tokens,
+  onChange,
+}: {
+  slot: SlotDef;
+  tokens: Record<string, string>;
+  onChange: (key: string, value: string) => void;
+}) {
+  const optionalVariants: Variant[] = slot.variants.filter((v) => v !== 'base');
+  const [expanded, setExpanded] = useState<Set<Variant>>(() => {
+    const s = new Set<Variant>();
+    for (const v of optionalVariants) {
+      if (tokens[tokenKey(slot.key, v)]) s.add(v);
+    }
+    return s;
+  });
+  useEffect(() => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const v of optionalVariants) {
+        if (tokens[tokenKey(slot.key, v)] && !next.has(v)) {
+          next.add(v);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokens]);
+
+  function expandVariant(v: Variant) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.add(v);
+      return next;
+    });
+  }
+  function collapseVariant(v: Variant) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.delete(v);
+      return next;
+    });
+    onChange(tokenKey(slot.key, v), '');
+  }
+
+  const baseValue = tokens[tokenKey(slot.key, 'base')] || '';
+  const remainingVariants = optionalVariants.filter((v) => !expanded.has(v));
+
+  return (
+    <div className="space-y-4">
+      <VariantSlot
+        slotKey={slot.key}
+        variant="base"
+        value={baseValue}
+        onChange={(v) => onChange(tokenKey(slot.key, 'base'), v)}
+      />
+      {[...expanded].map((variant) => (
+        <VariantSlot
+          key={variant}
+          slotKey={slot.key}
+          variant={variant}
+          value={tokens[tokenKey(slot.key, variant)] || ''}
+          onChange={(v) => onChange(tokenKey(slot.key, variant), v)}
+          onRemove={() => collapseVariant(variant)}
+        />
+      ))}
+      {remainingVariants.length > 0 && (
+        <div className="flex flex-wrap gap-2 pt-1">
+          {remainingVariants.map((v) => (
+            <Button
+              key={v}
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => expandVariant(v)}
+            >
+              <Plus className="h-3 w-3 mr-1" /> Add {VARIANT_LABEL[v]}
+            </Button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

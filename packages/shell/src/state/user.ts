@@ -71,39 +71,89 @@ export const userInitials = computed(() => {
 
 /**
  * Authenticated fetch wrapper — use this for ALL shell-internal calls
- * to `/_ensemble/*`. Centralizes 401 handling so an expired session is
- * detected the moment any page fires its API call, instead of pages
- * rendering against a stale `isAuthenticated` signal until refresh.
+ * to `/_ensemble/*`.
  *
- * On 401: flips the user signal to null and redirects to /login,
- * preserving the current path as `?from=` so the user lands back where
- * they were after re-signing in.
+ * Session model recap: access tokens live 15 min, refresh tokens live
+ * up to the workspace's configured session lifetime (default 30d). When
+ * a request returns 401 it almost always means the *access* token just
+ * expired — the refresh token is still valid. This wrapper attempts a
+ * refresh + retry once before giving up and redirecting to /login.
  *
- * Why this shape: doing a `fetchUser()` ping on every navigate would
- * add a round-trip per click. Most pages fetch their own data on mount;
- * letting *those* fetches be the trigger means zero overhead in the
- * happy path and instant detection when the cookie has actually expired.
+ * Without this two-step, the operator gets kicked to /login every 15
+ * minutes regardless of the configured session lifetime — because the
+ * refresh path is never exercised.
+ *
+ * Concurrency: multiple in-flight requests can race a 401 simultaneously.
+ * We dedupe refresh attempts via a single shared promise so only one
+ * actual /refresh call goes out per 401 storm.
  */
+
+let inFlightRefresh: Promise<boolean> | null = null;
+
+async function attemptRefresh(): Promise<boolean> {
+  if (inFlightRefresh) return inFlightRefresh;
+  inFlightRefresh = (async () => {
+    try {
+      const r = await fetch('/_ensemble/auth/refresh', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      return r.ok;
+    } catch {
+      return false;
+    } finally {
+      // Clear the singleton at the next microtask so other in-flight
+      // requests that hit 401 in the same tick share this attempt, but
+      // a *later* 401 (e.g. minutes later) gets a fresh attempt.
+      queueMicrotask(() => {
+        inFlightRefresh = null;
+      });
+    }
+  })();
+  return inFlightRefresh;
+}
+
 export async function authedFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
-  const response = await fetch(input, { credentials: 'include', ...init });
-  if (response.status === 401) {
-    // Only act on auth-flavored 401s — if a specific endpoint returns
-    // 401 for a non-session reason, the caller still gets the response
-    // and can render its own error. But we always flip the signal so
-    // the rest of the shell knows we're logged out.
+  const doFetch = () => fetch(input, { credentials: 'include', ...init });
+  let response = await doFetch();
+
+  if (response.status !== 401) return response;
+
+  // Don't try to refresh if we got 401 *from* the auth endpoints — that
+  // would loop. Specifically /refresh and /me speak for themselves.
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (url.includes('/_ensemble/auth/refresh') || url.includes('/_ensemble/auth/me')) {
     user.value = null;
     membership.value = null;
-    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-      const from = encodeURIComponent(
-        window.location.pathname + window.location.search + window.location.hash,
-      );
-      window.location.href = `/login?from=${from}`;
-    }
+    redirectToLogin();
+    return response;
   }
+
+  const refreshed = await attemptRefresh();
+  if (refreshed) {
+    // Retry the original request once. If it 401s again, we're really
+    // out (e.g. role changed, user deleted) — fall through to redirect.
+    response = await doFetch();
+    if (response.status !== 401) return response;
+  }
+
+  // Refresh failed (or retry still 401). Real session loss.
+  user.value = null;
+  membership.value = null;
+  redirectToLogin();
   return response;
+}
+
+function redirectToLogin() {
+  if (typeof window === 'undefined') return;
+  if (window.location.pathname === '/login') return;
+  const from = encodeURIComponent(
+    window.location.pathname + window.location.search + window.location.hash,
+  );
+  window.location.href = `/login?from=${from}`;
 }
 
 /**

@@ -27,6 +27,7 @@ import {
 } from '../services/ai-tiers';
 import {
   listLocales, addLocale, patchLocale, setDefaultLocale, removeLocale,
+  countLocalizedBrandTokens,
 } from '../services/locales';
 import {
   getSetting, setSetting, parseSessionTtl, SESSION_TTL_OPTIONS,
@@ -98,20 +99,32 @@ export function createCredentialsRoutes(): App {
       httpMetadata: { contentType: file.type },
     });
 
+    // Canonical URL is always returned for storage. When the operator
+    // has enabled the public alias (`/assets/<key>`), we also include
+    // it as `display_url` so the UI's "Copy URL" can show the pretty
+    // form. Stored brand_token values stay canonical — changing the
+    // alias toggle never breaks stored data.
+    const canonical = `/_ensemble/brand/asset/${encodeURIComponent(key)}`;
+    const aliasEnabled = (await getSetting(c.env, workspace.id, 'asset_public_alias_enabled')) === 'true';
+    const display = aliasEnabled ? `/assets/${encodeURIComponent(key)}` : canonical;
+
     return c.json({
       ok: true,
       key,
-      // The workspace serves R2 assets through its own origin so brand
-      // URLs survive R2 access control changes (operator can swap to a
-      // private bucket without re-uploading everything).
-      url: `/_ensemble/brand/asset/${encodeURIComponent(key)}`,
+      // Canonical (workspace-served, permanent) URL — always present.
+      url: canonical,
+      // Pretty URL when alias is enabled; same as `url` otherwise.
+      display_url: display,
     });
   });
 
-  app.get('/_ensemble/brand/asset/:key{.+}', async (c) => {
+  /**
+   * Shared R2 brand-asset reader. Used by both the canonical path and
+   * the optional /assets/<key> alias. Scoped to keys under `brand/` so
+   * the alias cannot exfiltrate other R2 prefixes.
+   */
+  async function serveBrandAsset(c: AppContext, key: string): Promise<Response> {
     if (!c.env.R2) return c.json({ error: 'R2 not configured' }, 404);
-    const key = decodeURIComponent(c.req.param('key'));
-    // Defense-in-depth: only serve from the brand/ prefix.
     if (!key.startsWith('brand/')) return c.json({ error: 'Not found' }, 404);
     const obj = await c.env.R2.get(key);
     if (!obj) return c.json({ error: 'Not found' }, 404);
@@ -120,6 +133,25 @@ export function createCredentialsRoutes(): App {
     headers.set('etag', obj.httpEtag);
     headers.set('Cache-Control', 'public, max-age=3600');
     return new Response(obj.body, { headers });
+  }
+
+  app.get('/_ensemble/brand/asset/:key{.+}', async (c) => {
+    return serveBrandAsset(c, decodeURIComponent(c.req.param('key')));
+  });
+
+  /**
+   * Optional pretty alias for R2-backed brand assets. Serves only when
+   * `asset_public_alias_enabled === 'true'` for the resolved workspace.
+   * The handler always matches the URL shape; the setting gate decides
+   * whether to serve or 404 (so disabling the alias makes the path
+   * disappear cleanly for new requests).
+   */
+  app.get('/assets/:key{.+}', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'Not found' }, 404);
+    const enabled = (await getSetting(c.env, workspace.id, 'asset_public_alias_enabled')) === 'true';
+    if (!enabled) return c.json({ error: 'Not found' }, 404);
+    return serveBrandAsset(c, decodeURIComponent(c.req.param('key')));
   });
 
   // ─── Credentials CRUD ─────────────────────────────────────────────
@@ -308,6 +340,48 @@ export function createCredentialsRoutes(): App {
    * (single-token model — v0.1.14). Returns ok if the gateway exists and
    * the token can read it; otherwise a specific failure reason.
    */
+  /**
+   * Send a branded test email to the current admin's address. Uses the
+   * magic-link template (the most visually representative). Returns
+   * whether the send actually went out; UI surfaces this via toast so
+   * operators can preview the template before relying on it.
+   */
+  app.post('/_ensemble/credentials/test/email/send', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    const user = c.get('user');
+    if (!workspace?.id) return c.json({ ok: false, message: 'workspace not resolved' }, 400);
+    if (!user?.email) return c.json({ ok: false, message: 'no email on file for current admin' }, 400);
+
+    const verified = await getCredential(c.env, workspace.id, 'email_provider_verified');
+    if (verified !== 'verified') {
+      return c.json({ ok: false, message: 'Email provider not verified. Run "Verify domain" first.' });
+    }
+
+    const base = await getWorkspacePublicUrl(c.env, workspace.id, c.req.raw);
+    // The URL doesn't have to resolve to anything meaningful — this is a
+    // preview send. We point it at /login as a safe default so a click
+    // doesn't surprise the operator.
+    const rendered = await renderMagicLinkEmail(c.env, workspace.id, {
+      url: `${base.replace(/\/$/, '')}/login`,
+      expires_in_minutes: 15,
+    });
+    const result = await sendEmail(c.env, workspace.id, {
+      to: user.email,
+      subject: `[Test] ${rendered.subject}`,
+      text: rendered.text,
+      html: rendered.html,
+    });
+
+    if (result.ok) return c.json({ ok: true, sent_to: user.email });
+    return c.json({
+      ok: false,
+      message: `Send failed: ${result.reason ?? 'unknown'}`,
+      detail: result.error_detail,
+    });
+  });
+
   app.post('/_ensemble/credentials/test/ai', async (c) => {
     const check = requireAdmin(c);
     if (check instanceof Response) return check;
@@ -446,6 +520,36 @@ export function createCredentialsRoutes(): App {
       request_sent: body,
       response: responseBody,
     });
+  });
+
+  /**
+   * R2 binding probe — surfaces "do you have R2 bound, and can the
+   * Worker write to it?" for the Connections tab's asset-storage row.
+   * Reuses the same writability check the setup status endpoint uses.
+   */
+  app.get('/_ensemble/r2/status', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ bound: false, writable: false, detail: 'No workspace' });
+
+    if (!c.env.R2) {
+      return c.json({
+        bound: false,
+        writable: false,
+        detail: 'No R2 bucket bound. Add the binding in wrangler.toml.',
+      });
+    }
+    try {
+      const probeKey = `_ensemble/setup-probe/${workspace.id}`;
+      await c.env.R2.put(probeKey, 'ok');
+      await c.env.R2.delete(probeKey);
+      return c.json({ bound: true, writable: true, detail: 'Bucket is writable.' });
+    } catch (err) {
+      return c.json({
+        bound: true,
+        writable: false,
+        detail: `Bucket bound but write failed: ${String(err).slice(0, 200)}`,
+      });
+    }
   });
 
   /**
@@ -729,7 +833,11 @@ export function createCredentialsRoutes(): App {
   // GET is open to any authenticated member (some settings, like
   // session_ttl, affect everyone). Writes require admin.
 
-  const SETTING_KEYS: SettingKey[] = ['session_ttl_seconds'];
+  const SETTING_KEYS: SettingKey[] = [
+    'session_ttl_seconds',
+    'asset_public_alias_enabled',
+    'public_brand_guide_enabled',
+  ];
   function isSettingKey(k: string): k is SettingKey {
     return (SETTING_KEYS as string[]).includes(k);
   }
@@ -759,14 +867,16 @@ export function createCredentialsRoutes(): App {
     if (typeof body.value !== 'string') {
       return c.json({ error: 'value must be a string' }, 400);
     }
-    // Per-key validation. Today we only have session_ttl_seconds.
+    // Per-key validation.
     if (key === 'session_ttl_seconds') {
       const n = Number(body.value);
       if (!Number.isFinite(n)) return c.json({ error: 'session_ttl_seconds must be a number' }, 400);
-      // parseSessionTtl clamps further; the explicit check here gives
-      // a clear error rather than silent clamping when the admin
-      // typed a totally invalid value.
       if (n < 60) return c.json({ error: 'session_ttl_seconds must be >= 60' }, 400);
+    }
+    if (key === 'asset_public_alias_enabled' || key === 'public_brand_guide_enabled') {
+      if (body.value !== 'true' && body.value !== 'false') {
+        return c.json({ error: `${key} must be "true" or "false"` }, 400);
+      }
     }
     const user = c.get('user');
     await setSetting(c.env, workspace.id, key, body.value, user?.id);
@@ -824,6 +934,19 @@ export function createCredentialsRoutes(): App {
     } catch (err) {
       return c.json({ error: String(err) }, 400);
     }
+  });
+
+  /**
+   * Count how many localized brand_tokens rows exist for this locale.
+   * The Languages tab uses this to drive a "you're about to delete N
+   * translations" confirm before allowing removal.
+   */
+  app.get('/_ensemble/locales/:code/usage', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const code = c.req.param('code');
+    const count = await countLocalizedBrandTokens(c.env, workspace.id, code);
+    return c.json({ code, brand_token_count: count });
   });
 
   app.delete('/_ensemble/locales/:code', async (c) => {

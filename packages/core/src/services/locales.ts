@@ -205,11 +205,37 @@ export async function removeLocale(
       `Cannot remove the default locale "${code}". Promote another locale first.`,
     );
   }
-  await env.DB.prepare(
-    `DELETE FROM workspace_locales WHERE workspace_id = ? AND code = ?`,
+  // Hard-delete any brand_tokens rows tagged with this locale before
+  // removing the locale itself. The strong-warning confirm in the UI
+  // tells the operator this is going to happen and how many rows are
+  // affected (via countLocalizedBrandTokens below).
+  await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM brand_tokens WHERE workspace_id = ? AND locale = ?`,
+    ).bind(workspaceId, code),
+    env.DB.prepare(
+      `DELETE FROM workspace_locales WHERE workspace_id = ? AND code = ?`,
+    ).bind(workspaceId, code),
+  ]);
+}
+
+/**
+ * Count how many brand_tokens rows are tagged with this locale, so the
+ * UI can show the operator exactly what they're about to delete in the
+ * remove-locale confirm dialog. Returns 0 when the locale has no
+ * localized content.
+ */
+export async function countLocalizedBrandTokens(
+  env: Env,
+  workspaceId: string,
+  code: string,
+): Promise<number> {
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM brand_tokens WHERE workspace_id = ? AND locale = ?`,
   )
     .bind(workspaceId, code)
-    .run();
+    .first<{ n: number }>();
+  return Number(row?.n ?? 0);
 }
 
 function rowToLocale(row: DbLocaleRow): WorkspaceLocale {

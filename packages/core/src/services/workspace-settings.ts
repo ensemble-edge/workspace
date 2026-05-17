@@ -14,12 +14,25 @@ interface Env {
   DB: D1Database;
 }
 
-export type SettingKey = 'session_ttl_seconds';
+export type SettingKey =
+  | 'session_ttl_seconds'
+  // v0.1.15.1: when 'true', R2-backed brand assets also serve from
+  // /assets/<key> in addition to the canonical /_ensemble/brand/asset/<key>.
+  // Presentation-only; stored brand_token values stay canonical so
+  // changing this setting cannot break stored data.
+  | 'asset_public_alias_enabled'
+  // v0.1.15.1: when 'true', the public brand guide page at /brand is
+  // reachable without auth. When 'false' or unset, /brand 404s.
+  | 'public_brand_guide_enabled';
 
 export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
   // 30 days — matches typical workspace expectations. Operators can
   // dial this down to as little as 1 hour for sensitive deployments.
   session_ttl_seconds: String(30 * 24 * 60 * 60),
+  // Pretty asset path off by default — operators opt in.
+  asset_public_alias_enabled: 'false',
+  // Brand guide off by default — operators opt in.
+  public_brand_guide_enabled: 'false',
 };
 
 /** Allowed session TTL values (in seconds) — the UI shows these as options. */

@@ -81,10 +81,32 @@ export function LanguagesTab() {
     }
   }
 
-  async function removeLocale(code: string) {
-    if (!confirm(`Remove "${code}" from this workspace? Content tagged with this locale will no longer be served until you add it back.`)) {
-      return;
+  async function removeLocale(code: string, displayName: string) {
+    // Ask the server how many localized brand_tokens rows exist so the
+    // confirm dialog can report exactly what's about to disappear.
+    let count = 0;
+    try {
+      const r = await authedFetch(`/_ensemble/locales/${encodeURIComponent(code)}/usage`);
+      if (r.ok) {
+        const body = (await r.json()) as { brand_token_count: number };
+        count = body.brand_token_count;
+      }
+    } catch {
+      // Fall through with count=0; worst case the operator sees "0 translations".
     }
+
+    const lines = [
+      `Remove "${displayName}" (${code})?`,
+      '',
+      count > 0
+        ? `${count} translation${count === 1 ? '' : 's'} will be permanently deleted.`
+        : 'No translations exist for this language yet.',
+      '',
+      'This cannot be undone.',
+    ].join('\n');
+
+    if (!confirm(lines)) return;
+
     try {
       const r = await authedFetch(`/_ensemble/locales/${encodeURIComponent(code)}`, {
         method: 'DELETE',
@@ -93,7 +115,7 @@ export function LanguagesTab() {
         const body = (await r.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${r.status}`);
       }
-      toast.success(`Removed ${code}`);
+      toast.success(`Removed ${displayName}`);
       await refresh();
     } catch (e) {
       toast.error('Failed to remove', {
@@ -124,7 +146,7 @@ export function LanguagesTab() {
                 key={l.code}
                 locale={l}
                 onMakeDefault={() => makeDefault(l.code)}
-                onRemove={() => removeLocale(l.code)}
+                onRemove={() => removeLocale(l.code, l.display_name)}
               />
             ))}
           </div>

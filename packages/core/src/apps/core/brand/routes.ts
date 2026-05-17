@@ -103,17 +103,35 @@ export function registerBrandRoutes(
   });
 
   // GET /_ensemble/core/brand/tokens/:category — List tokens by category
+  //
+  // Optional `?locale=es` returns rows for the specified locale; default
+  // (omitted) returns the default-locale slot (locale = '').
+  // `?all_locales=1` returns rows for every locale present (default
+  // included), shaped for per-locale UIs like MessagingTab.
   app.get('/_ensemble/core/brand/tokens/:category', async (c) => {
     const workspace = c.get('workspace');
     const category = c.req.param('category');
+    const locale = c.req.query('locale') ?? '';
+    const allLocales = c.req.query('all_locales') === '1';
     if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
 
     try {
+      if (allLocales) {
+        // Return one row per (key, locale). Caller groups by key.
+        const result = await c.env.DB.prepare(
+          `SELECT key, value, type, label, description, group_slug, sort_order, locale, updated_at
+             FROM brand_tokens
+            WHERE workspace_id = ? AND category = ?
+            ORDER BY sort_order, key, locale`
+        ).bind(workspace.id, category).all();
+        return c.json({ data: result.results || [] });
+      }
+
       const result = await c.env.DB.prepare(
-        `SELECT key, value, type, label, description, group_slug, sort_order, updated_at
-         FROM brand_tokens WHERE workspace_id = ? AND category = ? AND locale = ''
+        `SELECT key, value, type, label, description, group_slug, sort_order, locale, updated_at
+         FROM brand_tokens WHERE workspace_id = ? AND category = ? AND locale = ?
          ORDER BY sort_order, key`
-      ).bind(workspace.id, category).all();
+      ).bind(workspace.id, category, locale).all();
 
       return c.json({ data: result.results || [] });
     } catch (error) {

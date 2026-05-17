@@ -19,6 +19,7 @@ import * as React from 'react';
 import { useEffect, useState, useCallback } from 'react';
 import {
   Link2, Mail, Sparkles, Plus, RefreshCw, CheckCircle2, XCircle, Info, Circle,
+  UploadCloud, Send,
 } from 'lucide-react';
 
 import {
@@ -101,10 +102,99 @@ export function ConnectionsTab() {
     <TooltipProvider>
       <div className="space-y-6 max-w-3xl">
         <ConnectionCard creds={creds} onSaved={refresh} />
+        <AssetStorageCard />
         <NotificationsCard creds={creds} onSaved={refresh} />
         <AiAccessCard creds={creds} onSaved={refresh} />
       </div>
     </TooltipProvider>
+  );
+}
+
+// ─── Asset storage (R2) ───────────────────────────────────────────────
+
+function AssetStorageCard() {
+  const [status, setStatus] = useState<{
+    bound: boolean;
+    writable: boolean;
+    detail: string;
+  } | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setChecking(true);
+    try {
+      const r = await authedFetch('/_ensemble/r2/status');
+      if (r.ok) setStatus((await r.json()) as typeof status);
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const overall: 'done' | 'pending' =
+    status?.bound && status.writable ? 'done' : 'pending';
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <UploadCloud className="h-5 w-5" /> Asset storage (R2)
+            </CardTitle>
+            <CardDescription>
+              R2 bucket for brand logos and other uploaded assets. Configured at deploy
+              time in <span className="font-mono">wrangler.toml</span>, not here.
+            </CardDescription>
+          </div>
+          <StatusBadge status={overall} optional />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {status && (
+          <div className="space-y-1.5 text-sm">
+            <div className="flex items-center gap-2">
+              {status.bound ? (
+                <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+              ) : (
+                <XCircle className="h-4 w-4 text-destructive shrink-0" />
+              )}
+              <span>Binding present</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {status.writable ? (
+                <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+              ) : (
+                <XCircle className="h-4 w-4 text-destructive shrink-0" />
+              )}
+              <span>Writable</span>
+            </div>
+            <p className="text-xs text-muted-foreground">{status.detail}</p>
+          </div>
+        )}
+
+        {!status?.bound && (
+          <div className="rounded-md border bg-muted/40 p-3 space-y-2">
+            <p className="text-xs font-medium">Add this to your <span className="font-mono">wrangler.toml</span>:</p>
+            <pre className="text-xs font-mono bg-background border rounded p-2 overflow-x-auto">{`[[r2_buckets]]
+binding = "R2"
+bucket_name = "my-workspace-assets"`}</pre>
+            <p className="text-xs text-muted-foreground">
+              Create the bucket first with{' '}
+              <span className="font-mono">wrangler r2 bucket create my-workspace-assets</span>.
+              Then redeploy the Worker.
+            </p>
+          </div>
+        )}
+      </CardContent>
+      <CardFooter>
+        <Button variant="outline" size="sm" onClick={refresh} disabled={checking}>
+          <RefreshCw className={`h-3 w-3 mr-1 ${checking ? 'animate-spin' : ''}`} />
+          {checking ? 'Checking…' : 'Re-test'}
+        </Button>
+      </CardFooter>
+    </Card>
   );
 }
 
@@ -410,6 +500,28 @@ function NotificationsCard({
     }
   }
 
+  const [sendingTest, setSendingTest] = useState(false);
+  async function sendTestEmail() {
+    setSendingTest(true);
+    try {
+      const r = await authedFetch('/_ensemble/credentials/test/email/send', {
+        method: 'POST',
+      });
+      const body = (await r.json()) as { ok: boolean; sent_to?: string; message?: string };
+      if (r.ok && body.ok) {
+        toast.success(`Test email sent to ${body.sent_to}`, {
+          description: 'Check your inbox to preview the branded template.',
+        });
+      } else {
+        toast.error('Test send failed', { description: body.message ?? `HTTP ${r.status}` });
+      }
+    } catch (e) {
+      toast.error('Test send failed', { description: errMsg(e) });
+    } finally {
+      setSendingTest(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -520,6 +632,19 @@ function NotificationsCard({
           <>
             <Button variant="outline" onClick={runVerify} disabled={verifying || !provider}>
               {verifying ? 'Verifying…' : 'Verify domain'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={sendTestEmail}
+              disabled={sendingTest || verifyStatus !== 'verified'}
+              title={
+                verifyStatus !== 'verified'
+                  ? 'Verify the domain first'
+                  : 'Send a branded test email to your address'
+              }
+            >
+              <Send className={`h-3 w-3 mr-1 ${sendingTest ? 'animate-spin' : ''}`} />
+              {sendingTest ? 'Sending…' : 'Send test email'}
             </Button>
             <Button onClick={() => setEditing(true)}>Edit</Button>
           </>

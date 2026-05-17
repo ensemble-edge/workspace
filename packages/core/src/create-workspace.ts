@@ -257,11 +257,20 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
       const body = await c.req.json<{
         category: string;
         tokens: Record<string, string>;
+        /**
+         * v0.1.15.1 — optional locale tag for per-locale messaging
+         * tokens. Defaults to '' (the workspace default-locale slot
+         * that all non-localized callers continue to use). Empty
+         * values delete the row, so saving '' clears a translation.
+         */
+        locale?: string;
       }>();
 
       if (!body.category || !body.tokens) {
         return c.json({ error: 'Category and tokens are required' }, 400);
       }
+
+      const locale = (body.locale ?? '').trim();
 
       // Infer token type from category
       const typeMap: Record<string, string> = {
@@ -270,14 +279,22 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
       };
       const tokenType = typeMap[body.category] || 'text';
 
-      // Upsert each token (locale defaults to '' for non-localized tokens)
       for (const [key, value] of Object.entries(body.tokens)) {
+        if (value === '') {
+          // Empty string deletes the row — operators clear a
+          // translation by passing ''. Doesn't touch other locales.
+          await c.env.DB.prepare(
+            `DELETE FROM brand_tokens
+              WHERE workspace_id = ? AND category = ? AND key = ? AND locale = ?`,
+          ).bind(workspace.id, body.category, key, locale).run();
+          continue;
+        }
         await c.env.DB.prepare(
           `INSERT INTO brand_tokens (workspace_id, category, key, value, type, locale, updated_at)
-           VALUES (?, ?, ?, ?, ?, '', datetime('now'))
+           VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
            ON CONFLICT (workspace_id, category, key, locale)
            DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
-        ).bind(workspace.id, body.category, key, value, tokenType).run();
+        ).bind(workspace.id, body.category, key, value, tokenType, locale).run();
       }
 
       return c.json({ success: true });
@@ -418,6 +435,52 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
       // The capabilities array is the discoverable feature list. Consumers
       // can check for "isolation" before assuming sandboxed-mode support.
       capabilities: ['runtime-v1', 'guest-isolation', 'sandbox-postmessage'],
+    });
+  });
+
+  // ============================================================================
+  // Public brand guide at /brand (v0.1.15.1)
+  //
+  // Toggled by the `public_brand_guide_enabled` setting in Settings →
+  // Danger Zone. When off, falls through to the SPA catchall (which
+  // shows the authenticated brand admin page if logged in, redirects
+  // to /login otherwise). When on, serves a noindex HTML page sourced
+  // from brand_tokens — designed to share with partners and designers.
+  // ============================================================================
+
+  app.get('/brand', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.notFound();
+
+    // Authenticated users get the SPA's admin Brand page (the existing
+    // experience). The public guide is for *external* visitors only.
+    const { getAuthCookies } = await import('./utils/cookies');
+    const { accessToken } = getAuthCookies(c.req.header('Cookie'));
+    if (accessToken) {
+      const themeMode = await getSavedThemeMode(c.env.DB, workspace.id);
+      return c.html(generateShellHtml(
+        workspace.name ?? resolvedConfig.workspace.name,
+        resolvedConfig.brand.accent,
+        themeMode,
+      ));
+    }
+
+    // Unauthenticated: gate on the public-guide toggle. If off, 404 —
+    // explicitly *not* a redirect to /login, because we don't want to
+    // leak that the URL has a meaning.
+    const { getSetting } = await import('./services/workspace-settings');
+    const enabled = (await getSetting(c.env, workspace.id, 'public_brand_guide_enabled')) === 'true';
+    if (!enabled) return c.notFound();
+
+    const { renderBrandGuide } = await import('./services/brand-guide');
+    const html = await renderBrandGuide(c.env, workspace.id);
+    return new Response(html, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        // Defense-in-depth alongside the <meta name="robots"> tag.
+        'X-Robots-Tag': 'noindex, nofollow',
+        'Cache-Control': 'public, max-age=300',
+      },
     });
   });
 
