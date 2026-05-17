@@ -298,10 +298,18 @@ export function registerBrandRoutes(
 
   app.get('/_ensemble/core/fonts/google', async (c) => {
     try {
-      const fonts = await getCachedGoogleFonts(c.env);
-      return c.json({ fonts }, 200, {
-        // Help the browser cache on the second-tab case as well.
-        'Cache-Control': 'public, max-age=3600',
+      // `?refresh=1` bypasses KV cache. Used by the shell's hybrid
+      // typeahead upgrade so a poisoned-empty cache entry can't trap
+      // the operator on the bundled fallback for the full TTL window.
+      const refresh = c.req.query('refresh') === '1';
+      const fonts = await getCachedGoogleFonts(c.env, { refresh });
+      return c.json({ fonts, count: fonts.length }, 200, {
+        // Help the browser cache on the second-tab case as well — but
+        // only when we actually got a real catalog. An empty response
+        // gets a short cache so a transient failure isn't sticky.
+        'Cache-Control': fonts.length > 0
+          ? 'public, max-age=3600'
+          : 'public, max-age=30',
       });
     } catch (err) {
       console.error('[fonts] catalog fetch failed:', err);
@@ -322,22 +330,39 @@ interface GoogleFontEntry {
 /**
  * 24h-cached Google Fonts catalog. Cached in workspace KV under
  * `fonts:google:v1` so concurrent shell loads share one fetch.
- * Falls back to the previous cache value if a refresh fails.
+ *
+ * Treats a cached **empty** result as a cache miss — otherwise a single
+ * transient upstream failure would poison the cache for the full TTL
+ * and trap operators on the bundled fallback. Also accepts an explicit
+ * `refresh` flag for cache-bust via `?refresh=1`.
+ *
+ * Never writes an empty result back to KV — the cache only grows when
+ * we have a real catalog to share with future requests.
  */
-async function getCachedGoogleFonts(env: { KV: KVNamespace }): Promise<GoogleFontEntry[]> {
+async function getCachedGoogleFonts(
+  env: { KV: KVNamespace },
+  opts: { refresh?: boolean } = {},
+): Promise<GoogleFontEntry[]> {
   const KEY = 'fonts:google:v1';
   const TTL = 24 * 60 * 60; // 24h
 
-  const cached = await env.KV.get(KEY);
-  if (cached) {
-    try {
-      const { fetched_at, fonts } = JSON.parse(cached) as {
-        fetched_at: number;
-        fonts: GoogleFontEntry[];
-      };
-      if (Date.now() - fetched_at < TTL * 1000) return fonts;
-    } catch {
-      // fall through to refresh
+  if (!opts.refresh) {
+    const cached = await env.KV.get(KEY);
+    if (cached) {
+      try {
+        const { fetched_at, fonts } = JSON.parse(cached) as {
+          fetched_at: number;
+          fonts: GoogleFontEntry[];
+        };
+        // Treat empty-array cache as a miss — usually means the previous
+        // refresh got a 403/429/timeout from the upstream and we don't
+        // want to be stuck on that for 24h.
+        if (Array.isArray(fonts) && fonts.length > 0 && Date.now() - fetched_at < TTL * 1000) {
+          return fonts;
+        }
+      } catch {
+        // fall through to refresh
+      }
     }
   }
 
@@ -346,12 +371,14 @@ async function getCachedGoogleFonts(env: { KV: KVNamespace }): Promise<GoogleFon
   // with each entry shaped like { family, category, fonts: { '400': {...} }, ... }.
   const fresh = await fetchGoogleFontsMetadata();
 
-  // Persist (best-effort).
-  try {
-    await env.KV.put(KEY, JSON.stringify({ fetched_at: Date.now(), fonts: fresh }), {
-      expirationTtl: TTL * 7, // keep the cache for a week as fallback
-    });
-  } catch { /* ignore */ }
+  // Persist only when we got a real catalog — never cache an empty result.
+  if (fresh.length > 0) {
+    try {
+      await env.KV.put(KEY, JSON.stringify({ fetched_at: Date.now(), fonts: fresh }), {
+        expirationTtl: TTL * 7, // keep the cache for a week as fallback
+      });
+    } catch { /* ignore */ }
+  }
 
   return fresh;
 }

@@ -24,6 +24,8 @@ import {
   Button, Input, Label,
 } from '@ensemble-edge/ui';
 
+import { resolveFamilyStack } from './font-utils';
+
 export interface WordmarkSegment {
   text: string;
   color?: string;
@@ -64,12 +66,21 @@ export function serializeWordmarkSegments(segments: WordmarkSegment[]): string {
  * Controlled editor. Parent passes the raw JSON `value` and gets back
  * a new JSON string via `onChange` whenever segments change.
  */
+export interface WordmarkTypography {
+  family?: string;
+  weight?: string;
+  style?: 'normal' | 'italic';
+}
+
 export function WordmarkEditor({
   value,
   onChange,
+  typography,
 }: {
   value: string;
   onChange: (next: string) => void;
+  /** Live typography tokens — preview re-renders as these change. */
+  typography?: WordmarkTypography;
 }) {
   const segments = parseWordmarkSegments(value);
 
@@ -94,7 +105,7 @@ export function WordmarkEditor({
       {segments.length > 0 && (
         <div className="rounded-md border bg-muted/30 p-4">
           <p className="text-xs text-muted-foreground mb-2">Preview</p>
-          <WordmarkPreview segments={segments} />
+          <WordmarkPreview segments={segments} typography={typography} />
         </div>
       )}
 
@@ -165,9 +176,33 @@ function SegmentRow({
   );
 }
 
-function WordmarkPreview({ segments }: { segments: WordmarkSegment[] }) {
+function WordmarkPreview({
+  segments,
+  typography,
+}: {
+  segments: WordmarkSegment[];
+  typography?: WordmarkTypography;
+}) {
+  // Build a style object from the live typography tokens. When no family
+  // is set the wordmark "inherits Display" — we fall through to the
+  // built-in font-bold/2xl Tailwind defaults so the preview matches what
+  // ships when the operator leaves wordmark typography unconfigured.
+  const hasTypography = !!typography?.family;
+  const previewStyle: React.CSSProperties = hasTypography
+    ? {
+        fontFamily: resolveFamilyStack(typography!.family!),
+        fontWeight: typography!.weight ? Number(typography!.weight) : 700,
+        fontStyle: typography!.style ?? 'normal',
+        fontSize: '1.5rem',
+        lineHeight: 1.2,
+      }
+    : {};
+  const className = hasTypography
+    ? 'tracking-tight'
+    : 'text-2xl font-bold tracking-tight';
+
   return (
-    <span className="text-2xl font-bold tracking-tight">
+    <span className={className} style={previewStyle}>
       {segments.map((s, i) => (
         <span key={i} style={s.color ? { color: s.color } : undefined}>
           {s.text}

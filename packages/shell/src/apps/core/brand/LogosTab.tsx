@@ -144,16 +144,22 @@ export function LogosTab() {
   const upgradeCatalog = React.useCallback(() => {
     if (!catalogIsFallback || upgradingRef.current) return;
     upgradingRef.current = true;
-    authedFetch('/_ensemble/core/fonts/google')
-      .then((r) => r.json() as Promise<{ fonts: GoogleFontEntry[] }>)
+    authedFetch('/_ensemble/core/fonts/google?refresh=1')
+      .then((r) => r.json() as Promise<{ fonts: GoogleFontEntry[]; count?: number }>)
       .then((res) => {
         const fonts = res.fonts ?? [];
+        console.info('[fonts] upgrade fetch returned', fonts.length, 'families');
         if (fonts.length > 0) {
           setFontCatalog(fonts);
           setCatalogIsFallback(false);
+        } else {
+          upgradingRef.current = false;
         }
       })
-      .catch(() => { /* keep fallback */ });
+      .catch((err) => {
+        console.warn('[fonts] upgrade fetch failed:', err);
+        upgradingRef.current = false;
+      });
   }, [catalogIsFallback]);
 
   useEffect(() => {
@@ -329,6 +335,11 @@ function WordmarkCard({
             <WordmarkEditor
               value={textValue}
               onChange={(next) => onChange('wordmark_text', next)}
+              typography={{
+                family: tokens['wordmark_family'] || undefined,
+                weight: tokens['wordmark_weight'] || undefined,
+                style: (tokens['wordmark_style'] as 'normal' | 'italic') || 'normal',
+              }}
             />
           </div>
         ) : (

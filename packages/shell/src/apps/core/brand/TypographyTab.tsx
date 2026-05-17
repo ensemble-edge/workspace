@@ -90,16 +90,26 @@ export function TypographyTab() {
   const upgradeCatalog = React.useCallback(() => {
     if (!catalogIsFallback || upgradingRef.current) return;
     upgradingRef.current = true;
-    authedFetch('/_ensemble/core/fonts/google')
-      .then((r) => r.json() as Promise<{ fonts: GoogleFontEntry[] }>)
+    // `?refresh=1` bypasses any poisoned-empty KV cache entry. The
+    // initial page load fetch hit the cache (or empty); the upgrade
+    // forces a fresh upstream attempt.
+    authedFetch('/_ensemble/core/fonts/google?refresh=1')
+      .then((r) => r.json() as Promise<{ fonts: GoogleFontEntry[]; count?: number }>)
       .then((res) => {
         const fonts = res.fonts ?? [];
+        console.info('[fonts] upgrade fetch returned', fonts.length, 'families');
         if (fonts.length > 0) {
           setCatalog(fonts);
           setCatalogIsFallback(false);
+        } else {
+          // Allow another retry next time the operator types.
+          upgradingRef.current = false;
         }
       })
-      .catch(() => { /* keep fallback */ });
+      .catch((err) => {
+        console.warn('[fonts] upgrade fetch failed:', err);
+        upgradingRef.current = false;
+      });
   }, [catalogIsFallback]);
   const [recent, setRecent] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
