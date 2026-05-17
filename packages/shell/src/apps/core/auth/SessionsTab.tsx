@@ -57,16 +57,22 @@ export function SessionsTab() {
         }
       } finally {
         setLoading(false);
-        // Snapshot the loaded value as the dirty-tracking baseline. The
-        // hook's mount-time baseline saw `draftValue === null`; once we
-        // populate it from the server, treat that as the new baseline
-        // so the card doesn't read "Unsaved changes" before the
-        // operator has actually changed anything.
-        queueMicrotask(() => status.resetBaseline());
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Snapshot the loaded value as the dirty-tracking baseline. We do
+  // this in a separate effect keyed off the loaded value so it runs
+  // *after* React has re-rendered with the loaded state — avoiding the
+  // closure-staleness bug where a microtask-scheduled reset reads the
+  // pre-load default.
+  useEffect(() => {
+    if (currentValue !== null) {
+      status.resetBaseline(currentValue);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentValue]);
 
   async function save() {
     if (draftValue === null) return;

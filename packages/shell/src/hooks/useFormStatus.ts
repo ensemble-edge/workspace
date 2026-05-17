@@ -22,6 +22,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SaveStatusState } from '@ensemble-edge/ui';
 
+// Module-scoped sentinel so `resetBaseline()` (no arg) can be reliably
+// distinguished from `resetBaseline(undefined)` — Symbol identity is
+// stable across renders.
+const USE_CLOSURE_VALUE = Symbol('useFormStatus.useClosureValue');
+
 interface FormStatusReturn {
   state: SaveStatusState;
   dirty: boolean;
@@ -31,8 +36,12 @@ interface FormStatusReturn {
   commitSave: () => void;
   /** Call on save failure; status becomes 'error' until a new edit clears it. */
   failSave: (err?: unknown) => void;
-  /** Programmatically reset the baseline (e.g. after a fresh load). */
-  resetBaseline: () => void;
+  /**
+   * Programmatically reset the baseline. Pass the value to snapshot
+   * explicitly if calling after an async load (the closure-captured
+   * value may still be the pre-load default).
+   */
+  resetBaseline: (nextValue?: unknown) => void;
 }
 
 export function useFormStatus({
@@ -86,9 +95,13 @@ export function useFormStatus({
     setError(e ?? new Error('Save failed'));
   }, []);
 
-  const resetBaseline = useCallback(() => {
-    baseline.current = JSON.stringify(value);
-  }, [value]);
+  const resetBaseline = useCallback(
+    (nextValue: unknown = USE_CLOSURE_VALUE) => {
+      const v = nextValue === USE_CLOSURE_VALUE ? value : nextValue;
+      baseline.current = JSON.stringify(v);
+    },
+    [value],
+  );
 
   let state: SaveStatusState;
   if (error) state = 'error';

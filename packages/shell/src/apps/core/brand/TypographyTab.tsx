@@ -40,6 +40,7 @@ import type { FontComboboxOption } from '@ensemble-edge/ui';
 
 import { authedFetch, emitWorkspaceEvent } from '../../../state';
 import { useFormStatus } from '../../../hooks/useFormStatus';
+import { FALLBACK_GOOGLE_FONTS } from './fallback-fonts';
 import {
   SYSTEM_FONTS,
   DEFAULT_WEIGHT_FOR_ROLE,
@@ -106,10 +107,21 @@ export function TypographyTab() {
         if (rt) next[role] = rt;
       }
       setByRole(next);
-      setCatalog(fontsRes.fonts ?? []);
-      // After async load, snapshot as baseline so dirty-tracking
-      // doesn't fire on initial render.
-      queueMicrotask(() => status.resetBaseline());
+      // If the proxy endpoint returned no fonts (KV miss + upstream
+      // unreachable, parse error, etc.), fall back to the bundled
+      // top-40 catalog so the picker is never empty.
+      const fonts = fontsRes.fonts ?? [];
+      if (fonts.length === 0) {
+        setCatalog(FALLBACK_GOOGLE_FONTS);
+        console.warn('[fonts] live catalog empty; using bundled fallback (~40 families).');
+      } else {
+        setCatalog(fonts);
+      }
+      // After async load, snapshot the *loaded* byRole shape as the
+      // dirty-tracking baseline. Pass explicitly because the closure-
+      // captured `value` in the hook is still the pre-load defaults
+      // until React re-renders.
+      status.resetBaseline(next);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

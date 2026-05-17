@@ -133,17 +133,20 @@ export function MessagingTab() {
       ]);
       if (cancelled) return;
 
+      // Lifted outside the `if (tokensRes?.ok)` block so we can pass
+      // them to resetBaseline below.
+      let loadedCustom: CustomField[] = [];
+      let loadedVp: ValueProp[] | null = null;
+
       if (tokensRes?.ok) {
         const body = (await tokensRes.json()) as {
           data?: Array<{ key: string; value: string; locale: string }>;
         };
         const map: LocalizedTokens = {};
-        const custom: CustomField[] = [];
-        let vp: ValueProp[] | null = null;
         for (const row of body.data ?? []) {
           if (row.key === 'value_props') {
             if (row.locale === '') {
-              try { vp = JSON.parse(row.value); } catch { /* noop */ }
+              try { loadedVp = JSON.parse(row.value); } catch { /* noop */ }
             }
             continue;
           }
@@ -152,12 +155,12 @@ export function MessagingTab() {
             continue;
           }
           if (row.locale === '') {
-            custom.push({ key: row.key, value: row.value, type: 'text', label: row.key });
+            loadedCustom.push({ key: row.key, value: row.value, type: 'text', label: row.key });
           }
         }
         setTokens(map);
-        if (vp) setValueProps(vp);
-        setCustomFields(custom);
+        if (loadedVp) setValueProps(loadedVp);
+        setCustomFields(loadedCustom);
       }
 
       if (localesRes?.ok) {
@@ -170,7 +173,13 @@ export function MessagingTab() {
       }
 
       setLoading(false);
-      queueMicrotask(() => manualStatus.resetBaseline());
+      // Snapshot the loaded value_props + custom_fields as the
+      // dirty-tracking baseline. Pass explicitly because the
+      // closure-captured `value` is still the pre-fetch defaults.
+      manualStatus.resetBaseline({
+        valueProps: loadedVp ?? [{ headline: '', description: '' }],
+        customFields: loadedCustom,
+      });
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps

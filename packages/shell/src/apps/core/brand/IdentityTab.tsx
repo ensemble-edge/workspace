@@ -63,25 +63,41 @@ export function IdentityTab() {
     authedFetch('/_ensemble/core/brand/tokens/identity')
       .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string; type: string; label: string | null }> }>)
       .then((res) => {
+        // Collect loaded values into a map so we can both set state
+        // and pass the loaded values explicitly to resetBaseline. The
+        // closure-captured `value` in the hook is still the pre-fetch
+        // defaults at this point, so resetBaseline() with no arg
+        // would lock the baseline to the empty/default shape and the
+        // card would falsely read "Unsaved changes" on first render.
+        const loaded: Record<string, string> = {};
         const custom: CustomField[] = [];
         for (const token of res.data || []) {
           if (token.key.startsWith('logo_')) continue; // handled by Logos tab
           if (token.key === 'wordmark_text') continue; // handled by Logos tab (styled wordmark)
-          switch (token.key) {
-            case 'legal_name': setLegalName(token.value); break;
-            case 'display_name': setDisplayName(token.value); break;
-            case 'founding_year': setFoundingYear(token.value); break;
-            case 'headquarters': setHeadquarters(token.value); break;
-            case 'website': setWebsite(token.value); break;
-            case 'industry': setIndustry(token.value); break;
-            default:
-              if (!knownKeys.has(token.key)) {
-                custom.push({ key: token.key, value: token.value, type: token.type || 'text', label: token.label || token.key });
-              }
+          if (knownKeys.has(token.key)) {
+            loaded[token.key] = token.value;
+            switch (token.key) {
+              case 'legal_name': setLegalName(token.value); break;
+              case 'display_name': setDisplayName(token.value); break;
+              case 'founding_year': setFoundingYear(token.value); break;
+              case 'headquarters': setHeadquarters(token.value); break;
+              case 'website': setWebsite(token.value); break;
+              case 'industry': setIndustry(token.value); break;
+            }
+          } else {
+            custom.push({ key: token.key, value: token.value, type: token.type || 'text', label: token.label || token.key });
           }
         }
         setCustomFields(custom);
-        status.resetBaseline();
+        status.resetBaseline({
+          legalName: loaded.legal_name ?? '',
+          displayName: loaded.display_name ?? '',
+          foundingYear: loaded.founding_year ?? '',
+          headquarters: loaded.headquarters ?? '',
+          website: loaded.website ?? '',
+          industry: loaded.industry ?? '',
+          customFields: custom,
+        });
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps

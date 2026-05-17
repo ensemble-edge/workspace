@@ -105,16 +105,22 @@ export function ColorsTab() {
       const loadedGroups = Array.from(groupMap.values());
       setGroups(loadedGroups.length > 0 ? loadedGroups : getDefaultGroups());
       setLoaded(true);
-      // After async load, snapshot current values as the baseline so
-      // dirty-tracking starts from "saved state."
-      queueMicrotask(() => status.resetBaseline());
     }).catch(() => {
       setGroups(getDefaultGroups());
       setLoaded(true);
-      queueMicrotask(() => status.resetBaseline());
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Snapshot the loaded values as the dirty-tracking baseline. Run in
+  // a separate effect keyed off `loaded` so it fires after React has
+  // re-rendered with the loaded state — avoiding the closure-staleness
+  // bug where a microtask reset reads the pre-load defaults.
+  useEffect(() => {
+    if (!loaded) return;
+    status.resetBaseline({ brandPrimary, brandSecondary, brandAccent, groups, semanticColors });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
 
   // Save a brand core color + auto-generate its palette as a color group
   const updateBrandColor = async (key: string, value: string, setter: (v: string) => void) => {

@@ -32,6 +32,7 @@ import type { FontComboboxOption } from '@ensemble-edge/ui';
 import { authedFetch, emitWorkspaceEvent } from '../../../state';
 import { useFormStatus } from '../../../hooks/useFormStatus';
 import { WordmarkEditor } from './WordmarkEditor';
+import { FALLBACK_GOOGLE_FONTS } from './fallback-fonts';
 import {
   SYSTEM_FONTS,
   DEFAULT_WEIGHT_FOR_ROLE,
@@ -113,11 +114,23 @@ export function LogosTab() {
   const status = useFormStatus({ value: tokens, mode: 'manual' });
 
   // Load the Google Fonts catalog once for the wordmark Family picker.
+  // Falls back to the bundled top-40 list when the proxy returns empty.
   useEffect(() => {
     authedFetch('/_ensemble/core/fonts/google')
       .then((r) => r.json() as Promise<{ fonts: GoogleFontEntry[] }>)
-      .then((res) => setFontCatalog(res.fonts ?? []))
-      .catch(() => { /* picker degrades to system defaults only */ });
+      .then((res) => {
+        const fonts = res.fonts ?? [];
+        if (fonts.length === 0) {
+          setFontCatalog(FALLBACK_GOOGLE_FONTS);
+          console.warn('[fonts] live catalog empty; using bundled fallback (~40 families).');
+        } else {
+          setFontCatalog(fonts);
+        }
+      })
+      .catch(() => {
+        // Network/parse error — same fallback.
+        setFontCatalog(FALLBACK_GOOGLE_FONTS);
+      });
   }, []);
 
   useEffect(() => {
@@ -141,9 +154,11 @@ export function LogosTab() {
           }
         }
         setTokens(loaded);
-        // Snapshot the loaded state as the new baseline so we don't
-        // start out "dirty" relative to the initial empty {}.
-        status.resetBaseline();
+        // Snapshot the loaded state as the new baseline. Pass the
+        // value explicitly because the closure-captured `value` here
+        // is still the pre-fetch empty {} — state setters batch and
+        // the hook hasn't re-rendered yet.
+        status.resetBaseline(loaded);
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
