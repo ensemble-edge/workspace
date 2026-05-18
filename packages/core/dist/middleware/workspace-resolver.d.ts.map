@@ -1,0 +1,1 @@
+{"version":3,"file":"workspace-resolver.d.ts","sourceRoot":"","sources":["../../src/middleware/workspace-resolver.ts"],"names":[],"mappings":"AAAA;;;;;;;;;GASG;AAGH,OAAO,KAAK,EAAE,GAAG,EAAE,gBAAgB,EAAa,cAAc,EAAE,MAAM,UAAU,CAAC;AAUjF;;;;;GAKG;AACH,wBAAgB,iBAAiB,CAAC,MAAM,EAAE,cAAc;cAE1C,GAAG;eACF,gBAAgB;yBA4D9B"}
