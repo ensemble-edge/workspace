@@ -31,7 +31,13 @@ export type SettingKey =
   // that lives in wrangler.toml — but the UI uses this to remember
   // the operator's choice and to auto-populate the wrangler snippet
   // they paste before redeploy.
-  | 'r2_selected_bucket';
+  | 'r2_selected_bucket'
+  // v0.1.29+: name of the env binding the workspace should read R2
+  // through. Defaults to 'R2' — operators integrating Ensemble into
+  // an existing CF project that already binds R2 under a different
+  // name (e.g. 'FILES', 'STORAGE') can change this so Ensemble reads
+  // c.env[their-name] without forcing a rename or a duplicate binding.
+  | 'r2_binding_name';
 
 export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
   // 30 days — matches typical workspace expectations. Operators can
@@ -44,6 +50,10 @@ export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
   // No bucket selected by default — picker shows the operator's
   // account buckets and prompts them to pick one.
   r2_selected_bucket: '',
+  // Default binding name. Operators integrating into an existing CF
+  // project (where R2 may already be bound under another name) can
+  // change this.
+  r2_binding_name: 'R2',
 };
 
 /**

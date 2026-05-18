@@ -567,11 +567,14 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
         if (aliasPath && segments[0] === aliasPath) {
           // Looks like a brand-asset request via the configured alias.
           // Reuse the credentials/routes serveBrandAsset semantics:
-          // R2 must be bound, key must live under `brand/`.
-          if (!c.env.R2) return c.notFound();
+          // R2 must be bound (under the operator's configured binding
+          // name), key must live under `brand/`.
+          const { getR2Bucket } = await import('./services/r2-binding');
+          const r2 = await getR2Bucket(c.env, workspace.id);
+          if (!r2) return c.notFound();
           const key = decodeURIComponent(segments.slice(1).join('/'));
           if (!key.startsWith('brand/')) return c.notFound();
-          const obj = await c.env.R2.get(key);
+          const obj = await r2.get(key);
           if (!obj) return c.notFound();
           const headers = new Headers();
           obj.writeHttpMetadata(headers);

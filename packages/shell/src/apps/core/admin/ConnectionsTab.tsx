@@ -122,6 +122,7 @@ interface R2BucketsResponse {
   buckets: R2BucketSummary[];
   bindingReachable: boolean;
   selectedBucket: string;
+  bindingName: string;
   error?: string;
 }
 
@@ -179,8 +180,52 @@ function AssetStorageCard({ creds }: { creds: Record<string, CredentialSummary> 
 
   const buckets = data?.buckets ?? [];
   const selected = data?.selectedBucket || '';
+  const bindingName = data?.bindingName || 'R2';
   const bindingReachable = data?.bindingReachable ?? false;
   const selectedBucketExists = selected ? buckets.some((b) => b.name === selected) : false;
+
+  // Local editing state for the binding name. Defaults to whatever the
+  // server reported; PUT only fires on blur or explicit Save so we
+  // don't thrash the API on every keystroke.
+  const [bindingDraft, setBindingDraft] = useState<string>(bindingName);
+  const [bindingDirty, setBindingDirty] = useState(false);
+  useEffect(() => {
+    // Sync from server whenever the canonical value changes (initial
+    // load or after another save). If the operator is mid-edit, leave
+    // their draft alone.
+    if (!bindingDirty) setBindingDraft(bindingName);
+  }, [bindingName, bindingDirty]);
+
+  async function saveBindingName() {
+    const trimmed = bindingDraft.trim();
+    if (!trimmed || trimmed === bindingName) {
+      setBindingDirty(false);
+      return;
+    }
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed)) {
+      toast.error('Invalid binding name', {
+        description: 'Must be a JS identifier — letters, digits, underscore.',
+      });
+      return;
+    }
+    try {
+      const r = await authedFetch('/_ensemble/credentials/r2/binding-name', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (r.ok) {
+        toast.success(`Binding name set to ${trimmed}`);
+        setBindingDirty(false);
+        refresh(); // re-fetch so bindingReachable reflects the new name
+      } else {
+        const err = (await r.json().catch(() => ({}))) as { error?: string };
+        toast.error('Could not save', { description: err.error });
+      }
+    } catch (e) {
+      toast.error('Save failed', { description: errMsg(e) });
+    }
+  }
 
   // Three-state derivation for the selected bucket:
   //   verified  — bucket exists AND binding is reachable
@@ -192,7 +237,7 @@ function AssetStorageCard({ creds }: { creds: Record<string, CredentialSummary> 
     : bindingReachable ? 'verified'
     : 'exists';
 
-  const wranglerSnippet = `[[r2_buckets]]\nbinding = "R2"\nbucket_name = "${selected || 'YOUR_BUCKET_NAME'}"`;
+  const wranglerSnippet = `[[r2_buckets]]\nbinding = "${bindingName}"\nbucket_name = "${selected || 'YOUR_BUCKET_NAME'}"`;
 
   const overall: 'done' | 'pending' = bucketState === 'verified' ? 'done' : 'pending';
 
@@ -283,6 +328,34 @@ function AssetStorageCard({ creds }: { creds: Record<string, CredentialSummary> 
           )}
         </div>
 
+        {/* Binding name — operators in pre-existing CF projects can
+            rename it from 'R2' to whatever their wrangler.toml already
+            binds (e.g. FILES, STORAGE). The setting takes effect after
+            redeploying with the updated wrangler.toml. */}
+        <div className="space-y-1.5">
+          <Label className="text-xs">Binding name</Label>
+          <div className="flex gap-2">
+            <Input
+              value={bindingDraft}
+              onChange={(e) => { setBindingDraft(e.target.value); setBindingDirty(true); }}
+              onBlur={saveBindingName}
+              placeholder="R2"
+              className="font-mono text-sm"
+              disabled={disabled}
+            />
+            {bindingDirty && (
+              <Button type="button" size="sm" onClick={saveBindingName}>Save</Button>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The name Ensemble reads R2 through (<span className="font-mono">c.env.{bindingName}</span>).
+            Default is <span className="font-mono">R2</span>; change it if your{' '}
+            <span className="font-mono">wrangler.toml</span> already binds R2 under another name
+            (e.g. <span className="font-mono">FILES</span>) and you'd rather Ensemble adapt than
+            duplicate the binding.
+          </p>
+        </div>
+
         {/* Two-line health summary */}
         {selected && (
           <div className="rounded-md border bg-muted/30 p-3 space-y-1.5 text-sm">
@@ -339,9 +412,10 @@ function AssetStorageCard({ creds }: { creds: Record<string, CredentialSummary> 
           <pre className="text-xs font-mono bg-background border rounded p-2 overflow-x-auto">{wranglerSnippet}</pre>
           <p className="text-xs text-muted-foreground">
             Then run <span className="font-mono">npx wrangler deploy</span> to apply
-            the binding. The <span className="font-mono">binding = "R2"</span> line
-            must stay exactly that — workspace code references{' '}
-            <span className="font-mono">c.env.R2</span> throughout.
+            the binding. The <span className="font-mono">binding</span> value above
+            (<span className="font-mono">{bindingName}</span>) must match the binding
+            name configured here — Ensemble reads R2 through{' '}
+            <span className="font-mono">c.env.{bindingName}</span>.
           </p>
         </div>
       </CardContent>

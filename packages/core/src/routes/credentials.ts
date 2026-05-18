@@ -34,6 +34,7 @@ import {
   validateAliasPath,
   type SettingKey,
 } from '../services/workspace-settings';
+import { getR2Bucket } from '../services/r2-binding';
 
 type AppEnv = { Bindings: Env; Variables: ContextVariables };
 type AppContext = Context<AppEnv>;
@@ -74,7 +75,8 @@ export function createCredentialsRoutes(): App {
     if (adminCheck instanceof Response) return adminCheck;
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
-    if (!c.env.R2) {
+    const r2 = await getR2Bucket(c.env, workspace.id);
+    if (!r2) {
       return c.json({ error: 'R2 bucket not bound. Add the binding in wrangler.toml.' }, 412);
     }
 
@@ -96,7 +98,7 @@ export function createCredentialsRoutes(): App {
     const id = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
     const key = `brand/${workspace.id}/${kind}/${id}${ext}`;
 
-    await c.env.R2.put(key, file.stream(), {
+    await r2.put(key, file.stream(), {
       httpMetadata: { contentType: file.type },
     });
 
@@ -128,9 +130,12 @@ export function createCredentialsRoutes(): App {
    * the alias cannot exfiltrate other R2 prefixes.
    */
   async function serveBrandAsset(c: AppContext, key: string): Promise<Response> {
-    if (!c.env.R2) return c.json({ error: 'R2 not configured' }, 404);
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const r2 = await getR2Bucket(c.env, workspace.id);
+    if (!r2) return c.json({ error: 'R2 not configured' }, 404);
     if (!key.startsWith('brand/')) return c.json({ error: 'Not found' }, 404);
-    const obj = await c.env.R2.get(key);
+    const obj = await r2.get(key);
     if (!obj) return c.json({ error: 'Not found' }, 404);
     const headers = new Headers();
     obj.writeHttpMetadata(headers);
@@ -367,11 +372,13 @@ export function createCredentialsRoutes(): App {
     const accountId = await getCredential(c.env, workspace.id, 'cloudflare_account_id');
 
     // Binding health: independent of token. Tells operators whether
-    // their wrangler.toml is already wired up.
+    // their wrangler.toml is already wired up under the configured
+    // binding name (default 'R2', operator-overridable).
+    const r2 = await getR2Bucket(c.env, workspace.id);
     let bindingReachable = false;
-    if ((c.env as { R2?: R2Bucket }).R2) {
+    if (r2) {
       try {
-        await (c.env as { R2: R2Bucket }).R2.list({ limit: 1 });
+        await r2.list({ limit: 1 });
         bindingReachable = true;
       } catch {
         bindingReachable = false;
@@ -379,12 +386,14 @@ export function createCredentialsRoutes(): App {
     }
 
     const selectedBucket = (await getSetting(c.env, workspace.id, 'r2_selected_bucket')).trim();
+    const bindingName = (await getSetting(c.env, workspace.id, 'r2_binding_name')).trim() || 'R2';
 
     if (!token || !accountId) {
       return c.json({
         buckets: [],
         bindingReachable,
         selectedBucket,
+        bindingName,
         error: !token ? 'No Cloudflare API token set' : 'No Cloudflare Account ID set',
       });
     }
@@ -398,6 +407,7 @@ export function createCredentialsRoutes(): App {
         buckets: [],
         bindingReachable,
         selectedBucket,
+        bindingName,
         error: `Cloudflare API HTTP ${res.status} — token likely missing Workers R2 Storage:Read scope.`,
       });
     }
@@ -413,7 +423,37 @@ export function createCredentialsRoutes(): App {
       buckets,
       bindingReachable,
       selectedBucket,
+      bindingName,
     });
+  });
+
+  /**
+   * PUT /_ensemble/credentials/r2/binding-name
+   *
+   * Stores the env binding name Ensemble should read R2 through.
+   * Default is 'R2'. Operators integrating into a pre-existing CF
+   * project that already binds R2 under another name (FILES, etc.)
+   * can change this so getR2Bucket() reads c.env[their-name].
+   *
+   * Cloudflare requires binding names to be valid JS identifiers
+   * (start with [A-Za-z_], contain [A-Za-z0-9_]). We mirror that
+   * validation here so the UI can't store garbage.
+   */
+  app.put('/_ensemble/credentials/r2/binding-name', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+
+    const body = await c.req.json<{ name: string }>().catch(() => ({ name: '' }));
+    const name = (body.name ?? '').trim();
+    if (!name) return c.json({ error: 'Binding name cannot be empty' }, 400);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      return c.json({ error: 'Invalid binding name (must be a JS identifier)' }, 400);
+    }
+
+    await setSetting(c.env, workspace.id, 'r2_binding_name', name);
+    return c.json({ ok: true, bindingName: name });
   });
 
   /**
@@ -654,17 +694,18 @@ export function createCredentialsRoutes(): App {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ bound: false, writable: false, detail: 'No workspace' });
 
-    if (!c.env.R2) {
+    const r2 = await getR2Bucket(c.env, workspace.id);
+    if (!r2) {
       return c.json({
         bound: false,
         writable: false,
-        detail: 'No R2 bucket bound. Add the binding in wrangler.toml.',
+        detail: 'No R2 bucket bound under the configured binding name. Add the binding in wrangler.toml.',
       });
     }
     try {
       const probeKey = `_ensemble/setup-probe/${workspace.id}`;
-      await c.env.R2.put(probeKey, 'ok');
-      await c.env.R2.delete(probeKey);
+      await r2.put(probeKey, 'ok');
+      await r2.delete(probeKey);
       return c.json({ bound: true, writable: true, detail: 'Bucket is writable.' });
     } catch (err) {
       return c.json({
@@ -774,12 +815,13 @@ export function createCredentialsRoutes(): App {
     // configured/accessible. We check by attempting a tiny put then
     // delete. If env.R2 is missing entirely, mark pending.
     let r2Done = false;
-    let r2Detail = 'No R2 bucket bound — add the binding in wrangler.toml.';
-    if (c.env.R2) {
+    let r2Detail = 'No R2 bucket bound under the configured name — add the binding in wrangler.toml.';
+    const r2Probe = await getR2Bucket(c.env, workspace.id);
+    if (r2Probe) {
       try {
         const probeKey = `_ensemble/setup-probe/${workspace.id}`;
-        await c.env.R2.put(probeKey, 'ok');
-        await c.env.R2.delete(probeKey);
+        await r2Probe.put(probeKey, 'ok');
+        await r2Probe.delete(probeKey);
         r2Done = true;
         r2Detail = 'Bucket is writable.';
       } catch (err) {

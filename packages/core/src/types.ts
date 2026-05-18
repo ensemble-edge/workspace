@@ -23,8 +23,13 @@ export interface Env {
   // Key-Value store (sessions, cache)
   KV: KVNamespace;
 
-  // Object storage (assets, uploads)
-  R2: R2Bucket;
+  // Object storage (assets, uploads). The default binding name is
+  // 'R2' but operators can rename it via the workspace setting
+  // `r2_binding_name` to integrate with pre-existing CF projects
+  // that already bind R2 under another name (e.g. FILES, STORAGE).
+  // Access through getR2Bucket(env, workspaceId) — never c.env.R2
+  // directly — so the configurable binding name actually takes effect.
+  R2?: R2Bucket;
 
   // Secrets (set via `wrangler secret put`)
   JWT_SECRET: string;
