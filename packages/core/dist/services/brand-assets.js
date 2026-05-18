@@ -1,0 +1,335 @@
+/**
+ * Resolve the wordmark to SVG markup. Returns null when neither
+ * upload nor styled-text source is configured.
+ *
+ * - If `logo_wordmark` token points at an R2-served SVG, fetch + return it.
+ * - Otherwise compile `wordmark_text` + wordmark typography tokens to SVG.
+ *   Approximate text width from char count × emWidth heuristic; the
+ *   resulting viewBox is generous but the rendered text aligns to its
+ *   own bounding box thanks to text-anchor / dominant-baseline.
+ */
+export async function getWordmarkSvg(env, workspaceId, baseUrl) {
+    const tokens = await loadIdentityTokens(env.DB, workspaceId);
+    // Prefer styled text when configured (operator's brand chose
+    // text-based wordmark over an uploaded SVG).
+    const wordmarkText = tokens['wordmark_text'];
+    if (wordmarkText) {
+        return compileTextWordmark(wordmarkText, tokens);
+    }
+    // Fall back to uploaded SVG. We use logo_wordmark (the base variant)
+    // even if it's a PNG — operators on the old upload scheme stay
+    // working; new SVG-only uploads go through the v0.1.31 flow.
+    const url = tokens['logo_wordmark_svg'] || tokens['logo_wordmark'];
+    if (url) {
+        if (url.endsWith('.svg') || tokens['logo_wordmark_svg']) {
+            return fetchSvg(baseUrl, url);
+        }
+        // Raster sources (legacy PNG wordmarks) can't be composed — caller
+        // should branch on null and use the raster URL directly.
+        return null;
+    }
+    return null;
+}
+/**
+ * Resolve the icon mark to SVG. Returns null when no SVG icon is set.
+ */
+export async function getIconSvg(env, workspaceId, baseUrl) {
+    const tokens = await loadIdentityTokens(env.DB, workspaceId);
+    const url = tokens['logo_icon_mark_svg'] || tokens['logo_icon_mark'];
+    if (!url)
+        return null;
+    if (!url.endsWith('.svg') && !tokens['logo_icon_mark_svg'])
+        return null;
+    return fetchSvg(baseUrl, url);
+}
+async function loadIdentityTokens(db, workspaceId) {
+    const rows = await db.prepare(`SELECT key, value FROM brand_tokens
+     WHERE workspace_id = ? AND category IN ('identity', 'typography') AND locale = ''`).bind(workspaceId).all();
+    const out = {};
+    for (const r of rows.results ?? [])
+        out[r.key] = r.value;
+    return out;
+}
+async function fetchSvg(baseUrl, urlPath) {
+    try {
+        const fullUrl = urlPath.startsWith('http') ? urlPath : `${baseUrl}${urlPath}`;
+        const res = await fetch(fullUrl);
+        if (!res.ok)
+            return null;
+        return await res.text();
+    }
+    catch {
+        return null;
+    }
+}
+/* ──────────────────────────────────────────────────────────────
+ * Styled-text wordmark → SVG
+ * ──────────────────────────────────────────────────────────── */
+/**
+ * Compile a styled-text wordmark to an SVG document. Uses the
+ * configured wordmark typography (family, weight, size, letter-spacing,
+ * case) and per-segment colors.
+ *
+ * Text metrics: we approximate width from glyph count × an em-width
+ * heuristic (0.55 × fontSize for sans-serif). For pixel-perfect
+ * results we'd need opentype.js + a fetched woff2 file; that's a
+ * follow-up improvement. For composition + brand-guide rendering,
+ * the approximation is within 5-10% of true width which is fine
+ * for visual reference.
+ */
+function compileTextWordmark(rawJson, tokens) {
+    let segments = [];
+    try {
+        const parsed = JSON.parse(rawJson);
+        if (Array.isArray(parsed)) {
+            segments = parsed.filter((s) => typeof s === 'object' && s !== null && typeof s.text === 'string');
+        }
+    }
+    catch { /* fall through with empty */ }
+    if (segments.length === 0) {
+        return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>';
+    }
+    const family = tokens['wordmark_family'] || 'system-ui, sans-serif';
+    const weight = tokens['wordmark_weight'] || '700';
+    const style = tokens['wordmark_style'] || 'normal';
+    const letterSpacing = tokens['wordmark_letter_spacing'] || '0em';
+    const textTransform = tokens['wordmark_text_transform'] || 'none';
+    // viewBox math: use 64 as the canonical font-size for SVG layout,
+    // then estimate width per segment. Letter-spacing in em becomes
+    // additional space-per-character on top of the per-glyph advance.
+    const SIZE = 64;
+    const EM_WIDTH = 0.55; // sans-serif approximation
+    const lsMatch = /^(-?[\d.]+)em$/.exec(letterSpacing);
+    const lsEm = lsMatch ? parseFloat(lsMatch[1]) : 0;
+    const advance = SIZE * (EM_WIDTH + lsEm);
+    // Apply text-transform server-side so the rendered glyph count
+    // matches what the operator configured (lowercase + uppercase
+    // change character widths in real fonts; for the heuristic we
+    // assume same advance per glyph).
+    function transformText(s) {
+        if (textTransform === 'uppercase')
+            return s.toUpperCase();
+        if (textTransform === 'lowercase')
+            return s.toLowerCase();
+        return s;
+    }
+    const transformed = segments.map((s) => ({ ...s, text: transformText(s.text) }));
+    const totalChars = transformed.reduce((n, s) => n + s.text.length, 0);
+    const width = Math.ceil(totalChars * advance);
+    // Height ~ cap-height (~0.7 of em-box) with 10% breathing.
+    const height = Math.ceil(SIZE * 0.85);
+    // Build the SVG with absolute positioning. x cursor advances by
+    // each segment's measured width. Baseline at 80% of height keeps
+    // descenders visible.
+    let x = 0;
+    const tspans = [];
+    for (const seg of transformed) {
+        const fill = seg.color ? ` fill="${escapeXml(seg.color)}"` : '';
+        tspans.push(`<tspan x="${x}"${fill}>${escapeXml(seg.text)}</tspan>`);
+        x += seg.text.length * advance;
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" font-family=${escapeXmlAttr(family)} font-weight="${weight}" font-style="${style}" font-size="${SIZE}" letter-spacing="${escapeXmlAttr(letterSpacing)}"><text y="${Math.floor(height * 0.78)}">${tspans.join('')}</text></svg>`;
+}
+function escapeXml(s) {
+    return s.replace(/[<>&'"]/g, (c) => {
+        switch (c) {
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '&': return '&amp;';
+            case "'": return '&apos;';
+            case '"': return '&quot;';
+            default: return c;
+        }
+    });
+}
+function escapeXmlAttr(s) {
+    return `"${escapeXml(s)}"`;
+}
+/* ──────────────────────────────────────────────────────────────
+ * SVG manipulation helpers
+ * ──────────────────────────────────────────────────────────── */
+/**
+ * Parse an SVG's viewBox into [x, y, width, height]. Defaults to
+ * [0, 0, 100, 100] when no viewBox is present.
+ */
+export function parseViewBox(svg) {
+    const m = /viewBox\s*=\s*["']([\d.\-\s]+)["']/i.exec(svg);
+    if (!m)
+        return [0, 0, 100, 100];
+    const parts = m[1].trim().split(/\s+/).map(Number);
+    if (parts.length !== 4 || parts.some((n) => !isFinite(n)))
+        return [0, 0, 100, 100];
+    return parts;
+}
+/**
+ * Strip the outer <svg> wrapper so the contents can be embedded in
+ * a parent SVG (used by composeLockup to nest wordmark + icon).
+ */
+export function svgInner(svg) {
+    return svg.replace(/^[\s\S]*?<svg[^>]*>/i, '').replace(/<\/svg>\s*$/i, '');
+}
+/* ──────────────────────────────────────────────────────────────
+ * Finish application (color swap)
+ * ──────────────────────────────────────────────────────────── */
+/**
+ * Apply a finish to an SVG by rewriting fill values. The finish's
+ * fillOverride says what to replace fills WITH:
+ *   - null              → no change (full-color)
+ *   - hex (e.g. '#000') → replace every fill with this hex
+ *   - 'var(--brand-primary)' → resolve to actual brand primary, swap
+ *
+ * Targets:
+ *   - currentColor      → swapped (the canonical theme-aware fill)
+ *   - fill="#hex"       → swapped (explicit colors)
+ *   - fill="rgb(...)"   → swapped
+ *   - class="brand-*"   → swapped via @style block injection
+ */
+export function applyFinish(svg, finishId, policy, brandColors) {
+    const finish = policy.finishes.find((f) => f.id === finishId);
+    if (!finish || finish.fillOverride === null)
+        return svg;
+    let target = finish.fillOverride;
+    if (target === 'var(--brand-primary)')
+        target = brandColors.primary;
+    // Replace inline fill attributes — preserves attribute ordering and
+    // structure better than a full DOM parse.
+    let out = svg
+        .replace(/fill\s*=\s*["'][^"']*["']/g, `fill="${target}"`)
+        .replace(/stroke\s*=\s*["'][^"']*["']/g, `stroke="${target}"`);
+    // Replace `currentColor` and class-based brand-* CSS with the
+    // target color via an injected <style> block. Goes inside the root
+    // <svg> so it scopes to this document only.
+    const styleBlock = `<style>
+    .brand-primary, .brand-secondary, .brand-accent { fill: ${target}; stroke: ${target}; }
+    [fill="currentColor"], [stroke="currentColor"] { fill: ${target}; stroke: ${target}; }
+  </style>`;
+    out = out.replace(/(<svg[^>]*>)/, `$1${styleBlock}`);
+    return out;
+}
+/* ──────────────────────────────────────────────────────────────
+ * Background composition
+ * ──────────────────────────────────────────────────────────── */
+/**
+ * Wrap the SVG in a background rect. 'transparent' bg returns the
+ * SVG unchanged. Hex or var() backgrounds inject a full-bleed rect
+ * behind the existing content.
+ */
+export function compositeOnBackground(svg, backgroundColor) {
+    if (backgroundColor === 'transparent' || !backgroundColor)
+        return svg;
+    const [x, y, w, h] = parseViewBox(svg);
+    const rect = `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${backgroundColor}"/>`;
+    // Insert rect IMMEDIATELY after the root <svg ...> open tag so it
+    // paints behind everything else.
+    return svg.replace(/(<svg[^>]*>)/, `$1${rect}`);
+}
+/* ──────────────────────────────────────────────────────────────
+ * Composition (lockups)
+ * ──────────────────────────────────────────────────────────── */
+/**
+ * Compose icon + wordmark into a stacked or horizontal lockup. The
+ * iconScale config controls icon size relative to wordmark height;
+ * spacing controls the gap between them (em-relative to wordmark
+ * height, NOT viewBox units).
+ *
+ * Stacked: icon above wordmark, centered. Spacing is the vertical gap.
+ * Horizontal: icon left of wordmark, vertically aligned by cap-height.
+ *
+ * Both inputs must be SVG strings with viewBoxes — getWordmarkSvg
+ * and getIconSvg both return valid viewBox-bearing SVGs.
+ */
+export function composeLockup(iconSvg, wordmarkSvg, composition, config) {
+    if (composition === 'wordmark-only')
+        return wordmarkSvg;
+    if (composition === 'icon-only')
+        return iconSvg;
+    const [, , iw, ih] = parseViewBox(iconSvg);
+    const [, , ww, wh] = parseViewBox(wordmarkSvg);
+    // Icon target height in lockup-units = wordmark-height × iconScale.
+    const iconScale = config.iconScale ?? 1.5;
+    const spacing = (config.spacing ?? 0.4) * wh;
+    // Icon scaled to target height; preserves aspect ratio.
+    const targetIconHeight = wh * iconScale;
+    const targetIconWidth = (iw / ih) * targetIconHeight;
+    if (composition === 'stacked') {
+        const hAlign = config.hAlign ?? 'center';
+        const lockupWidth = Math.max(targetIconWidth, ww);
+        const lockupHeight = targetIconHeight + spacing + wh;
+        const iconX = hAlign === 'left' ? 0 : hAlign === 'right' ? (lockupWidth - targetIconWidth) : (lockupWidth - targetIconWidth) / 2;
+        const wordmarkX = hAlign === 'left' ? 0 : hAlign === 'right' ? (lockupWidth - ww) : (lockupWidth - ww) / 2;
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${lockupWidth} ${lockupHeight}">
+      <g transform="translate(${iconX}, 0)">
+        <svg width="${targetIconWidth}" height="${targetIconHeight}" viewBox="${parseViewBox(iconSvg).join(' ')}">${svgInner(iconSvg)}</svg>
+      </g>
+      <g transform="translate(${wordmarkX}, ${targetIconHeight + spacing})">
+        <svg width="${ww}" height="${wh}" viewBox="${parseViewBox(wordmarkSvg).join(' ')}">${svgInner(wordmarkSvg)}</svg>
+      </g>
+    </svg>`;
+    }
+    if (composition === 'horizontal') {
+        const vAlign = config.vAlign ?? 'middle';
+        const lockupWidth = targetIconWidth + spacing + ww;
+        const lockupHeight = Math.max(targetIconHeight, wh);
+        const iconY = vAlign === 'top' ? 0 : vAlign === 'bottom' ? (lockupHeight - targetIconHeight) : (lockupHeight - targetIconHeight) / 2;
+        const wordmarkY = vAlign === 'top' ? 0 : vAlign === 'bottom' ? (lockupHeight - wh) : (lockupHeight - wh) / 2;
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${lockupWidth} ${lockupHeight}">
+      <g transform="translate(0, ${iconY})">
+        <svg width="${targetIconWidth}" height="${targetIconHeight}" viewBox="${parseViewBox(iconSvg).join(' ')}">${svgInner(iconSvg)}</svg>
+      </g>
+      <g transform="translate(${targetIconWidth + spacing}, ${wordmarkY})">
+        <svg width="${ww}" height="${wh}" viewBox="${parseViewBox(wordmarkSvg).join(' ')}">${svgInner(wordmarkSvg)}</svg>
+      </g>
+    </svg>`;
+    }
+    return wordmarkSvg;
+}
+/**
+ * Render a brand asset variant as an SVG string. Returns null when
+ * the requested variant is banned or the source SVGs aren't available.
+ */
+export async function renderBrandAsset(req, ctx) {
+    const { isPairAllowed } = await import('./brand-policy');
+    if (!isPairAllowed(ctx.policy, ctx.brandColors, req.finish, req.backgroundId)) {
+        return null;
+    }
+    if (!ctx.policy.compositions[req.composition]?.allowed) {
+        return null;
+    }
+    // Source resolution.
+    const wordmarkSvg = await getWordmarkSvg({ DB: ctx.db }, ctx.workspaceId, ctx.baseUrl);
+    const iconSvg = await getIconSvg({ DB: ctx.db }, ctx.workspaceId, ctx.baseUrl);
+    if (req.composition === 'wordmark-only') {
+        if (!wordmarkSvg)
+            return null;
+    }
+    else if (req.composition === 'icon-only') {
+        if (!iconSvg)
+            return null;
+    }
+    else {
+        if (!wordmarkSvg || !iconSvg)
+            return null;
+    }
+    // Composition.
+    let svg;
+    if (req.composition === 'wordmark-only')
+        svg = wordmarkSvg;
+    else if (req.composition === 'icon-only')
+        svg = iconSvg;
+    else
+        svg = composeLockup(iconSvg, wordmarkSvg, req.composition, ctx.policy.compositions[req.composition]);
+    // Finish (color swap).
+    svg = applyFinish(svg, req.finish, ctx.policy, ctx.brandColors);
+    // Background composition.
+    const bg = ctx.policy.backgrounds.find((b) => b.id === req.backgroundId);
+    if (bg) {
+        let bgColor = bg.color;
+        if (bgColor === 'var(--brand-background-light)')
+            bgColor = ctx.brandColors.bgLight;
+        else if (bgColor === 'var(--brand-background-dark)')
+            bgColor = ctx.brandColors.bgDark;
+        svg = compositeOnBackground(svg, bgColor);
+    }
+    return svg;
+}
+//# sourceMappingURL=brand-assets.js.map
