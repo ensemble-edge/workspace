@@ -151,6 +151,82 @@ async function readSvgFromR2(
  * ──────────────────────────────────────────────────────────── */
 
 /**
+ * Per-family average em-width. Used by the wordmark compiler to
+ * estimate text width — feeds the SVG viewBox AND the composition
+ * layer (which positions icons relative to wordmark width).
+ *
+ * Values measured from rendered specimens at common weights (400/700).
+ * Display fonts like Bebas Neue are condensed; serifs like Playfair
+ * are wider; monospace fonts are widest per-glyph.
+ *
+ * Default for unknown families: 0.55 (a sans-serif average that's
+ * close to most modern UI fonts).
+ *
+ * This is approximation, not precision — true per-glyph metrics need
+ * opentype.js + woff2 parsing (deferred). But knowing a wordmark
+ * uses Bebas Neue (~0.42) vs Inter (~0.52) vs Poppins (~0.55) is
+ * the difference between composition that looks intentional and
+ * composition that looks broken.
+ */
+const FAMILY_EM_WIDTHS: Record<string, number> = {
+  // Sans-serif workhorses
+  'Roboto':            0.50,
+  'Inter':             0.52,
+  'Open Sans':         0.54,
+  'Lato':              0.50,
+  'Montserrat':        0.58,
+  'Poppins':           0.55,
+  'Nunito':            0.55,
+  'Nunito Sans':       0.55,
+  'DM Sans':           0.54,
+  'Manrope':           0.55,
+  'Work Sans':         0.52,
+  'Rubik':             0.55,
+  'Plus Jakarta Sans': 0.55,
+  'Outfit':            0.55,
+  'Geist':             0.52,
+  'Public Sans':       0.52,
+  'IBM Plex Sans':     0.52,
+  'Source Sans 3':     0.50,
+  'Karla':             0.50,
+  'Mulish':            0.53,
+  // Serif (typically wider)
+  'Playfair Display':  0.55,
+  'Merriweather':      0.62,
+  'PT Serif':          0.55,
+  'Lora':              0.55,
+  'Roboto Slab':       0.55,
+  'Source Serif 4':    0.55,
+  'Crimson Text':      0.52,
+  'Spectral':          0.55,
+  'EB Garamond':       0.50,
+  'Bitter':            0.55,
+  // Display (often condensed)
+  'Oswald':            0.40,
+  'Bebas Neue':        0.42,
+  'Archivo':           0.55,
+  'Anton':             0.40,
+  'Gloock':            0.55,
+  // Monospace (square advance)
+  'JetBrains Mono':    0.60,
+  'Roboto Mono':       0.60,
+  'Fira Code':         0.60,
+  'IBM Plex Mono':     0.60,
+  'Source Code Pro':   0.60,
+  'Space Mono':        0.60,
+  // Handwriting
+  'Caveat':            0.45,
+  'Dancing Script':    0.50,
+  'Pacifico':          0.55,
+  // System stacks
+  'System Sans':       0.52,
+  'System Serif':      0.55,
+  'System Mono':       0.60,
+};
+
+const DEFAULT_EM_WIDTH = 0.55;
+
+/**
  * Compile a styled-text wordmark to an SVG document. Uses the
  * configured wordmark typography (family, weight, size, letter-spacing,
  * case) and per-segment colors.
@@ -183,13 +259,13 @@ function compileTextWordmark(rawJson: string, tokens: Record<string, string>): s
   const textTransform = tokens['wordmark_text_transform'] || 'none';
 
   // viewBox math: use 64 as the canonical font-size for SVG layout,
-  // then estimate width per segment. Letter-spacing in em becomes
-  // additional space-per-character on top of the per-glyph advance.
+  // then estimate width per segment using the per-family em-width
+  // table. Letter-spacing in em adds to the per-glyph advance.
   const SIZE = 64;
-  const EM_WIDTH = 0.55;          // sans-serif approximation
+  const emWidth = FAMILY_EM_WIDTHS[family] ?? DEFAULT_EM_WIDTH;
   const lsMatch = /^(-?[\d.]+)em$/.exec(letterSpacing);
   const lsEm = lsMatch ? parseFloat(lsMatch[1]) : 0;
-  const advance = SIZE * (EM_WIDTH + lsEm);
+  const advance = SIZE * (emWidth + lsEm);
 
   // Apply text-transform server-side so the rendered glyph count
   // matches what the operator configured (lowercase + uppercase
@@ -235,7 +311,16 @@ function compileTextWordmark(rawJson: string, tokens: Record<string, string>): s
     ? ''
     : `<defs><style>@import url('https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, '+')}:wght@${weight}&amp;display=swap');</style></defs>`;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" font-family="${escapeXml(family)}" font-weight="${escapeXml(weight)}" font-style="${escapeXml(style)}" font-size="${SIZE}" letter-spacing="${escapeXml(letterSpacing)}">${fontImport}<text y="${baselineY}">${tspans.join('')}</text></svg>`;
+  // textLength + lengthAdjust force the browser to render the text
+  // at EXACTLY our computed width. This eliminates the gap between
+  // our estimate and the browser's natural rendering — critical for
+  // the composition layer (which positions icons relative to
+  // wordmark width). The trade-off is potential slight glyph
+  // stretching/squishing, but for a wordmark this is invisible-to-
+  // acceptable. lengthAdjust="spacingAndGlyphs" distributes the
+  // adjustment across both letter-spacing and the glyphs themselves,
+  // looking more natural than the spacing-only mode.
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" font-family="${escapeXml(family)}" font-weight="${escapeXml(weight)}" font-style="${escapeXml(style)}" font-size="${SIZE}" letter-spacing="${escapeXml(letterSpacing)}">${fontImport}<text y="${baselineY}" textLength="${width}" lengthAdjust="spacingAndGlyphs">${tspans.join('')}</text></svg>`;
 }
 
 function escapeXml(s: string): string {

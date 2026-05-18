@@ -324,6 +324,42 @@ export function createCredentialsRoutes(): App {
   });
 
   /**
+   * GET /favicon.svg — modern-browser favicon served as SVG.
+   *
+   * Modern browsers (Chrome 92+, Firefox 41+, Safari 16+) accept
+   * <link rel="icon" type="image/svg+xml" href="/favicon.svg"> and
+   * render it at every favicon size — tab, bookmark, history.
+   * That covers ~95% of users without rasterization.
+   *
+   * Source priority:
+   *   1. Operator's uploaded SVG icon mark (logo_icon_mark_svg)
+   *   2. Generated mono-brand of icon-only composition
+   *   3. 404 (browser falls back to /favicon.ico if present)
+   *
+   * Legacy .ico support — `logo_favicon` raster upload still works
+   * via the standard brand-asset path when an operator pre-uploaded
+   * one. Older browsers consume that.
+   */
+  app.get('/favicon.svg', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.notFound();
+    const { getIconSvg } = await import('../services/brand-assets');
+    const svg = await getIconSvg(c.env, workspace.id);
+    if (!svg) return c.notFound();
+    return new Response(svg, {
+      headers: {
+        'Content-Type': 'image/svg+xml; charset=utf-8',
+        // Long cache — operators bump their icon by uploading a new
+        // one which gets a new R2 key, so this URL effectively keys
+        // on whatever the current `logo_icon_mark_svg` token points at.
+        // Brand CSS revalidation (v0.1.23 ETag) handles cache-busting
+        // when the operator updates anything brand-related.
+        'Cache-Control': 'public, max-age=3600, must-revalidate',
+      },
+    });
+  });
+
+  /**
    * Shared R2 brand-asset reader. Used by both the canonical path and
    * the optional /assets/<key> alias. Scoped to keys under `brand/` so
    * the alias cannot exfiltrate other R2 prefixes.
