@@ -204,12 +204,20 @@ function compileTextWordmark(rawJson: string, tokens: Record<string, string>): s
   const transformed = segments.map((s) => ({ ...s, text: transformText(s.text) }));
   const totalChars = transformed.reduce((n, s) => n + s.text.length, 0);
   const width = Math.ceil(totalChars * advance);
-  // Height ~ cap-height (~0.7 of em-box) with 10% breathing.
-  const height = Math.ceil(SIZE * 0.85);
+  // viewBox height must accommodate the FULL em-box of the text plus
+  // a little breathing room. SVG <text> places the baseline at y=`y`,
+  // and glyphs extend UP from baseline by cap-height (~0.75 × font-size)
+  // AND descenders extend DOWN by ~0.25 × font-size. So total glyph
+  // extent is ~1.0 × font-size from the top of caps to the bottom of
+  // descenders. Earlier math used 0.85 × SIZE which clipped both the
+  // tops of caps and the bottoms of descenders — invisible logo.
+  const ASCENT_FRACTION = 0.8;    // baseline as fraction of viewBox height
+  const HEIGHT_FACTOR = 1.05;     // em-box + small breathing room
+  const height = Math.ceil(SIZE * HEIGHT_FACTOR);
+  const baselineY = Math.round(height * ASCENT_FRACTION);
 
   // Build the SVG with absolute positioning. x cursor advances by
-  // each segment's measured width. Baseline at 80% of height keeps
-  // descenders visible.
+  // each segment's measured width.
   let x = 0;
   const tspans: string[] = [];
   for (const seg of transformed) {
@@ -218,7 +226,16 @@ function compileTextWordmark(rawJson: string, tokens: Record<string, string>): s
     x += seg.text.length * advance;
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" font-family="${escapeXml(family)}" font-weight="${escapeXml(weight)}" font-style="${escapeXml(style)}" font-size="${SIZE}" letter-spacing="${escapeXml(letterSpacing)}"><text y="${Math.floor(height * 0.78)}">${tspans.join('')}</text></svg>`;
+  // When the wordmark uses a non-system font, embed an @import so
+  // the SVG renders correctly even inside <img> tags (which run SVGs
+  // in a sandboxed mode without access to the host page's font CSS).
+  // System stacks (system-ui, Georgia, ui-monospace) need no import.
+  const isSystem = /system-ui|^(serif|sans-serif|monospace)$|Georgia|ui-monospace|-apple-system/i.test(family);
+  const fontImport = isSystem
+    ? ''
+    : `<defs><style>@import url('https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, '+')}:wght@${weight}&amp;display=swap');</style></defs>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" font-family="${escapeXml(family)}" font-weight="${escapeXml(weight)}" font-style="${escapeXml(style)}" font-size="${SIZE}" letter-spacing="${escapeXml(letterSpacing)}">${fontImport}<text y="${baselineY}">${tspans.join('')}</text></svg>`;
 }
 
 function escapeXml(s: string): string {
