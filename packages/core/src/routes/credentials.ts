@@ -309,6 +309,30 @@ export function createCredentialsRoutes(): App {
       });
     }
 
+    // 5. Workers R2 Storage — list buckets on the account. Powers the
+    // bucket picker in the credentials tab so operators can choose an
+    // R2 bucket from a dropdown rather than typing the name into
+    // wrangler.toml by hand.
+    if (accountId) {
+      const r2R = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets`,
+        { headers: auth },
+      );
+      scopes.push({
+        name: 'Workers R2 Storage:Read',
+        ok: r2R.ok,
+        detail: r2R.ok
+          ? 'Token can list R2 buckets.'
+          : `HTTP ${r2R.status} — token likely missing Workers R2 Storage scope.`,
+      });
+    } else {
+      scopes.push({
+        name: 'Workers R2 Storage:Read',
+        ok: false,
+        detail: 'Cannot test — set the Cloudflare Account ID first.',
+      });
+    }
+
     // Persist for the UI to render on next load without retesting.
     await setCredential(
       c.env, workspace.id, 'cf_token_scope_status', 'connection',
@@ -316,6 +340,107 @@ export function createCredentialsRoutes(): App {
     );
 
     return c.json({ scopes });
+  });
+
+  /**
+   * GET /_ensemble/credentials/r2/buckets
+   *
+   * Lists every R2 bucket in the operator's Cloudflare account. Uses
+   * the Cloudflare API token already configured in the credentials
+   * tab. Powers the bucket picker so operators can choose from a
+   * dropdown instead of typing the bucket name into wrangler.toml.
+   *
+   * Also reports binding health: whether `c.env.R2` is wired up at all,
+   * and (if so) whether the previously-stored "selected bucket" is the
+   * one currently bound. We can't read the bucket name from the
+   * binding directly — Cloudflare doesn't expose it — so we infer it
+   * from the workspace-settings `r2_selected_bucket` value plus a
+   * `c.env.R2.list({ limit: 1 })` reachability probe.
+   */
+  app.get('/_ensemble/credentials/r2/buckets', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+
+    const token = await getCredential(c.env, workspace.id, 'cloudflare_api_token');
+    const accountId = await getCredential(c.env, workspace.id, 'cloudflare_account_id');
+
+    // Binding health: independent of token. Tells operators whether
+    // their wrangler.toml is already wired up.
+    let bindingReachable = false;
+    if ((c.env as { R2?: R2Bucket }).R2) {
+      try {
+        await (c.env as { R2: R2Bucket }).R2.list({ limit: 1 });
+        bindingReachable = true;
+      } catch {
+        bindingReachable = false;
+      }
+    }
+
+    const selectedBucket = (await getSetting(c.env, workspace.id, 'r2_selected_bucket')).trim();
+
+    if (!token || !accountId) {
+      return c.json({
+        buckets: [],
+        bindingReachable,
+        selectedBucket,
+        error: !token ? 'No Cloudflare API token set' : 'No Cloudflare Account ID set',
+      });
+    }
+
+    const res = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!res.ok) {
+      return c.json({
+        buckets: [],
+        bindingReachable,
+        selectedBucket,
+        error: `Cloudflare API HTTP ${res.status} — token likely missing Workers R2 Storage:Read scope.`,
+      });
+    }
+
+    type CfBucket = { name: string; creation_date?: string };
+    const body = (await res.json()) as { result?: { buckets?: CfBucket[] } };
+    const buckets = (body.result?.buckets ?? []).map((b) => ({
+      name: b.name,
+      created_at: b.creation_date,
+    }));
+
+    return c.json({
+      buckets,
+      bindingReachable,
+      selectedBucket,
+    });
+  });
+
+  /**
+   * PUT /_ensemble/credentials/r2/selected-bucket
+   *
+   * Stores which bucket the operator picked from the dropdown. Doesn't
+   * actually change any binding — that requires editing wrangler.toml
+   * and redeploying — but persisting the choice lets the UI remember
+   * it and lets the wrangler-snippet auto-populate on subsequent visits.
+   */
+  app.put('/_ensemble/credentials/r2/selected-bucket', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+
+    const body = await c.req.json<{ name: string }>().catch(() => ({ name: '' }));
+    const name = (body.name ?? '').trim();
+    // Light validation: CF R2 bucket names are 3–63 chars, lowercase,
+    // dashes/numbers/letters. Mirror that here so the UI can't store
+    // garbage that won't match anything in the dropdown.
+    if (name && !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(name)) {
+      return c.json({ error: 'Invalid bucket name' }, 400);
+    }
+
+    await setSetting(c.env, workspace.id, 'r2_selected_bucket', name);
+    return c.json({ ok: true, selectedBucket: name });
   });
 
   app.post('/_ensemble/credentials/test/email', async (c) => {

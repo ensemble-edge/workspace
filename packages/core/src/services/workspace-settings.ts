@@ -25,7 +25,13 @@ export type SettingKey =
   | 'asset_public_alias_path'
   // v0.1.15.1: when 'true', the public brand guide page at /brand is
   // reachable without auth. When 'false' or unset, /brand 404s.
-  | 'public_brand_guide_enabled';
+  | 'public_brand_guide_enabled'
+  // v0.1.28+: name of the R2 bucket the operator picked from the
+  // credentials-tab dropdown. Doesn't change the actual binding —
+  // that lives in wrangler.toml — but the UI uses this to remember
+  // the operator's choice and to auto-populate the wrangler snippet
+  // they paste before redeploy.
+  | 'r2_selected_bucket';
 
 export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
   // 30 days — matches typical workspace expectations. Operators can
@@ -35,6 +41,9 @@ export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
   asset_public_alias_path: '',
   // Brand guide off by default — operators opt in.
   public_brand_guide_enabled: 'false',
+  // No bucket selected by default — picker shows the operator's
+  // account buckets and prompts them to pick one.
+  r2_selected_bucket: '',
 };
 
 /**

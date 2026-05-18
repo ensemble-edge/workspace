@@ -16,7 +16,7 @@
  */
 
 import * as React from 'react';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Link2, Mail, Sparkles, Plus, RefreshCw, CheckCircle2, XCircle, Info, Circle,
   UploadCloud, Send,
@@ -76,6 +76,7 @@ const REQUIRED_SCOPES: Array<{ name: string; purpose: string }> = [
   { name: 'Zone DNS:Edit', purpose: 'Sending-domain DNS records (TXT/CNAME)' },
   { name: 'Email Routing Addresses:Edit', purpose: 'Inbound + Cloudflare-provider sends' },
   { name: 'AI Gateway:Edit', purpose: 'Provisioning AI tier routes' },
+  { name: 'Workers R2 Storage:Read', purpose: 'Listing R2 buckets for the picker' },
 ];
 
 export function ConnectionsTab() {
@@ -102,7 +103,7 @@ export function ConnectionsTab() {
     <TooltipProvider>
       <div className="space-y-6 max-w-3xl">
         <ConnectionCard creds={creds} onSaved={refresh} />
-        <AssetStorageCard />
+        <AssetStorageCard creds={creds} />
         <NotificationsCard creds={creds} onSaved={refresh} />
         <AiAccessCard creds={creds} onSaved={refresh} />
       </div>
@@ -112,28 +113,91 @@ export function ConnectionsTab() {
 
 // ─── Asset storage (R2) ───────────────────────────────────────────────
 
-function AssetStorageCard() {
-  const [status, setStatus] = useState<{
-    bound: boolean;
-    writable: boolean;
-    detail: string;
-  } | null>(null);
-  const [checking, setChecking] = useState(false);
+interface R2BucketSummary {
+  name: string;
+  created_at?: string;
+}
+
+interface R2BucketsResponse {
+  buckets: R2BucketSummary[];
+  bindingReachable: boolean;
+  selectedBucket: string;
+  error?: string;
+}
+
+function AssetStorageCard({ creds }: { creds: Record<string, CredentialSummary> }) {
+  // Read the cached scope-status to know if the operator's CF token
+  // has Workers R2 Storage:Read. If it doesn't, the bucket picker is
+  // useless — we still show the card but in a disabled state with a
+  // direct pointer to the fix.
+  const cachedScopes = useMemo<ScopeResult[]>(() => {
+    try {
+      const raw = creds['cf_token_scope_status']?.value;
+      return raw ? (JSON.parse(raw) as ScopeResult[]) : [];
+    } catch { return []; }
+  }, [creds]);
+  const r2ScopeOk = cachedScopes.find((s) => s.name === 'Workers R2 Storage:Read')?.ok ?? false;
+  const tokenSet = !!creds['cloudflare_api_token']?.set;
+  const accountIdSet = !!creds['cloudflare_account_id']?.set;
+
+  const [data, setData] = useState<R2BucketsResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(async () => {
-    setChecking(true);
+    if (!tokenSet || !accountIdSet) return;
+    setLoading(true);
     try {
-      const r = await authedFetch('/_ensemble/r2/status');
-      if (r.ok) setStatus((await r.json()) as typeof status);
+      const r = await authedFetch('/_ensemble/credentials/r2/buckets');
+      if (r.ok) setData((await r.json()) as R2BucketsResponse);
     } finally {
-      setChecking(false);
+      setLoading(false);
     }
-  }, []);
+  }, [tokenSet, accountIdSet]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const overall: 'done' | 'pending' =
-    status?.bound && status.writable ? 'done' : 'pending';
+  async function selectBucket(name: string) {
+    setSaving(true);
+    try {
+      const r = await authedFetch('/_ensemble/credentials/r2/selected-bucket', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (r.ok) {
+        setData((prev) => prev ? { ...prev, selectedBucket: name } : prev);
+        toast.success(name ? `Selected ${name}` : 'Cleared bucket selection');
+      } else {
+        const err = (await r.json().catch(() => ({}))) as { error?: string };
+        toast.error('Could not save', { description: err.error });
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const buckets = data?.buckets ?? [];
+  const selected = data?.selectedBucket || '';
+  const bindingReachable = data?.bindingReachable ?? false;
+  const selectedBucketExists = selected ? buckets.some((b) => b.name === selected) : false;
+
+  // Three-state derivation for the selected bucket:
+  //   verified  — bucket exists AND binding is reachable
+  //   exists    — bucket exists in the operator's CF account but binding isn't deployed
+  //   missing   — operator previously picked this bucket but it's no longer in the account
+  const bucketState: 'verified' | 'exists' | 'missing' | 'unset' =
+    !selected ? 'unset'
+    : !selectedBucketExists ? 'missing'
+    : bindingReachable ? 'verified'
+    : 'exists';
+
+  const wranglerSnippet = `[[r2_buckets]]\nbinding = "R2"\nbucket_name = "${selected || 'YOUR_BUCKET_NAME'}"`;
+
+  const overall: 'done' | 'pending' = bucketState === 'verified' ? 'done' : 'pending';
+
+  // Disabled state when the prerequisite scope/credential is missing.
+  const disabled = !tokenSet || !accountIdSet || !r2ScopeOk;
 
   return (
     <Card>
@@ -144,56 +208,143 @@ function AssetStorageCard() {
               <UploadCloud className="h-5 w-5" /> Asset storage (R2)
             </CardTitle>
             <CardDescription>
-              R2 bucket for brand logos and other uploaded assets. Configured at deploy
-              time in <span className="font-mono">wrangler.toml</span>, not here.
+              Pick an R2 bucket from your Cloudflare account; the binding still
+              lives in <span className="font-mono">wrangler.toml</span>.
             </CardDescription>
           </div>
           <StatusBadge status={overall} optional />
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
-        {status && (
-          <div className="space-y-1.5 text-sm">
-            <div className="flex items-center gap-2">
-              {status.bound ? (
-                <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-              ) : (
-                <XCircle className="h-4 w-4 text-destructive shrink-0" />
+
+      <CardContent className="space-y-4">
+        {disabled && (
+          <div className="rounded-md border border-amber-300/50 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm space-y-1">
+            <p className="font-medium">Prerequisites missing</p>
+            <ul className="text-xs space-y-0.5 list-disc list-inside text-muted-foreground">
+              {!tokenSet && <li>Cloudflare API token not set (above)</li>}
+              {!accountIdSet && <li>Cloudflare Account ID not set (above)</li>}
+              {tokenSet && accountIdSet && !r2ScopeOk && (
+                <li>
+                  Token missing <span className="font-mono">Workers R2 Storage:Read</span> scope.
+                  {' '}Add it at{' '}
+                  <a className="underline" target="_blank" rel="noreferrer noopener"
+                     href="https://dash.cloudflare.com/profile/api-tokens">
+                    Cloudflare → API Tokens
+                  </a>
+                  .
+                </li>
               )}
-              <span>Binding present</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {status.writable ? (
-                <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-              ) : (
-                <XCircle className="h-4 w-4 text-destructive shrink-0" />
-              )}
-              <span>Writable</span>
-            </div>
-            <p className="text-xs text-muted-foreground">{status.detail}</p>
+            </ul>
           </div>
         )}
 
-        {!status?.bound && (
-          <div className="rounded-md border bg-muted/40 p-3 space-y-2">
-            <p className="text-xs font-medium">Add this to your <span className="font-mono">wrangler.toml</span>:</p>
-            <pre className="text-xs font-mono bg-background border rounded p-2 overflow-x-auto">{`[[r2_buckets]]
-binding = "R2"
-bucket_name = "my-workspace-assets"`}</pre>
-            <p className="text-xs text-muted-foreground">
-              Create the bucket first with{' '}
-              <span className="font-mono">wrangler r2 bucket create my-workspace-assets</span>.
-              Then redeploy the Worker.
-            </p>
+        {/* Bucket picker */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <Label className="text-xs">Bucket</Label>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={refresh}
+              disabled={disabled || loading}
+              className="h-6 px-2"
+            >
+              <RefreshCw className={`h-3 w-3 mr-1 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+          <Select
+            value={selected || ''}
+            onValueChange={(v) => selectBucket(v)}
+            disabled={disabled || loading || saving}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder={loading ? 'Loading buckets…' : 'Pick a bucket…'} />
+            </SelectTrigger>
+            <SelectContent>
+              {buckets.length === 0 && !loading && (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                  No buckets in this Cloudflare account.{' '}
+                  <a className="underline" target="_blank" rel="noreferrer noopener"
+                     href="https://dash.cloudflare.com/?to=/:account/r2">
+                    Create one
+                  </a>
+                  , then click Refresh.
+                </div>
+              )}
+              {buckets.map((b) => (
+                <SelectItem key={b.name} value={b.name}>{b.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {data?.error && (
+            <p className="text-xs text-destructive">{data.error}</p>
+          )}
+        </div>
+
+        {/* Two-line health summary */}
+        {selected && (
+          <div className="rounded-md border bg-muted/30 p-3 space-y-1.5 text-sm">
+            <div className="flex items-center gap-2">
+              {selectedBucketExists ? (
+                <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+              ) : (
+                <XCircle className="h-4 w-4 text-destructive shrink-0" />
+              )}
+              <span>
+                <strong>Bucket:</strong>{' '}
+                {selectedBucketExists
+                  ? <><span className="font-mono">{selected}</span> exists in your Cloudflare account</>
+                  : <>Selected <span className="font-mono">{selected}</span> was not found — pick a different bucket</>
+                }
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {bindingReachable ? (
+                <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+              ) : (
+                <XCircle className="h-4 w-4 text-amber-500 shrink-0" />
+              )}
+              <span>
+                <strong>Binding:</strong>{' '}
+                {bindingReachable
+                  ? 'Bound and reachable from the workspace worker'
+                  : 'Not yet bound — paste the snippet below into wrangler.toml and redeploy'
+                }
+              </span>
+            </div>
           </div>
         )}
+
+        {/* Auto-populated wrangler snippet */}
+        <div className="rounded-md border bg-muted/40 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium">
+              Add to your <span className="font-mono">wrangler.toml</span>:
+            </p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2"
+              onClick={() => {
+                navigator.clipboard.writeText(wranglerSnippet);
+                toast.success('Snippet copied');
+              }}
+            >
+              Copy
+            </Button>
+          </div>
+          <pre className="text-xs font-mono bg-background border rounded p-2 overflow-x-auto">{wranglerSnippet}</pre>
+          <p className="text-xs text-muted-foreground">
+            Then run <span className="font-mono">npx wrangler deploy</span> to apply
+            the binding. The <span className="font-mono">binding = "R2"</span> line
+            must stay exactly that — workspace code references{' '}
+            <span className="font-mono">c.env.R2</span> throughout.
+          </p>
+        </div>
       </CardContent>
-      <CardFooter>
-        <Button variant="outline" size="sm" onClick={refresh} disabled={checking}>
-          <RefreshCw className={`h-3 w-3 mr-1 ${checking ? 'animate-spin' : ''}`} />
-          {checking ? 'Checking…' : 'Re-test'}
-        </Button>
-      </CardFooter>
     </Card>
   );
 }
