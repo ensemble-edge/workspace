@@ -1,6 +1,6 @@
 {
   "name": "@ensemble-edge/core",
-  "version": "0.0.1",
+  "version": "0.1.36",
   "type": "module",
   "description": "Ensemble Workspace engine — shell, gateway, and services",
   "main": "src/index.ts",
