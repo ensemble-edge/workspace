@@ -70,6 +70,30 @@ export function createCredentialsRoutes(): App {
   ]);
   const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
+  /**
+   * Slots that REQUIRE an SVG master. These produce derived rasters
+   * via the generation engine; uploading a raster as the master breaks
+   * the derived-variant pipeline. Other slots (favicon, social_avatar,
+   * og_image) accept raster because they're output-only formats with
+   * no useful vector source.
+   */
+  const SVG_REQUIRED_ROLES = new Set(['wordmark', 'icon_mark', 'lockup']);
+
+  /** Compute next version number for the same role+variant prefix. */
+  async function nextVersion(
+    r2: R2Bucket, prefix: string,
+  ): Promise<number> {
+    // R2.list returns keys sorted lexically. We list under the
+    // prefix-before-version and parse the v<n> token out of each.
+    const listed = await r2.list({ prefix, limit: 100 });
+    let max = 0;
+    for (const obj of listed.objects) {
+      const m = obj.key.match(/-v(\d+)-/);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    return max + 1;
+  }
+
   app.post('/_ensemble/brand/upload', async (c) => {
     const adminCheck = requireAdmin(c);
     if (adminCheck instanceof Response) return adminCheck;
@@ -82,7 +106,7 @@ export function createCredentialsRoutes(): App {
 
     const form = await c.req.formData();
     const file = form.get('file');
-    const kind = (form.get('kind') as string) || 'logo';
+    const kindRaw = (form.get('kind') as string) || 'logo';
     if (!(file instanceof File)) {
       return c.json({ error: 'No file provided (form field "file")' }, 400);
     }
@@ -93,10 +117,69 @@ export function createCredentialsRoutes(): App {
       return c.json({ error: `File too large (max ${MAX_UPLOAD_BYTES / 1024 / 1024}MB)` }, 413);
     }
 
-    // Generate a non-guessable key; the kind is descriptive only.
+    // Parse `kind` into role + variant. Client sends shapes like:
+    //   wordmark_base   → role=wordmark, variant=base
+    //   wordmark_dark   → role=wordmark, variant=dark
+    //   wordmark_svg    → role=wordmark, variant=master   (legacy alias)
+    //   icon_mark_dark_svg → role=icon_mark, variant=dark
+    //   social_avatar_base → role=social_avatar, variant=base
+    // Two-word roles (icon_mark, social_avatar, og_image) need careful
+    // splitting — match the longest known role prefix.
+    const KNOWN_ROLES = ['icon_mark', 'social_avatar', 'og_image', 'lockup', 'wordmark', 'favicon'];
+    let role = 'logo';
+    let variant = 'base';
+    for (const r of KNOWN_ROLES) {
+      if (kindRaw === r || kindRaw.startsWith(r + '_')) {
+        role = r;
+        const suffix = kindRaw.slice(r.length).replace(/^_/, '');
+        variant = suffix || 'base';
+        break;
+      }
+    }
+    // Normalize 'svg' suffix → 'master' (the canonical variant name
+    // for vector originals). Strip _svg from compound variants.
+    if (variant === 'svg') variant = 'master';
+    else if (variant.endsWith('_svg')) variant = variant.slice(0, -4);
+    // 'base' is the canonical default variant — we surface it as
+    // 'primary' in filenames so the brand-asset semantics are clear.
+    if (variant === 'base') variant = 'primary';
+
+    // Enforce SVG-only for vector-required roles. Allow raster on
+    // legitimately raster-only slots (favicon, social_avatar, og_image).
+    if (SVG_REQUIRED_ROLES.has(role) && file.type !== 'image/svg+xml') {
+      return c.json({
+        error: 'SVG master required',
+        detail:
+          `The ${role} slot requires an SVG file. We generate PNG, JPG, ` +
+          `and other formats at any size on demand from the SVG master — ` +
+          `uploading a raster here would break the derived-variant pipeline. ` +
+          `Convert your file to SVG and try again.`,
+      }, 415);
+    }
+
+    // Detect resolution. SVGs get 'master'; rasters get the pixel
+    // width parsed from the file's image header. We parse a small
+    // prefix of the file to avoid pulling the whole thing into memory
+    // just for dimensions.
     const ext = extensionFor(file.type);
-    const id = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
-    const key = `brand/${workspace.id}/${kind}/${id}${ext}`;
+    let resolution = 'master';
+    if (file.type !== 'image/svg+xml') {
+      try {
+        const head = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+        const w = parseImageWidth(head, file.type);
+        if (w) resolution = String(w);
+      } catch { /* fall back to 'master' */ }
+    }
+
+    // Self-describing R2 key:
+    //   brand/<slug>/<role>/<slug>-<role>-<variant>-<resolution>-v<n>-<hash>.<ext>
+    const slug = (workspace.slug || workspace.id).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const safeVariant = variant.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const versionPrefix = `brand/${slug}/${role}/${slug}-${role}-${safeVariant}-`;
+    const v = await nextVersion(r2, versionPrefix);
+    const hash = crypto.randomUUID().replace(/-/g, '').slice(0, 6);
+    const filename = `${slug}-${role}-${safeVariant}-${resolution}-v${v}-${hash}${ext}`;
+    const key = `brand/${slug}/${role}/${filename}`;
 
     await r2.put(key, file.stream(), {
       httpMetadata: { contentType: file.type },
@@ -104,10 +187,7 @@ export function createCredentialsRoutes(): App {
 
     // Canonical URL is always returned for storage. When the operator
     // has configured a public alias path (e.g. 'media'), we also
-    // include the pretty form (/media/<key>) as `display_url` so the
-    // UI's "Copy URL" can show the operator's chosen path. Stored
-    // brand_token values stay canonical — changing the alias path
-    // never breaks stored data.
+    // include the pretty form (/media/<key>) as `display_url`.
     const canonical = `/_ensemble/brand/asset/${encodeURIComponent(key)}`;
     const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
     const display = aliasPath
@@ -117,9 +197,12 @@ export function createCredentialsRoutes(): App {
     return c.json({
       ok: true,
       key,
-      // Canonical (workspace-served, permanent) URL — always present.
+      role,
+      variant: safeVariant,
+      resolution,
+      version: v,
+      filename,
       url: canonical,
-      // Pretty URL when alias is enabled; same as `url` otherwise.
       display_url: display,
     });
   });
@@ -1146,4 +1229,60 @@ function extensionFor(mime: string): string {
       return '.ico';
     default: return '';
   }
+}
+
+/**
+ * Parse pixel width from the first 64 bytes of a raster image. Returns
+ * null for unrecognized formats. Used by the upload route to embed
+ * the resolution into the self-describing filename.
+ *
+ * PNG: width at bytes 16-19 (big-endian uint32) after the 8-byte
+ *   PNG signature and the IHDR chunk header.
+ * JPEG: SOFn marker (0xFFC0–C3) followed by length + precision; width
+ *   is at offset 7 from the marker as a big-endian uint16.
+ * WebP: VP8/VP8L/VP8X chunk at byte 12+ contains width — we handle
+ *   only the lossy VP8 + lossless VP8L variants which cover ~99% of
+ *   browser-produced webp.
+ */
+function parseImageWidth(buf: Uint8Array, mime: string): number | null {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  if (mime === 'image/png' && buf.length >= 24) {
+    // PNG header: 89 50 4E 47 0D 0A 1A 0A, then IHDR chunk (length 4,
+    // type 'IHDR', then width 4, height 4).
+    return view.getUint32(16, false);
+  }
+  if (mime === 'image/jpeg' && buf.length >= 32) {
+    // Walk JPEG segments until we hit a SOFn marker.
+    let i = 2; // skip SOI (FFD8)
+    while (i < buf.length - 10) {
+      if (buf[i] !== 0xff) break;
+      const marker = buf[i + 1];
+      const segLen = view.getUint16(i + 2, false);
+      // SOF0/1/2/3 — baseline + progressive variants
+      if (marker >= 0xc0 && marker <= 0xc3) {
+        return view.getUint16(i + 7, false);
+      }
+      i += 2 + segLen;
+    }
+    return null;
+  }
+  if (mime === 'image/webp' && buf.length >= 30) {
+    // RIFF....WEBPVP8 or VP8L or VP8X
+    const fourcc = String.fromCharCode(buf[12], buf[13], buf[14], buf[15]);
+    if (fourcc === 'VP8 ') {
+      // bytes 26-27, little-endian, 14-bit (mask 0x3fff)
+      return view.getUint16(26, true) & 0x3fff;
+    }
+    if (fourcc === 'VP8L') {
+      // bytes 21-22, packed: width-1 in 14 bits little-endian
+      const b1 = buf[21];
+      const b2 = buf[22];
+      return ((b2 << 8) | b1 & 0xff) + 1 - ((b1 & 0xc0) << 8) /* sign-correct mask */;
+    }
+    if (fourcc === 'VP8X' && buf.length >= 30) {
+      // bytes 24-26 little-endian 24-bit width-1
+      return ((buf[26] << 16) | (buf[25] << 8) | buf[24]) + 1;
+    }
+  }
+  return null;
 }

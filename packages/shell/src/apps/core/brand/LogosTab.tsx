@@ -58,37 +58,67 @@ interface SlotDef {
   description: string;
   /** Which variants are settable for this slot. */
   variants: Variant[];
+  /**
+   * When true, this slot ONLY accepts SVG masters. Every derived
+   * format/size/theme is generated from the SVG on demand by the
+   * brand-asset generation engine.
+   */
+  svgOnly?: boolean;
+  /** Author-guideline tooltip shown next to the upload card. */
+  guideline?: string;
 }
+
+const SVG_AUTHOR_GUIDELINE =
+  'Upload an SVG master.\n' +
+  '• Use your brand colors as authored — we generate mono-black, mono-white, and mono-brand finishes from this source.\n' +
+  '• Use currentColor for the primary mark fill so it theme-swaps automatically.\n' +
+  '• For accent fills, use CSS class names: brand-primary, brand-secondary, brand-accent — they swap to match the active palette.\n' +
+  '• ViewBox should be tight (no excess whitespace) — we add safe-area padding when needed.\n' +
+  '• No embedded raster images or external font references — convert text to paths.\n' +
+  '• Minimum 64×64 viewBox; recommended 512×512 or 1024×1024.';
 
 const SLOTS: SlotDef[] = [
   {
     key: 'wordmark',
     label: 'Wordmark',
-    description: 'Full company name logo',
-    variants: ['base', 'dark', 'svg', 'dark_svg'],
+    description:
+      'Full company name logo. Use styled text (typography-driven) or upload an SVG. ' +
+      'Every PNG / favicon / dark variant is generated on demand from this source.',
+    // Wordmark uniquely supports text-OR-SVG; the variants array is
+    // unused for the SVG side because we only accept a single master.
+    variants: ['svg'],
+    svgOnly: true,
+    guideline: SVG_AUTHOR_GUIDELINE,
   },
   {
     key: 'icon_mark',
     label: 'Icon Mark',
-    description: 'Square icon/symbol (used in sidebar)',
-    variants: ['base', 'dark', 'svg', 'dark_svg'],
+    description:
+      'Square icon/symbol. SVG only — the favicon suite, social avatar, ' +
+      'and every other raster size are generated from this one master.',
+    variants: ['svg'],
+    svgOnly: true,
+    guideline: SVG_AUTHOR_GUIDELINE,
   },
-  {
-    key: 'favicon',
-    label: 'Favicon',
-    description: 'Browser tab icon. Falls back to icon mark if empty.',
-    variants: ['base', 'dark', 'svg', 'dark_svg'],
-  },
+  // Favicon slot intentionally removed in v0.1.31. Favicons are
+  // generated automatically from the icon mark (full 10-file canonical
+  // suite: favicon.ico, favicon.svg, favicon-16x16, favicon-32x32,
+  // apple-touch-icon, icon-192, icon-512, mstile-150, site.webmanifest,
+  // browserconfig.xml).
   {
     key: 'social_avatar',
     label: 'Social Avatar',
-    description: 'Square image for social profiles (raster only)',
+    description:
+      'Square image for social profiles. Raster allowed — these are ' +
+      'output-only formats with no useful vector source.',
     variants: ['base'],
   },
   {
     key: 'og_image',
     label: 'OG Image',
-    description: '1200×630 for social sharing previews (raster only)',
+    description:
+      '1200×630 for social sharing previews. Raster allowed — typically ' +
+      'designed as a composed image rather than derived from a logo.',
     variants: ['base'],
   },
 ];
@@ -200,6 +230,39 @@ export function LogosTab() {
     setTokens((prev) => ({ ...prev, [key]: value }));
   }
 
+  /**
+   * Autosave a single token immediately. Used by upload flows so the
+   * R2 artifact and its brand_token row are persisted as one logical
+   * action — refreshing the page after an upload now remembers the
+   * file (was the v0.1.30 bug: R2 had the file, brand_tokens didn't
+   * know about it, refresh wiped the in-memory pointer).
+   *
+   * Updates the dirty-tracking baseline so the SaveStatus indicator
+   * stays clean and the bottom "Save Logos" button doesn't light up.
+   */
+  async function persistToken(key: string, value: string) {
+    setTokens((prev) => {
+      const next = { ...prev, [key]: value };
+      // Update the dirty baseline so this autosaved change doesn't
+      // count as an unsaved edit.
+      status.resetBaseline(next);
+      return next;
+    });
+    try {
+      const res = await authedFetch('/_ensemble/brand/tokens', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: 'identity', tokens: { [key]: value } }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      emitWorkspaceEvent('brand.tokens.changed', { category: 'identity' });
+    } catch (e) {
+      toast.error('Autosave failed', {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
   async function handleSave() {
     status.beginSave();
     try {
@@ -234,6 +297,7 @@ export function LogosTab() {
               slot={slot}
               tokens={tokens}
               onChange={setToken}
+              onPersist={persistToken}
               fontCatalog={fontCatalog}
               onFirstSearch={upgradeCatalog}
             />
@@ -243,6 +307,7 @@ export function LogosTab() {
               slot={slot}
               tokens={tokens}
               onChange={setToken}
+              onPersist={persistToken}
             />
           )
         ))}
@@ -272,12 +337,14 @@ function WordmarkCard({
   slot,
   tokens,
   onChange,
+  onPersist,
   fontCatalog,
   onFirstSearch,
 }: {
   slot: SlotDef;
   tokens: Record<string, string>;
   onChange: (key: string, value: string) => void;
+  onPersist: (key: string, value: string) => Promise<void>;
   fontCatalog: GoogleFontEntry[];
   onFirstSearch?: () => void;
 }) {
@@ -347,7 +414,7 @@ function WordmarkCard({
             />
           </div>
         ) : (
-          <ImageVariantBlock slot={slot} tokens={tokens} onChange={onChange} />
+          <ImageVariantBlock slot={slot} tokens={tokens} onChange={onChange} onPersist={onPersist} />
         )}
       </CardContent>
     </Card>
@@ -362,10 +429,12 @@ function ImageVariantBlock({
   slot,
   tokens,
   onChange,
+  onPersist,
 }: {
   slot: SlotDef;
   tokens: Record<string, string>;
   onChange: (key: string, value: string) => void;
+  onPersist: (key: string, value: string) => Promise<void>;
 }) {
   const optionalVariants: Variant[] = slot.variants.filter((v) => v !== 'base');
   const [expanded, setExpanded] = useState<Set<Variant>>(() => {
@@ -403,7 +472,7 @@ function ImageVariantBlock({
       next.delete(v);
       return next;
     });
-    onChange(tokenKey(slot.key, v), '');
+    onPersist(tokenKey(slot.key, v), '');
   }
 
   const baseValue = tokens[tokenKey(slot.key, 'base')] || '';
@@ -414,16 +483,18 @@ function ImageVariantBlock({
       <VariantSlot
         slotKey={slot.key}
         variant="base"
+        slotDef={slot}
         value={baseValue}
-        onChange={(v) => onChange(tokenKey(slot.key, 'base'), v)}
+        onChange={(v) => onPersist(tokenKey(slot.key, 'base'), v)}
       />
       {[...expanded].map((variant) => (
         <VariantSlot
           key={variant}
           slotKey={slot.key}
           variant={variant}
+          slotDef={slot}
           value={tokens[tokenKey(slot.key, variant)] || ''}
-          onChange={(v) => onChange(tokenKey(slot.key, variant), v)}
+          onChange={(v) => onPersist(tokenKey(slot.key, variant), v)}
           onRemove={() => collapseVariant(variant)}
         />
       ))}
@@ -450,10 +521,18 @@ function SlotCard({
   slot,
   tokens,
   onChange,
+  onPersist,
 }: {
   slot: SlotDef;
   tokens: Record<string, string>;
+  /** In-memory token update for non-upload edits. */
   onChange: (key: string, value: string) => void;
+  /**
+   * Persisted token update for upload flows — writes to brand_tokens
+   * immediately so the file is saved as soon as the upload completes.
+   * No more "uploaded but forgot to hit Save."
+   */
+  onPersist: (key: string, value: string) => Promise<void>;
 }) {
   const optionalVariants: Variant[] = slot.variants.filter((v) => v !== 'base');
 
@@ -496,7 +575,9 @@ function SlotCard({
       next.delete(v);
       return next;
     });
-    onChange(tokenKey(slot.key, v), '');
+    // Clearing a variant persists immediately too — symmetrical with
+    // upload-autosave so removed variants stay removed across refresh.
+    onPersist(tokenKey(slot.key, v), '');
   }
 
   const baseValue = tokens[tokenKey(slot.key, 'base')] || '';
@@ -512,8 +593,9 @@ function SlotCard({
         <VariantSlot
           slotKey={slot.key}
           variant="base"
+          slotDef={slot}
           value={baseValue}
-          onChange={(v) => onChange(tokenKey(slot.key, 'base'), v)}
+          onChange={(v) => onPersist(tokenKey(slot.key, 'base'), v)}
         />
 
         {[...expanded].map((variant) => (
@@ -521,8 +603,9 @@ function SlotCard({
             key={variant}
             slotKey={slot.key}
             variant={variant}
+            slotDef={slot}
             value={tokens[tokenKey(slot.key, variant)] || ''}
-            onChange={(v) => onChange(tokenKey(slot.key, variant), v)}
+            onChange={(v) => onPersist(tokenKey(slot.key, variant), v)}
             onRemove={() => collapseVariant(variant)}
           />
         ))}
@@ -550,20 +633,32 @@ function SlotCard({
 function VariantSlot({
   slotKey,
   variant,
+  slotDef,
   value,
   onChange,
   onRemove,
 }: {
   slotKey: string;
   variant: Variant;
+  /** Slot metadata, including svgOnly flag and author guideline text. */
+  slotDef: SlotDef;
   value: string;
+  /**
+   * Called with the canonical URL after a successful upload. Parent
+   * routes this to `onPersist` so the brand_tokens row is written
+   * immediately — operators no longer have to remember to hit Save.
+   */
   onChange: (url: string) => void;
   onRemove?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
-  const isSvg = variant === 'svg' || variant === 'dark_svg';
+  // SVG-required slots (wordmark, icon_mark, lockup) accept ONLY SVG;
+  // legacy variant-named slots ('svg' / 'dark_svg') also force SVG.
+  // Raster-output-only slots (social_avatar, og_image) accept the
+  // full raster allowlist.
+  const isSvg = slotDef.svgOnly || variant === 'svg' || variant === 'dark_svg';
   const accept = isSvg
     ? 'image/svg+xml'
     : 'image/png,image/jpeg,image/webp,image/x-icon,image/vnd.microsoft.icon';
@@ -600,7 +695,19 @@ function VariantSlot({
   return (
     <div className="rounded-md border p-3 space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium">{VARIANT_LABEL[variant]}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-medium">
+            {slotDef.svgOnly ? 'SVG master' : VARIANT_LABEL[variant]}
+          </span>
+          {slotDef.guideline && (
+            <span
+              title={slotDef.guideline}
+              className="text-muted-foreground cursor-help text-[10px] border rounded px-1 py-0.5"
+            >
+              ?
+            </span>
+          )}
+        </div>
         {onRemove && (
           <Button
             type="button"
