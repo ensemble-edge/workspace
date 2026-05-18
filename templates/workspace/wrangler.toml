@@ -5,15 +5,25 @@ compatibility_date = "2024-01-01"
 [vars]
 WORKSPACE_NAME = "My Workspace"
 
+# D1 — required. Binding name MUST stay "DB" (Ensemble reads c.env.DB).
 [[d1_databases]]
 binding = "DB"
 database_name = "my-workspace-db"
 database_id = ""
 
+# KV — required. Binding name MUST stay "KV" (sessions, AI Gateway
+# cache, Google Fonts cache, brand CSS cache all read c.env.KV).
 [[kv_namespaces]]
-binding = "CACHE"
+binding = "KV"
 id = ""
 
+# R2 — optional. Hosts brand-asset uploads and any operator file
+# storage. Default binding name is "R2"; if your existing project
+# already binds R2 under another name (FILES, STORAGE, ASSETS, ...)
+# you can change the binding here AND update the workspace's
+# "Binding name" setting in Brand → Connections → Asset Storage to
+# match. Pick a bucket name in the workspace UI; the picker
+# auto-populates a copy-pasteable wrangler snippet.
 [[r2_buckets]]
-binding = "FILES"
-bucket_name = "my-workspace-files"
+binding = "R2"
+bucket_name = ""
