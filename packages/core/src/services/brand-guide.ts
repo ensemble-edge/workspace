@@ -19,6 +19,12 @@ interface Env {
 
 interface BrandData {
   workspace_name: string;
+  /**
+   * Brand description for the public guide. Sourced from the
+   * `elevator_pitch` messaging token (operator-editable in
+   * Brand → Messaging), NOT a column on the workspaces table —
+   * workspaces only carries identity, not narrative copy.
+   */
   workspace_description: string | null;
   tagline: string | null;
   accent: string;
@@ -27,9 +33,9 @@ interface BrandData {
 }
 
 async function loadBrandData(env: Env, workspaceId: string): Promise<BrandData> {
-  const ws = await env.DB.prepare(`SELECT name, description FROM workspaces WHERE id = ?`)
+  const ws = await env.DB.prepare(`SELECT name FROM workspaces WHERE id = ?`)
     .bind(workspaceId)
-    .first<{ name: string; description: string | null }>();
+    .first<{ name: string }>();
 
   const rows = await env.DB.prepare(
     `SELECT key, value, category FROM brand_tokens
@@ -44,7 +50,11 @@ async function loadBrandData(env: Env, workspaceId: string): Promise<BrandData> 
 
   return {
     workspace_name: ws?.name ?? 'Workspace',
-    workspace_description: ws?.description ?? null,
+    // Source description from elevator_pitch — it's the closest
+    // operator-curated "what does this workspace do" string we have.
+    // Falls back to null so the brand-guide renderer can hide the
+    // description block entirely.
+    workspace_description: tokens['elevator_pitch'] ?? null,
     tagline: tokens['tagline'] ?? null,
     accent: tokens['accent'] || '#3B82F6',
     tokens,
