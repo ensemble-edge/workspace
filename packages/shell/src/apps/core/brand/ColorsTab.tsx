@@ -28,7 +28,7 @@ import {
   toast,
 } from '@ensemble-edge/ui';
 
-import { generatePalette, getRelativeLuminance } from './color-utils';
+import { generatePalette, getRelativeLuminance, autoForeground } from './color-utils';
 import { authedFetch, emitWorkspaceEvent } from '../../../state';
 import { useFormStatus } from '../../../hooks/useFormStatus';
 
@@ -51,6 +51,16 @@ export function ColorsTab() {
   const [brandSecondary, setBrandSecondary] = useState('#1e293b');
   const [brandAccent, setBrandAccent] = useState('#ef4444');
 
+  // v0.1.32+: theme-readiness foundation. Required for the brand-asset
+  // generator to produce dark-mode logo variants and for the brand
+  // guide to render the approved finish × background matrix. Operator
+  // sets the canonical light + dark backgrounds; foregrounds auto-
+  // derive (black on light, white on dark) but operator can override.
+  const [brandBgLight, setBrandBgLight] = useState('#ffffff');
+  const [brandBgDark, setBrandBgDark] = useState('#0a0a0a');
+  const [brandFgLight, setBrandFgLight] = useState('');  // empty = auto-derive
+  const [brandFgDark, setBrandFgDark] = useState('');    // empty = auto-derive
+
   const [groups, setGroups] = useState<ColorGroup[]>([]);
   const [semanticColors, setSemanticColors] = useState({
     success: '#5B8A72',
@@ -64,7 +74,11 @@ export function ColorsTab() {
   });
   const [loaded, setLoaded] = useState(false);
   const status = useFormStatus({
-    value: { brandPrimary, brandSecondary, brandAccent, groups, semanticColors },
+    value: {
+      brandPrimary, brandSecondary, brandAccent,
+      brandBgLight, brandBgDark, brandFgLight, brandFgDark,
+      groups, semanticColors,
+    },
     mode: 'manual',
   });
   const saving = status.state === 'saving';
@@ -99,6 +113,14 @@ export function ColorsTab() {
           setBrandSecondary(token.value);
         } else if (token.key === 'brand-accent') {
           setBrandAccent(token.value);
+        } else if (token.key === 'brand-background-light') {
+          setBrandBgLight(token.value);
+        } else if (token.key === 'brand-background-dark') {
+          setBrandBgDark(token.value);
+        } else if (token.key === 'brand-foreground-light') {
+          setBrandFgLight(token.value);
+        } else if (token.key === 'brand-foreground-dark') {
+          setBrandFgDark(token.value);
         }
       }
 
@@ -118,7 +140,11 @@ export function ColorsTab() {
   // bug where a microtask reset reads the pre-load defaults.
   useEffect(() => {
     if (!loaded) return;
-    status.resetBaseline({ brandPrimary, brandSecondary, brandAccent, groups, semanticColors });
+    status.resetBaseline({
+      brandPrimary, brandSecondary, brandAccent,
+      brandBgLight, brandBgDark, brandFgLight, brandFgDark,
+      groups, semanticColors,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
@@ -232,15 +258,22 @@ export function ColorsTab() {
         if (!res.ok) throw new Error(`Failed to save ${group.label}`);
       }
 
-      // Save semantic colors
+      // Save semantic colors + theme-foundation pair in one PUT.
       const semRes = await authedFetch('/_ensemble/brand/tokens', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           category: 'colors',
-          tokens: Object.fromEntries(
-            Object.entries(semanticColors).map(([k, v]) => [`semantic.${k}`, v])
-          ),
+          tokens: {
+            ...Object.fromEntries(
+              Object.entries(semanticColors).map(([k, v]) => [`semantic.${k}`, v])
+            ),
+            'brand-background-light': brandBgLight,
+            'brand-background-dark': brandBgDark,
+            // Empty values clear the override and re-enable auto-derive.
+            'brand-foreground-light': brandFgLight,
+            'brand-foreground-dark': brandFgDark,
+          },
         }),
       });
       if (!semRes.ok) throw new Error('Failed to save semantic colors');
@@ -272,6 +305,73 @@ export function ColorsTab() {
               onChange={(v) => updateBrandColor('brand-secondary', v, setBrandSecondary)} />
             <BrandColorPicker label="Accent" description="Action / highlight" value={brandAccent}
               onChange={(v) => updateBrandColor('brand-accent', v, setBrandAccent)} />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Theme foundation — required for dark-mode logo generation and
+          for the brand guide's approved finish × background matrix. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Theme foundation</CardTitle>
+          <CardDescription>
+            Required light + dark background pair. Foreground colors auto-derive for
+            contrast unless overridden. These drive dark-mode logo generation and
+            the brand guide's finish × background matrix.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="space-y-3">
+              <BrandColorPicker
+                label="Background — Light"
+                description="Light-mode canvas (typically near-white)"
+                value={brandBgLight}
+                onChange={setBrandBgLight}
+              />
+              <div className="space-y-1.5">
+                <Label className="text-xs">Foreground — Light (optional override)</Label>
+                <div className="flex gap-2 items-center">
+                  <Input
+                    type="text"
+                    value={brandFgLight}
+                    onChange={(e) => setBrandFgLight(e.target.value)}
+                    placeholder={`auto: ${autoForeground(brandBgLight)}`}
+                    className="font-mono text-xs h-8"
+                  />
+                  {brandFgLight && (
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setBrandFgLight('')}>
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <BrandColorPicker
+                label="Background — Dark"
+                description="Dark-mode canvas (typically near-black)"
+                value={brandBgDark}
+                onChange={setBrandBgDark}
+              />
+              <div className="space-y-1.5">
+                <Label className="text-xs">Foreground — Dark (optional override)</Label>
+                <div className="flex gap-2 items-center">
+                  <Input
+                    type="text"
+                    value={brandFgDark}
+                    onChange={(e) => setBrandFgDark(e.target.value)}
+                    placeholder={`auto: ${autoForeground(brandBgDark)}`}
+                    className="font-mono text-xs h-8"
+                  />
+                  {brandFgDark && (
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setBrandFgDark('')}>
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>

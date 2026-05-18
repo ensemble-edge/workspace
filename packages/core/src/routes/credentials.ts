@@ -208,6 +208,124 @@ export function createCredentialsRoutes(): App {
   });
 
   /**
+   * GET /_ensemble/core/brand/logo-policy — current policy + computed
+   * banned pairs based on the workspace's brand backgrounds. The UI
+   * uses this to render the composition tab + the variants matrix.
+   */
+  app.get('/_ensemble/core/brand/logo-policy', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const { loadPolicy, effectiveBannedPairs } = await import('../services/brand-policy');
+    const policy = await loadPolicy(c.env.DB, workspace.id);
+
+    // Fetch brand colors needed for contrast-based ban computation.
+    const rows = await c.env.DB.prepare(
+      `SELECT key, value FROM brand_tokens
+       WHERE workspace_id = ? AND category = 'colors' AND locale = ''
+         AND key IN ('brand-primary', 'brand-background-light', 'brand-background-dark')`,
+    ).bind(workspace.id).all<{ key: string; value: string }>();
+    const colors = { bgLight: '#ffffff', bgDark: '#0a0a0a', primary: '#3b82f6' };
+    for (const r of rows.results ?? []) {
+      if (r.key === 'brand-primary') colors.primary = r.value;
+      else if (r.key === 'brand-background-light') colors.bgLight = r.value;
+      else if (r.key === 'brand-background-dark') colors.bgDark = r.value;
+    }
+    const effectiveBans = effectiveBannedPairs(policy, colors);
+    return c.json({ policy, effectiveBans, brandColors: colors });
+  });
+
+  /** PUT /_ensemble/core/brand/logo-policy — admin-only policy update. */
+  app.put('/_ensemble/core/brand/logo-policy', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const body = await c.req.json().catch(() => ({}));
+    const { savePolicy, defaultPolicy } = await import('../services/brand-policy');
+    // Merge with default to ensure schema completeness.
+    const merged = { ...defaultPolicy(), ...body, version: 1 };
+    await savePolicy(c.env.DB, workspace.id, merged);
+    return c.json({ ok: true });
+  });
+
+  /**
+   * GET /_ensemble/core/brand/render
+   *
+   * The brand-asset generator endpoint. Returns an SVG representation
+   * of a composed, finish-applied, background-composited variant.
+   *
+   * Query params:
+   *   composition = wordmark-only | icon-only | stacked | horizontal
+   *   finish      = full-color | mono-black | mono-white | mono-brand
+   *   bg          = transparent | light | dark
+   *   download    = 1 (optional) — adds Content-Disposition: attachment
+   *
+   * Refuses banned combinations with 422.
+   *
+   * Raster output (PNG/JPG/WebP via resvg-wasm) ships in a follow-up
+   * release — operators wanting raster today download SVG and convert
+   * externally, OR use a modern browser which renders SVG natively.
+   */
+  app.get('/_ensemble/core/brand/render', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+
+    const composition = (c.req.query('composition') || 'wordmark-only') as 'wordmark-only' | 'icon-only' | 'stacked' | 'horizontal';
+    const finish = (c.req.query('finish') || 'full-color') as 'full-color' | 'mono-black' | 'mono-white' | 'mono-brand';
+    const backgroundId = c.req.query('bg') || 'transparent';
+
+    const { loadPolicy, isPairAllowed } = await import('../services/brand-policy');
+    const { renderBrandAsset } = await import('../services/brand-assets');
+
+    const policy = await loadPolicy(c.env.DB, workspace.id);
+
+    // Brand colors for finish resolution + WCAG contrast checks.
+    const rows = await c.env.DB.prepare(
+      `SELECT key, value FROM brand_tokens
+       WHERE workspace_id = ? AND category = 'colors' AND locale = ''
+         AND key IN ('brand-primary', 'brand-background-light', 'brand-background-dark')`,
+    ).bind(workspace.id).all<{ key: string; value: string }>();
+    const brandColors = { bgLight: '#ffffff', bgDark: '#0a0a0a', primary: '#3b82f6' };
+    for (const r of rows.results ?? []) {
+      if (r.key === 'brand-primary') brandColors.primary = r.value;
+      else if (r.key === 'brand-background-light') brandColors.bgLight = r.value;
+      else if (r.key === 'brand-background-dark') brandColors.bgDark = r.value;
+    }
+
+    if (!isPairAllowed(policy, brandColors, finish, backgroundId)) {
+      return c.json({
+        error: 'banned_combination',
+        detail: `${finish} on ${backgroundId} is not an approved brand use.`,
+      }, 422);
+    }
+
+    const url = new URL(c.req.url);
+    const baseUrl = `${url.protocol}//${url.host}`;
+    const svg = await renderBrandAsset(
+      { composition, finish, backgroundId },
+      { workspaceId: workspace.id, baseUrl, db: c.env.DB, policy, brandColors },
+    );
+
+    if (!svg) {
+      return c.json({
+        error: 'render_failed',
+        detail: 'Source SVG(s) missing or composition not allowed. Upload a wordmark + icon master in Brand → Logos.',
+      }, 404);
+    }
+
+    const headers = new Headers({
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600',
+    });
+    const slug = (workspace.slug || workspace.id).toLowerCase();
+    const filename = `${slug}-${composition}-${finish}-${backgroundId}.svg`;
+    if (c.req.query('download') === '1') {
+      headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+    }
+    return new Response(svg, { headers });
+  });
+
+  /**
    * Shared R2 brand-asset reader. Used by both the canonical path and
    * the optional /assets/<key> alias. Scoped to keys under `brand/` so
    * the alias cannot exfiltrate other R2 prefixes.
@@ -222,6 +340,17 @@ export function createCredentialsRoutes(): App {
     if (!obj) return c.json({ error: 'Not found' }, 404);
     const headers = new Headers();
     obj.writeHttpMetadata(headers);
+    // Operator-friendly download filename: strip the version + hash
+    // segments so designers see a clean name like
+    // 'cl-workspace-wordmark-primary-master.svg' instead of the
+    // full storage key.
+    const tail = key.split('/').pop() || 'asset';
+    const stripped = tail.replace(/-v\d+-[a-z0-9]{6}(\.[a-z0-9]+)$/i, '$1');
+    if (c.req.query('download') === '1') {
+      headers.set('Content-Disposition', `attachment; filename="${stripped}"`);
+    } else {
+      headers.set('Content-Disposition', `inline; filename="${stripped}"`);
+    }
     headers.set('etag', obj.httpEtag);
     headers.set('Cache-Control', 'public, max-age=3600');
     return new Response(obj.body, { headers });

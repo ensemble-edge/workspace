@@ -259,6 +259,13 @@ export function OverviewTab() {
         <TypographySpecimenCard fonts={activeFonts} />
       )}
 
+      {/* Logo variants matrix — composition × finish × background.
+          Renders only approved combinations. Each cell exposes copy
+          (SVG markup / URL) and download (SVG) actions. The brand
+          guide shows the same matrix + the banned-uses gallery. */}
+      <LogoVariantsCard />
+
+
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Messaging */}
         {hasMessaging && (
@@ -425,6 +432,165 @@ function SpecimenRow({ role, font }: { role: FontRoleKey; font: ResolvedFontRole
       {font.usage && (
         <p className="text-xs text-muted-foreground/80 mt-1">{font.usage}</p>
       )}
+    </div>
+  );
+}
+
+// ─── Logo Variants ─────────────────────────────────────────────────
+
+type CompositionId = 'wordmark-only' | 'icon-only' | 'stacked' | 'horizontal';
+type FinishId = 'full-color' | 'mono-black' | 'mono-white' | 'mono-brand';
+
+interface PolicyResponse {
+  policy: {
+    compositions: Record<CompositionId, { allowed: boolean }>;
+    finishes: Array<{ id: FinishId; label: string; allowed: boolean }>;
+    backgrounds: Array<{ id: string; label: string; allowed: boolean }>;
+  };
+  effectiveBans: Array<{ finishId: FinishId; backgroundId: string; reason?: string }>;
+}
+
+/**
+ * Full Composition × Finish × Background matrix. Only renders cells
+ * that are approved by the operator's policy AND pass WCAG contrast.
+ * Each cell shows the live-generated SVG and exposes copy + download
+ * actions.
+ */
+function LogoVariantsCard() {
+  const [policy, setPolicy] = useState<PolicyResponse | null>(null);
+
+  useEffect(() => {
+    authedFetch('/_ensemble/core/brand/logo-policy')
+      .then((r) => r.json() as Promise<PolicyResponse>)
+      .then(setPolicy)
+      .catch(() => { /* no policy → card hidden */ });
+  }, []);
+
+  if (!policy) return null;
+
+  const approvedComps = (Object.entries(policy.policy.compositions) as Array<[CompositionId, { allowed: boolean }]>)
+    .filter(([, c]) => c.allowed)
+    .map(([id]) => id);
+  const approvedFinishes = policy.policy.finishes.filter((f) => f.allowed);
+  const approvedBgs = policy.policy.backgrounds.filter((b) => b.allowed);
+
+  const banSet = new Set(
+    policy.effectiveBans.map((b) => `${b.finishId}|${b.backgroundId}`),
+  );
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2">
+          <Palette className="h-5 w-5" /> Logo variants
+        </CardTitle>
+        <CardDescription>
+          Approved compositions × finishes × backgrounds. Every cell is
+          generated live from your SVG masters and brand colors. Download
+          SVG, copy markup, or copy URL for any cell.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {approvedComps.map((composition) => (
+          <div key={composition} className="space-y-2">
+            <p className="text-xs uppercase tracking-wider text-muted-foreground">
+              {composition.replace('-', ' ')}
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {approvedFinishes.flatMap((finish) =>
+                approvedBgs.map((bg) => {
+                  if (banSet.has(`${finish.id}|${bg.id}`)) return null;
+                  return (
+                    <VariantCell
+                      key={`${composition}-${finish.id}-${bg.id}`}
+                      composition={composition}
+                      finish={finish}
+                      background={bg}
+                    />
+                  );
+                }),
+              )}
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function VariantCell({
+  composition,
+  finish,
+  background,
+}: {
+  composition: CompositionId;
+  finish: { id: FinishId; label: string };
+  background: { id: string; label: string };
+}) {
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const renderUrl = `/_ensemble/core/brand/render?composition=${composition}&finish=${finish.id}&bg=${encodeURIComponent(background.id)}`;
+  const downloadUrl = `${renderUrl}&download=1`;
+
+  // Dark backgrounds render the cell with a dark frame so the operator
+  // sees the variant in its intended context. Light/transparent stay
+  // light. We rely on a few hex heuristics rather than re-fetching the
+  // brand colors.
+  const isDarkBg = background.id === 'dark';
+
+  async function copyMarkup() {
+    try {
+      const r = await authedFetch(renderUrl);
+      const svg = await r.text();
+      await navigator.clipboard.writeText(svg);
+      toast.success('SVG copied to clipboard');
+    } catch {
+      toast.error('Copy failed');
+    }
+  }
+
+  async function copyUrl() {
+    await navigator.clipboard.writeText(baseUrl + renderUrl);
+    toast.success('URL copied');
+  }
+
+  return (
+    <div
+      className={
+        isDarkBg
+          ? 'rounded-md border p-3 bg-zinc-900 text-zinc-100'
+          : 'rounded-md border p-3 bg-muted/30'
+      }
+    >
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] uppercase tracking-wider opacity-70">
+          {finish.label} · {background.label}
+        </p>
+      </div>
+      <div className="flex items-center justify-center h-24 mb-2 rounded">
+        {/* Embed the generated SVG via <img> — the browser fetches it
+            and renders inline; no special handling needed because the
+            render endpoint returns image/svg+xml. */}
+        <img
+          src={renderUrl}
+          alt={`${composition} — ${finish.label} on ${background.label}`}
+          className="max-h-20 max-w-full"
+        />
+      </div>
+      <div className="flex flex-wrap gap-1">
+        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs"
+          onClick={copyMarkup}>
+          Copy SVG
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs"
+          onClick={copyUrl}>
+          Copy URL
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" asChild>
+          <a href={downloadUrl} download>
+            <Download className="h-3 w-3 mr-1" /> SVG
+          </a>
+        </Button>
+      </div>
     </div>
   );
 }

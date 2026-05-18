@@ -150,3 +150,27 @@ export function generatePalette(hex: string): Palette {
     900: hslToHex(h, s, lightnesses[900]),
   };
 }
+
+/**
+ * Auto-derive a readable foreground color for a given background.
+ * Returns near-black for light backgrounds, near-white for dark ones.
+ * Used by the Colors tab and the brand-asset generator to default
+ * foregrounds when the operator hasn't set an explicit override.
+ */
+export function autoForeground(backgroundHex: string): string {
+  const lum = getRelativeLuminance(backgroundHex);
+  return lum > 0.5 ? '#0a0a0a' : '#fafafa';
+}
+
+/**
+ * WCAG contrast ratio between two colors. Returns a number where
+ * 4.5+ is AA, 7+ is AAA. Used by the brand-asset policy to auto-flag
+ * banned finish × background pairs.
+ */
+export function contrastRatio(fgHex: string, bgHex: string): number {
+  const l1 = getRelativeLuminance(fgHex);
+  const l2 = getRelativeLuminance(bgHex);
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}

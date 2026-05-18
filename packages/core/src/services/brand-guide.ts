@@ -69,6 +69,23 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
   const wordmarkDark = resolveBrandImage(brand.tokens, 'wordmark', { mode: 'dark' });
   const iconDark = resolveBrandImage(brand.tokens, 'icon_mark', { mode: 'dark' });
 
+  // v0.1.32+: policy-driven approved + banned variants. The variants
+  // gallery pulls live from the generator endpoint; the banned-uses
+  // gallery renders the same logo with red Xs and a reason caption.
+  const { loadPolicy, effectiveBannedPairs } = await import('./brand-policy');
+  const policy = await loadPolicy(env.DB, workspaceId);
+  const brandColors = {
+    bgLight: brand.tokens['brand-background-light'] || '#ffffff',
+    bgDark: brand.tokens['brand-background-dark'] || '#0a0a0a',
+    primary: brand.tokens['brand-primary'] || brand.accent,
+  };
+  const bannedPairs = effectiveBannedPairs(policy, brandColors);
+  const approvedComps = (Object.entries(policy.compositions) as Array<[string, { allowed: boolean }]>)
+    .filter(([, c]) => c.allowed).map(([id]) => id);
+  const approvedFinishes = policy.finishes.filter((f) => f.allowed);
+  const approvedBgs = policy.backgrounds.filter((b) => b.allowed);
+  const banSet = new Set(bannedPairs.map((b) => `${b.finishId}|${b.backgroundId}`));
+
   const font =
     tokens('font_sans', brand.tokens) ||
     `-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif`;
@@ -133,6 +150,66 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
             </section>`
           : ''
       }
+
+      <section>
+        <h2>Approved uses</h2>
+        <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">
+          Every composition × finish × background combination approved by this brand.
+          Use these freely.
+        </p>
+        ${approvedComps.map((composition) => `
+          <p style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;margin:16px 0 8px;">
+            ${escapeHtml(composition.replace('-', ' '))}
+          </p>
+          <div class="logo-grid">
+            ${approvedFinishes.flatMap((finish) =>
+              approvedBgs.map((bg) => {
+                if (banSet.has(`${finish.id}|${bg.id}`)) return '';
+                const renderUrl = `/_ensemble/core/brand/render?composition=${composition}&finish=${finish.id}&bg=${encodeURIComponent(bg.id)}`;
+                const isDark = bg.id === 'dark';
+                return `<div>
+                  <div class="logo-tile${isDark ? ' dark' : ''}">
+                    <img src="${escapeAttr(renderUrl)}" alt="${escapeHtml(`${finish.label} on ${bg.label}`)}">
+                  </div>
+                  <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">${escapeHtml(`${finish.label} · ${bg.label}`)}</p>
+                </div>`;
+              }),
+            ).join('')}
+          </div>
+        `).join('')}
+      </section>
+
+      ${bannedPairs.length > 0 ? `
+      <section>
+        <h2>Banned uses</h2>
+        <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">
+          Don't use the logo in these combinations — they're either illegible
+          (insufficient contrast) or off-brand by policy.
+        </p>
+        <div class="logo-grid">
+          ${bannedPairs.map((ban) => {
+            const finish = policy.finishes.find((f) => f.id === ban.finishId);
+            const bg = policy.backgrounds.find((b) => b.id === ban.backgroundId);
+            if (!finish || !bg) return '';
+            const renderUrl = `/_ensemble/core/brand/render?composition=wordmark-only&finish=${ban.finishId}&bg=${encodeURIComponent(ban.backgroundId)}`;
+            const isDark = ban.backgroundId === 'dark';
+            return `<div>
+              <div class="logo-tile${isDark ? ' dark' : ''}" style="position:relative;">
+                <img src="${escapeAttr(renderUrl)}" alt="banned use">
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+                  <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <line x1="5" y1="5" x2="95" y2="95" stroke="#c62828" stroke-width="3"/>
+                    <line x1="95" y1="5" x2="5" y2="95" stroke="#c62828" stroke-width="3"/>
+                  </svg>
+                </div>
+              </div>
+              <p style="font-size:12px;color:#c62828;margin:8px 0 0;font-weight:600;">${escapeHtml(`${finish.label} · ${bg.label}`)}</p>
+              ${ban.reason ? `<p style="font-size:11px;color:#6b7280;margin:2px 0 0;">${escapeHtml(ban.reason)}</p>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      </section>
+      ` : ''}
 
       ${
         colorEntries.length > 0
