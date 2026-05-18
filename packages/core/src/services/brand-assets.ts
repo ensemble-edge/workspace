@@ -17,9 +17,11 @@
  * download SVG and convert externally if they need raster.
  */
 import type { D1Database } from '@cloudflare/workers-types';
+import type { Env } from '../types';
 import type {
   CompositionId, FinishId, LogoPolicy,
 } from './brand-policy';
+import { getR2Bucket } from './r2-binding';
 
 /* ──────────────────────────────────────────────────────────────
  * Source resolution
@@ -41,9 +43,8 @@ interface WordmarkSegment {
  *   own bounding box thanks to text-anchor / dominant-baseline.
  */
 export async function getWordmarkSvg(
-  env: { DB: D1Database },
+  env: Env,
   workspaceId: string,
-  baseUrl: string,
 ): Promise<string | null> {
   const tokens = await loadIdentityTokens(env.DB, workspaceId);
 
@@ -60,7 +61,7 @@ export async function getWordmarkSvg(
   const url = tokens['logo_wordmark_svg'] || tokens['logo_wordmark'];
   if (url) {
     if (url.endsWith('.svg') || tokens['logo_wordmark_svg']) {
-      return fetchSvg(baseUrl, url);
+      return readSvgFromR2(env, workspaceId, url);
     }
     // Raster sources (legacy PNG wordmarks) can't be composed — caller
     // should branch on null and use the raster URL directly.
@@ -74,15 +75,14 @@ export async function getWordmarkSvg(
  * Resolve the icon mark to SVG. Returns null when no SVG icon is set.
  */
 export async function getIconSvg(
-  env: { DB: D1Database },
+  env: Env,
   workspaceId: string,
-  baseUrl: string,
 ): Promise<string | null> {
   const tokens = await loadIdentityTokens(env.DB, workspaceId);
   const url = tokens['logo_icon_mark_svg'] || tokens['logo_icon_mark'];
   if (!url) return null;
   if (!url.endsWith('.svg') && !tokens['logo_icon_mark_svg']) return null;
-  return fetchSvg(baseUrl, url);
+  return readSvgFromR2(env, workspaceId, url);
 }
 
 async function loadIdentityTokens(db: D1Database, workspaceId: string): Promise<Record<string, string>> {
@@ -95,12 +95,52 @@ async function loadIdentityTokens(db: D1Database, workspaceId: string): Promise<
   return out;
 }
 
-async function fetchSvg(baseUrl: string, urlPath: string): Promise<string | null> {
+/**
+ * Read an SVG asset from R2 directly via the binding — NOT via HTTP
+ * self-fetch. The brand_token value is a canonical URL like
+ *   /_ensemble/brand/asset/<encoded-key>
+ * or the configured public-alias path; we extract the underlying
+ * R2 key and read it through c.env[r2-binding-name].
+ *
+ * This was the cause of the "broken images in waves" bug in v0.1.32:
+ * each variant cell fired an HTTP fetch back to the workspace itself,
+ * and 16+ concurrent cells exhausted the Worker subrequest budget,
+ * causing requests to sit in queue until the 30s subrequest timeout.
+ * Reading from R2 directly is faster, doesn't count against the
+ * subrequest budget, and is reliable under concurrent load.
+ */
+async function readSvgFromR2(
+  env: Env,
+  workspaceId: string,
+  urlOrKey: string,
+): Promise<string | null> {
+  // Extract R2 key from the stored URL. Canonical path is
+  // /_ensemble/brand/asset/<urlencoded-key>; aliased paths look like
+  // /<alias>/<urlencoded-key>. The key segment is always the URL-
+  // encoded R2 key; everything before it is presentation.
+  let key: string;
+  if (urlOrKey.startsWith('brand/')) {
+    // Raw key form (used by some legacy stores).
+    key = urlOrKey;
+  } else {
+    const canonicalMatch = /\/_ensemble\/brand\/asset\/(.+)$/.exec(urlOrKey);
+    if (canonicalMatch) {
+      key = decodeURIComponent(canonicalMatch[1]);
+    } else {
+      // Aliased form: /<alias>/<encoded-key>. Strip the first segment.
+      const m = /^\/[^/]+\/(.+)$/.exec(urlOrKey);
+      if (m) key = decodeURIComponent(m[1]);
+      else return null;
+    }
+  }
+  if (!key.startsWith('brand/')) return null;
+
+  const r2 = await getR2Bucket(env, workspaceId);
+  if (!r2) return null;
   try {
-    const fullUrl = urlPath.startsWith('http') ? urlPath : `${baseUrl}${urlPath}`;
-    const res = await fetch(fullUrl);
-    if (!res.ok) return null;
-    return await res.text();
+    const obj = await r2.get(key);
+    if (!obj) return null;
+    return await obj.text();
   } catch {
     return null;
   }
@@ -371,8 +411,7 @@ export interface RenderRequest {
 
 export interface RenderContext {
   workspaceId: string;
-  baseUrl: string;
-  db: D1Database;
+  env: Env;
   policy: LogoPolicy;
   brandColors: { bgLight: string; bgDark: string; primary: string };
 }
@@ -393,9 +432,11 @@ export async function renderBrandAsset(
     return null;
   }
 
-  // Source resolution.
-  const wordmarkSvg = await getWordmarkSvg({ DB: ctx.db }, ctx.workspaceId, ctx.baseUrl);
-  const iconSvg = await getIconSvg({ DB: ctx.db }, ctx.workspaceId, ctx.baseUrl);
+  // Source resolution — direct R2 reads via getR2Bucket, not HTTP
+  // self-fetches. Faster, no subrequest-budget pressure, no timeouts
+  // under concurrent variant-matrix renders.
+  const wordmarkSvg = await getWordmarkSvg(ctx.env, ctx.workspaceId);
+  const iconSvg = await getIconSvg(ctx.env, ctx.workspaceId);
 
   if (req.composition === 'wordmark-only') {
     if (!wordmarkSvg) return null;

@@ -299,11 +299,9 @@ export function createCredentialsRoutes(): App {
       }, 422);
     }
 
-    const url = new URL(c.req.url);
-    const baseUrl = `${url.protocol}//${url.host}`;
     const svg = await renderBrandAsset(
       { composition, finish, backgroundId },
-      { workspaceId: workspace.id, baseUrl, db: c.env.DB, policy, brandColors },
+      { workspaceId: workspace.id, env: c.env, policy, brandColors },
     );
 
     if (!svg) {
