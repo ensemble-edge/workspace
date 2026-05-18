@@ -279,27 +279,29 @@ function compileTextWordmark(rawJson: string, tokens: Record<string, string>): s
 
   const transformed = segments.map((s) => ({ ...s, text: transformText(s.text) }));
   const totalChars = transformed.reduce((n, s) => n + s.text.length, 0);
-  const width = Math.ceil(totalChars * advance);
-  // viewBox height must accommodate the FULL em-box of the text plus
-  // a little breathing room. SVG <text> places the baseline at y=`y`,
-  // and glyphs extend UP from baseline by cap-height (~0.75 × font-size)
-  // AND descenders extend DOWN by ~0.25 × font-size. So total glyph
-  // extent is ~1.0 × font-size from the top of caps to the bottom of
-  // descenders. Earlier math used 0.85 × SIZE which clipped both the
-  // tops of caps and the bottoms of descenders — invisible logo.
-  const ASCENT_FRACTION = 0.8;    // baseline as fraction of viewBox height
-  const HEIGHT_FACTOR = 1.05;     // em-box + small breathing room
+  // viewBox width: estimate with a 20% generous margin so even when
+  // our em-width is off, glyphs don't clip on the right.
+  const estimatedWidth = totalChars * advance;
+  const width = Math.ceil(estimatedWidth * 1.2);
+  // Height accommodates full em-box (caps + descenders) plus padding.
+  // SIZE × 1.2 gives ~10% padding above caps and below descenders so
+  // no clipping is possible even for tall fonts.
+  const HEIGHT_FACTOR = 1.2;
   const height = Math.ceil(SIZE * HEIGHT_FACTOR);
-  const baselineY = Math.round(height * ASCENT_FRACTION);
+  // Baseline at 80% of height puts cap-tops at ~y=12 (above zero) and
+  // descenders at ~y=80 — comfortably inside the viewBox.
+  const baselineY = Math.round(height * 0.8);
 
-  // Build the SVG with absolute positioning. x cursor advances by
-  // each segment's measured width.
-  let x = 0;
+  // Inline tspans (NO absolute x positions). The browser flows them
+  // left-to-right at their natural rendered widths, so multi-color
+  // segments meet seamlessly with no overlap and no gaps.
+  // Previously: each tspan had x="<estimate>" which (a) didn't account
+  // for actual glyph advances and (b) fought textLength's stretching,
+  // causing the overlap you reported.
   const tspans: string[] = [];
   for (const seg of transformed) {
     const fill = seg.color ? ` fill="${escapeXml(seg.color)}"` : '';
-    tspans.push(`<tspan x="${x}"${fill}>${escapeXml(seg.text)}</tspan>`);
-    x += seg.text.length * advance;
+    tspans.push(`<tspan${fill}>${escapeXml(seg.text)}</tspan>`);
   }
 
   // When the wordmark uses a non-system font, embed an @import so
@@ -307,20 +309,23 @@ function compileTextWordmark(rawJson: string, tokens: Record<string, string>): s
   // in a sandboxed mode without access to the host page's font CSS).
   // System stacks (system-ui, Georgia, ui-monospace) need no import.
   const isSystem = /system-ui|^(serif|sans-serif|monospace)$|Georgia|ui-monospace|-apple-system/i.test(family);
+  // Note: drop `&display=swap` from the URL. We can't put a bare `&`
+  // inside SVG XML (it would need to be `&amp;` for the XML parser
+  // but CSS sees `&amp;` literally and the URL becomes malformed).
+  // Skipping the param entirely produces a valid URL the CSS parser
+  // accepts. display=swap is a perf optimization, not required.
   const fontImport = isSystem
     ? ''
-    : `<defs><style>@import url('https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, '+')}:wght@${weight}&amp;display=swap');</style></defs>`;
+    : `<defs><style>@import url('https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, '+')}:wght@${weight}');</style></defs>`;
 
-  // textLength + lengthAdjust force the browser to render the text
-  // at EXACTLY our computed width. This eliminates the gap between
-  // our estimate and the browser's natural rendering — critical for
-  // the composition layer (which positions icons relative to
-  // wordmark width). The trade-off is potential slight glyph
-  // stretching/squishing, but for a wordmark this is invisible-to-
-  // acceptable. lengthAdjust="spacingAndGlyphs" distributes the
-  // adjustment across both letter-spacing and the glyphs themselves,
-  // looking more natural than the spacing-only mode.
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" font-family="${escapeXml(family)}" font-weight="${escapeXml(weight)}" font-style="${escapeXml(style)}" font-size="${SIZE}" letter-spacing="${escapeXml(letterSpacing)}">${fontImport}<text y="${baselineY}" textLength="${width}" lengthAdjust="spacingAndGlyphs">${tspans.join('')}</text></svg>`;
+  // No textLength. No absolute x on tspans. Let the browser do its
+  // job — render the text at its natural width with proper
+  // letter-spacing. The viewBox is generous enough that natural
+  // width fits even when our estimate is off. Composition layer
+  // uses the viewBox width as the wordmark width; the slight
+  // generous-margin is invisible because the text is left-anchored
+  // and the right-side breathing space looks intentional.
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" font-family="${escapeXml(family)}" font-weight="${escapeXml(weight)}" font-style="${escapeXml(style)}" font-size="${SIZE}" letter-spacing="${escapeXml(letterSpacing)}">${fontImport}<text x="0" y="${baselineY}">${tspans.join('')}</text></svg>`;
 }
 
 function escapeXml(s: string): string {
