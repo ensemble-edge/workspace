@@ -178,7 +178,7 @@ function compileTextWordmark(rawJson: string, tokens: Record<string, string>): s
     x += seg.text.length * advance;
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" font-family=${escapeXmlAttr(family)} font-weight="${weight}" font-style="${style}" font-size="${SIZE}" letter-spacing="${escapeXmlAttr(letterSpacing)}"><text y="${Math.floor(height * 0.78)}">${tspans.join('')}</text></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" font-family="${escapeXml(family)}" font-weight="${escapeXml(weight)}" font-style="${escapeXml(style)}" font-size="${SIZE}" letter-spacing="${escapeXml(letterSpacing)}"><text y="${Math.floor(height * 0.78)}">${tspans.join('')}</text></svg>`;
 }
 
 function escapeXml(s: string): string {
@@ -192,10 +192,6 @@ function escapeXml(s: string): string {
       default: return c;
     }
   });
-}
-
-function escapeXmlAttr(s: string): string {
-  return `"${escapeXml(s)}"`;
 }
 
 /* ──────────────────────────────────────────────────────────────
