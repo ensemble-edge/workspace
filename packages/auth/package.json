@@ -1,6 +1,6 @@
 {
   "name": "@ensemble-edge/auth",
-  "version": "0.0.1",
+  "version": "0.1.42",
   "description": "Ensemble workspace authentication - JWT, sessions, magic links, OIDC",
   "type": "module",
   "main": "./src/index.ts",
