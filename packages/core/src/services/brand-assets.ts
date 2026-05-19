@@ -470,40 +470,73 @@ export function composeLockup(
   const targetIconWidth = (iw / ih) * targetIconHeight;
 
   if (composition === 'stacked') {
-    const hAlign = config.hAlign ?? 'center';
+    // v0.1.47+: iconPosition controls top/bottom; hAlign kept for
+    // legacy reads but always center-aligns horizontally now.
+    const iconPosition = config.iconPosition ?? (config.hAlign === 'left' || config.hAlign === 'right' ? 'top' : 'top');
     const lockupWidth = Math.max(targetIconWidth, ww);
     const lockupHeight = targetIconHeight + spacing + wh;
-    const iconX = hAlign === 'left' ? 0 : hAlign === 'right' ? (lockupWidth - targetIconWidth) : (lockupWidth - targetIconWidth) / 2;
-    const wordmarkX = hAlign === 'left' ? 0 : hAlign === 'right' ? (lockupWidth - ww) : (lockupWidth - ww) / 2;
+    const iconX = (lockupWidth - targetIconWidth) / 2;
+    const wordmarkX = (lockupWidth - ww) / 2;
+    const iconY = iconPosition === 'top' ? 0 : (lockupHeight - targetIconHeight);
+    const wordmarkY = iconPosition === 'top' ? (targetIconHeight + spacing) : 0;
 
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${lockupWidth} ${lockupHeight}">
-      <g transform="translate(${iconX}, 0)">
+      <g transform="translate(${iconX}, ${iconY})">
         <svg width="${targetIconWidth}" height="${targetIconHeight}" viewBox="${parseViewBox(iconSvg).join(' ')}">${svgInner(iconSvg)}</svg>
       </g>
-      <g transform="translate(${wordmarkX}, ${targetIconHeight + spacing})">
+      <g transform="translate(${wordmarkX}, ${wordmarkY})">
         <svg width="${ww}" height="${wh}" viewBox="${parseViewBox(wordmarkSvg).join(' ')}">${svgInner(wordmarkSvg)}</svg>
       </g>
     </svg>`;
   }
 
   if (composition === 'horizontal') {
-    const vAlign = config.vAlign ?? 'middle';
+    // v0.1.47+: iconSide controls left/right; vAlign defaults to
+    // middle (cap-height aligned) and rarely needs operator override.
+    const iconSide = config.iconSide ?? 'left';
     const lockupWidth = targetIconWidth + spacing + ww;
     const lockupHeight = Math.max(targetIconHeight, wh);
-    const iconY = vAlign === 'top' ? 0 : vAlign === 'bottom' ? (lockupHeight - targetIconHeight) : (lockupHeight - targetIconHeight) / 2;
-    const wordmarkY = vAlign === 'top' ? 0 : vAlign === 'bottom' ? (lockupHeight - wh) : (lockupHeight - wh) / 2;
+    const iconY = (lockupHeight - targetIconHeight) / 2;
+    const wordmarkY = (lockupHeight - wh) / 2;
+    const iconX = iconSide === 'left' ? 0 : (targetIconWidth + spacing + ww - targetIconWidth);
+    const wordmarkX = iconSide === 'left' ? (targetIconWidth + spacing) : 0;
 
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${lockupWidth} ${lockupHeight}">
-      <g transform="translate(0, ${iconY})">
+      <g transform="translate(${iconX}, ${iconY})">
         <svg width="${targetIconWidth}" height="${targetIconHeight}" viewBox="${parseViewBox(iconSvg).join(' ')}">${svgInner(iconSvg)}</svg>
       </g>
-      <g transform="translate(${targetIconWidth + spacing}, ${wordmarkY})">
+      <g transform="translate(${wordmarkX}, ${wordmarkY})">
         <svg width="${ww}" height="${wh}" viewBox="${parseViewBox(wordmarkSvg).join(' ')}">${svgInner(wordmarkSvg)}</svg>
       </g>
     </svg>`;
   }
 
   return wordmarkSvg;
+}
+
+/**
+ * v0.1.47+: wrap any composition in a brand-background tile with
+ * configurable padding. Used when the operator has enabled the
+ * Backgrounded variant in policy. Returns a new SVG with the inner
+ * composition centered inside a padded background rect.
+ */
+export function wrapInBackground(
+  innerSvg: string,
+  backgroundColor: string,
+  paddingEm: number,
+): string {
+  const [, , innerW, innerH] = parseViewBox(innerSvg);
+  // Padding in em — treated as a fraction of the inner content height
+  // (so a wider lockup gets proportionally wider padding too).
+  const padding = innerH * paddingEm;
+  const outerW = innerW + padding * 2;
+  const outerH = innerH + padding * 2;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${outerW} ${outerH}">
+    <rect x="0" y="0" width="${outerW}" height="${outerH}" fill="${backgroundColor}"/>
+    <g transform="translate(${padding}, ${padding})">
+      <svg width="${innerW}" height="${innerH}" viewBox="${parseViewBox(innerSvg).join(' ')}">${svgInner(innerSvg)}</svg>
+    </g>
+  </svg>`;
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -514,6 +547,12 @@ export interface RenderRequest {
   composition: CompositionId;
   finish: FinishId;
   backgroundId: string;
+  /**
+   * v0.1.47+: wrap the rendered composition in a brand-background
+   * tile with operator-configured padding. When true and policy
+   * allows it, the engine appends the wrapInBackground step.
+   */
+  backgrounded?: boolean;
 }
 
 export interface RenderContext {
@@ -569,6 +608,18 @@ export async function renderBrandAsset(
     if (bgColor === 'var(--brand-background-light)') bgColor = ctx.brandColors.bgLight;
     else if (bgColor === 'var(--brand-background-dark)') bgColor = ctx.brandColors.bgDark;
     svg = compositeOnBackground(svg, bgColor);
+  }
+
+  // v0.1.47+: backgrounded-tile wrapping. Operator-controlled padding.
+  // Refuse the request if backgrounded isn't allowed in policy OR if
+  // the specific light/dark variant is disabled.
+  if (req.backgrounded && ctx.policy.backgrounded?.allowed) {
+    const wantsLight = req.backgroundId === 'light' || req.backgroundId === 'transparent';
+    const wantsDark = req.backgroundId === 'dark';
+    if (wantsLight && !ctx.policy.backgrounded.lightAllowed) return null;
+    if (wantsDark && !ctx.policy.backgrounded.darkAllowed) return null;
+    const tileColor = wantsDark ? ctx.brandColors.bgDark : ctx.brandColors.bgLight;
+    svg = wrapInBackground(svg, tileColor, ctx.policy.backgrounded.padding);
   }
 
   return svg;

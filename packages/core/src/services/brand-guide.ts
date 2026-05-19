@@ -87,8 +87,12 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
     primary: brand.tokens['brand-primary'] || brand.accent,
   };
   const bannedPairs = effectiveBannedPairs(policy, brandColors);
-  const approvedComps = (Object.entries(policy.compositions) as Array<[string, { allowed: boolean }]>)
-    .filter(([, c]) => c.allowed).map(([id]) => id);
+  const allComps = Object.entries(policy.compositions) as Array<[string, { allowed: boolean }]>;
+  const approvedComps = allComps.filter(([, c]) => c.allowed).map(([id]) => id);
+  // v0.1.47+: compositions explicitly disabled in policy show up in
+  // the banned-uses gallery so external consumers learn the brand's
+  // approved-vs-banned compositions visually.
+  const bannedComps = allComps.filter(([, c]) => !c.allowed).map(([id]) => id);
   const approvedFinishes = policy.finishes.filter((f) => f.allowed);
   const approvedBgs = policy.backgrounds.filter((b) => b.allowed);
   const banSet = new Set(bannedPairs.map((b) => `${b.finishId}|${b.backgroundId}`));
@@ -192,7 +196,7 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
         `).join('')}
       </section>
 
-      ${bannedPairs.length > 0 ? `
+      ${(bannedPairs.length > 0 || bannedComps.length > 0) ? `
       <section>
         <h2>Banned uses</h2>
         <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">
@@ -200,6 +204,33 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
           (insufficient contrast) or off-brand by policy.
         </p>
         <div class="logo-grid">
+          ${bannedComps.map((composition) => {
+            // v0.1.47+: render a sample of this banned composition with the
+            // red X overlay so consumers learn the brand's allowed lockups.
+            // Uses full-color × transparent as the sample finish/bg since
+            // we just need to show *what the composition looks like*.
+            const compShort = composition === 'wordmark-only' ? 'wordmark'
+              : composition === 'icon-only' ? 'icon'
+              : composition;
+            const renderUrl = applyAssetAlias(
+              `/_ensemble/brand/render/${brand.workspace_slug}-${compShort}-full-color-transparent.svg`,
+              aliasPath,
+            ) ?? '';
+            const label = composition.replace('-', ' ');
+            return `<div>
+              <div class="logo-tile" style="position:relative;">
+                <img src="${escapeAttr(renderUrl)}" alt="banned composition: ${escapeAttr(label)}">
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+                  <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <line x1="5" y1="5" x2="95" y2="95" stroke="#c62828" stroke-width="3"/>
+                    <line x1="95" y1="5" x2="5" y2="95" stroke="#c62828" stroke-width="3"/>
+                  </svg>
+                </div>
+              </div>
+              <p style="font-size:12px;color:#c62828;margin:8px 0 0;font-weight:600;text-transform:capitalize;">${escapeHtml(label)} lockup</p>
+              <p style="font-size:11px;color:#6b7280;margin:2px 0 0;">Not an approved composition for this brand.</p>
+            </div>`;
+          }).join('')}
           ${bannedPairs.map((ban) => {
             const finish = policy.finishes.find((f) => f.id === ban.finishId);
             const bg = policy.backgrounds.find((b) => b.id === ban.backgroundId);

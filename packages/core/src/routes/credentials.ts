@@ -284,7 +284,7 @@ export function createCredentialsRoutes(): App {
     composition: 'wordmark-only' | 'icon-only' | 'stacked' | 'horizontal',
     finish: 'full-color' | 'mono-black' | 'mono-white' | 'mono-brand',
     backgroundId: string,
-    options: { download: boolean; filename?: string },
+    options: { download: boolean; filename?: string; backgrounded?: boolean },
   ): Promise<Response> {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
@@ -315,7 +315,7 @@ export function createCredentialsRoutes(): App {
     }
 
     const svg = await renderBrandAsset(
-      { composition, finish, backgroundId },
+      { composition, finish, backgroundId, backgrounded: options.backgrounded },
       { workspaceId: workspace.id, env: c.env, policy, brandColors },
     );
 
@@ -349,7 +349,8 @@ export function createCredentialsRoutes(): App {
     const finish = (c.req.query('finish') || 'full-color') as 'full-color' | 'mono-black' | 'mono-white' | 'mono-brand';
     const backgroundId = c.req.query('bg') || 'transparent';
     const download = c.req.query('download') === '1';
-    return handleBrandRender(c, composition, finish, backgroundId, { download });
+    const backgrounded = c.req.query('backgrounded') === '1';
+    return handleBrandRender(c, composition, finish, backgroundId, { download, backgrounded });
   });
 
   /**
@@ -444,7 +445,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.46-unified-brand-url-model',
+      buildFingerprint: 'v0.1.47-composition-policy-editors',
       timestamp: new Date().toISOString(),
     });
   });

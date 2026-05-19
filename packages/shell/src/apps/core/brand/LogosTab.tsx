@@ -25,6 +25,7 @@ import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
   Button, Input, Label, SaveStatus, FontCombobox,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Slider, Switch,
   toast,
 } from '@ensemble-edge/ui';
 import type { FontComboboxOption } from '@ensemble-edge/ui';
@@ -101,26 +102,11 @@ const SLOTS: SlotDef[] = [
     guideline: SVG_AUTHOR_GUIDELINE,
   },
   // Favicon slot intentionally removed in v0.1.31. Favicons are
-  // generated automatically from the icon mark (full 10-file canonical
-  // suite: favicon.ico, favicon.svg, favicon-16x16, favicon-32x32,
-  // apple-touch-icon, icon-192, icon-512, mstile-150, site.webmanifest,
-  // browserconfig.xml).
-  {
-    key: 'social_avatar',
-    label: 'Social Avatar',
-    description:
-      'Square image for social profiles. Raster allowed — these are ' +
-      'output-only formats with no useful vector source.',
-    variants: ['base'],
-  },
-  {
-    key: 'og_image',
-    label: 'OG Image',
-    description:
-      '1200×630 for social sharing previews. Raster allowed — typically ' +
-      'designed as a composed image rather than derived from a logo.',
-    variants: ['base'],
-  },
+  // generated automatically from the icon mark.
+  // Social avatar + OG image moved to the Social/Sharing tab in
+  // v0.1.47 — they're raster-output-only assets with no vector
+  // source pipeline, conceptually separate from the SVG-master
+  // brand logo system.
 ];
 
 const VARIANT_LABEL: Record<Variant, string> = {
@@ -312,6 +298,14 @@ export function LogosTab() {
           )
         ))}
       </div>
+
+      {/* v0.1.47: composition policy editors. Each card drives a slice
+          of logo_policy via autosave (toggle + position = immediate PUT,
+          sliders = local state while dragging + debounced PUT on
+          mouse-up). The variants matrix on Brand Overview and the
+          public brand guide already read from this policy — these
+          editors fill the missing write side. */}
+      <CompositionPolicyEditors />
 
       <div className="flex items-center gap-3">
         <Button onClick={handleSave} disabled={!status.dirty || saving}>
@@ -787,3 +781,407 @@ function VariantSlot({
   );
 }
 
+
+// ─── Composition policy editors (v0.1.47) ────────────────────────────
+//
+// Three cards that let operators tune the lockup compositions and the
+// backgrounded variant. Each card autosaves: toggle/position flips
+// PUT immediately, sliders update local state while dragging and PUT
+// on mouse-up (debounced so a fast drag doesn't fire dozens of writes).
+//
+// Live preview tiles inside each card render the actual lockup at the
+// configured settings via the brand-render endpoint, so operators see
+// what each slider does in real time.
+
+type CompositionPolicy = {
+  allowed: boolean;
+  iconScale?: number;
+  spacing?: number;
+  iconPosition?: 'top' | 'bottom';
+  iconSide?: 'left' | 'right';
+};
+
+type LogoPolicyShape = {
+  compositions: {
+    'wordmark-only': { allowed: boolean };
+    'icon-only': { allowed: boolean };
+    'stacked': CompositionPolicy;
+    'horizontal': CompositionPolicy;
+  };
+  backgrounded?: {
+    allowed: boolean;
+    lightAllowed: boolean;
+    darkAllowed: boolean;
+    padding: number;
+  };
+};
+
+function CompositionPolicyEditors() {
+  const [policy, setPolicy] = useState<LogoPolicyShape | null>(null);
+  const [workspaceSlug, setWorkspaceSlug] = useState<string>('');
+  const [aliasPath, setAliasPath] = useState<string>('');
+
+  // Load policy on mount.
+  useEffect(() => {
+    authedFetch('/_ensemble/core/brand/logo-policy')
+      .then((r) => r.json() as Promise<{ policy: LogoPolicyShape; workspaceSlug?: string; assetAliasPath?: string }>)
+      .then((res) => {
+        setPolicy(res.policy);
+        setWorkspaceSlug(res.workspaceSlug || 'workspace');
+        setAliasPath(res.assetAliasPath || '');
+      })
+      .catch(() => { /* card hidden */ });
+  }, []);
+
+  if (!policy) return null;
+
+  // Save the whole policy. We send the merged object so the server's
+  // default-merge layer fills in any fields we didn't touch.
+  async function savePolicy(next: LogoPolicyShape) {
+    setPolicy(next);
+    try {
+      const res = await authedFetch('/_ensemble/core/brand/logo-policy', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      toast.error('Could not save policy', {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  function updateComposition(key: 'stacked' | 'horizontal', patch: Partial<CompositionPolicy>) {
+    if (!policy) return;
+    savePolicy({
+      ...policy,
+      compositions: {
+        ...policy.compositions,
+        [key]: { ...policy.compositions[key], ...patch },
+      },
+    });
+  }
+
+  function updateBackgrounded(patch: Partial<NonNullable<LogoPolicyShape['backgrounded']>>) {
+    if (!policy) return;
+    const current = policy.backgrounded ?? { allowed: false, lightAllowed: true, darkAllowed: true, padding: 0.5 };
+    savePolicy({ ...policy, backgrounded: { ...current, ...patch } });
+  }
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <HorizontalLockupCard
+        config={policy.compositions.horizontal}
+        onChange={(p) => updateComposition('horizontal', p)}
+        workspaceSlug={workspaceSlug}
+        aliasPath={aliasPath}
+      />
+      <StackedLockupCard
+        config={policy.compositions.stacked}
+        onChange={(p) => updateComposition('stacked', p)}
+        workspaceSlug={workspaceSlug}
+        aliasPath={aliasPath}
+      />
+      <BackgroundedLockupCard
+        config={policy.backgrounded ?? { allowed: false, lightAllowed: true, darkAllowed: true, padding: 0.5 }}
+        onChange={updateBackgrounded}
+        workspaceSlug={workspaceSlug}
+        aliasPath={aliasPath}
+      />
+    </div>
+  );
+}
+
+function HorizontalLockupCard({
+  config, onChange, workspaceSlug, aliasPath,
+}: {
+  config: CompositionPolicy;
+  onChange: (p: Partial<CompositionPolicy>) => void;
+  workspaceSlug: string;
+  aliasPath: string;
+}) {
+  return (
+    <CompositionCard
+      title="Horizontal lockup"
+      description="Icon and wordmark side by side. Common for headers, signatures, and nav bars."
+      allowed={config.allowed}
+      onToggle={(v) => onChange({ allowed: v })}
+      previewUrl={buildPreviewUrl('horizontal', workspaceSlug, aliasPath)}
+      sliders={[
+        {
+          label: 'Icon size',
+          help: 'Relative to wordmark height',
+          value: config.iconScale ?? 1.2,
+          min: 0.5, max: 2, step: 0.05,
+          format: (v) => `${v.toFixed(2)}×`,
+          onChange: (v) => onChange({ iconScale: v }),
+        },
+        {
+          label: 'Spacing',
+          help: 'Gap between icon and wordmark (em-relative)',
+          value: config.spacing ?? 0.4,
+          min: 0, max: 1.5, step: 0.05,
+          format: (v) => `${v.toFixed(2)}em`,
+          onChange: (v) => onChange({ spacing: v }),
+        },
+      ]}
+      position={{
+        label: 'Icon position',
+        options: [
+          { value: 'left', label: 'Left' },
+          { value: 'right', label: 'Right' },
+        ],
+        current: config.iconSide ?? 'left',
+        onChange: (v) => onChange({ iconSide: v as 'left' | 'right' }),
+      }}
+    />
+  );
+}
+
+function StackedLockupCard({
+  config, onChange, workspaceSlug, aliasPath,
+}: {
+  config: CompositionPolicy;
+  onChange: (p: Partial<CompositionPolicy>) => void;
+  workspaceSlug: string;
+  aliasPath: string;
+}) {
+  return (
+    <CompositionCard
+      title="Stacked lockup"
+      description="Icon above (or below) the wordmark. Common for app launchers, splash screens, and badges."
+      allowed={config.allowed}
+      onToggle={(v) => onChange({ allowed: v })}
+      previewUrl={buildPreviewUrl('stacked', workspaceSlug, aliasPath)}
+      sliders={[
+        {
+          label: 'Icon size',
+          help: 'Relative to wordmark height',
+          value: config.iconScale ?? 1.5,
+          min: 0.5, max: 2.5, step: 0.05,
+          format: (v) => `${v.toFixed(2)}×`,
+          onChange: (v) => onChange({ iconScale: v }),
+        },
+        {
+          label: 'Spacing',
+          help: 'Vertical gap between icon and wordmark',
+          value: config.spacing ?? 0.4,
+          min: 0, max: 1.5, step: 0.05,
+          format: (v) => `${v.toFixed(2)}em`,
+          onChange: (v) => onChange({ spacing: v }),
+        },
+      ]}
+      position={{
+        label: 'Icon position',
+        options: [
+          { value: 'top', label: 'Top' },
+          { value: 'bottom', label: 'Bottom' },
+        ],
+        current: config.iconPosition ?? 'top',
+        onChange: (v) => onChange({ iconPosition: v as 'top' | 'bottom' }),
+      }}
+    />
+  );
+}
+
+function BackgroundedLockupCard({
+  config, onChange, workspaceSlug, aliasPath,
+}: {
+  config: { allowed: boolean; lightAllowed: boolean; darkAllowed: boolean; padding: number };
+  onChange: (p: Partial<{ allowed: boolean; lightAllowed: boolean; darkAllowed: boolean; padding: number }>) => void;
+  workspaceSlug: string;
+  aliasPath: string;
+}) {
+  const [paddingLocal, setPaddingLocal] = useState(config.padding);
+  useEffect(() => { setPaddingLocal(config.padding); }, [config.padding]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1 flex-1">
+            <CardTitle className="text-base">Backgrounded lockup</CardTitle>
+            <CardDescription>
+              Wrap the lockup in a brand-color tile with padding. Useful for app icons,
+              social embeds, or any context where the logo needs a controlled background.
+            </CardDescription>
+          </div>
+          <Switch checked={config.allowed} onCheckedChange={(v) => onChange({ allowed: v })} />
+        </div>
+      </CardHeader>
+      {config.allowed && (
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-md border p-3 flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-medium">On light background</p>
+                <p className="text-[10px] text-muted-foreground">Uses brand-background-light</p>
+              </div>
+              <Switch checked={config.lightAllowed} onCheckedChange={(v) => onChange({ lightAllowed: v })} />
+            </div>
+            <div className="rounded-md border p-3 flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-medium">On dark background</p>
+                <p className="text-[10px] text-muted-foreground">Uses brand-background-dark</p>
+              </div>
+              <Switch checked={config.darkAllowed} onCheckedChange={(v) => onChange({ darkAllowed: v })} />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Outer padding</Label>
+              <span className="text-xs font-mono text-muted-foreground">{paddingLocal.toFixed(2)}em</span>
+            </div>
+            <Slider
+              value={[paddingLocal]}
+              min={0} max={2} step={0.05}
+              onValueChange={(v) => setPaddingLocal(v[0])}
+              onValueCommit={(v) => onChange({ padding: v[0] })}
+            />
+            <p className="text-[10px] text-muted-foreground">
+              Space between the logo and the tile edge.
+            </p>
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+interface SliderConfig {
+  label: string;
+  help: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  format: (v: number) => string;
+  onChange: (v: number) => void;
+}
+
+interface PositionConfig {
+  label: string;
+  options: Array<{ value: string; label: string }>;
+  current: string;
+  onChange: (v: string) => void;
+}
+
+function CompositionCard({
+  title,
+  description,
+  allowed,
+  onToggle,
+  previewUrl,
+  sliders,
+  position,
+}: {
+  title: string;
+  description: string;
+  allowed: boolean;
+  onToggle: (v: boolean) => void;
+  previewUrl: string;
+  sliders: SliderConfig[];
+  position: PositionConfig;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1 flex-1">
+            <CardTitle className="text-base">{title}</CardTitle>
+            <CardDescription>{description}</CardDescription>
+          </div>
+          <Switch checked={allowed} onCheckedChange={onToggle} />
+        </div>
+      </CardHeader>
+      {allowed && (
+        <CardContent className="space-y-4">
+          {/* Live preview tile */}
+          <div className="flex items-center justify-center h-32 rounded-md border bg-muted/30 overflow-hidden">
+            <img
+              src={previewUrl}
+              alt={`${title} preview`}
+              className="max-h-28 max-w-full object-contain"
+              // Cache-bust so policy changes update the preview
+              // immediately. Tiny URL noise; not user-visible.
+              key={previewUrl}
+            />
+          </div>
+
+          {/* Position toggle */}
+          <div className="space-y-1.5">
+            <Label className="text-xs">{position.label}</Label>
+            <div className="grid grid-cols-2 rounded-md border p-1 gap-1">
+              {position.options.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={
+                    position.current === opt.value
+                      ? 'rounded px-2 py-1 text-xs font-medium bg-primary text-primary-foreground'
+                      : 'rounded px-2 py-1 text-xs font-medium hover:bg-muted text-muted-foreground'
+                  }
+                  onClick={() => position.onChange(opt.value)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Sliders */}
+          {sliders.map((s) => (
+            <CardSlider key={s.label} {...s} />
+          ))}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+function CardSlider({
+  label, help, value, min, max, step, format, onChange,
+}: SliderConfig) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => { setLocal(value); }, [value]);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs">{label}</Label>
+        <span className="text-xs font-mono text-muted-foreground">{format(local)}</span>
+      </div>
+      <Slider
+        value={[local]}
+        min={min} max={max} step={step}
+        onValueChange={(v) => setLocal(v[0])}
+        onValueCommit={(v) => onChange(v[0])}
+      />
+      <p className="text-[10px] text-muted-foreground">{help}</p>
+    </div>
+  );
+}
+
+/**
+ * Build the preview URL for a composition. Uses full-color-on-light
+ * by default — picking a banned pair would render nothing.
+ */
+function buildPreviewUrl(
+  composition: 'horizontal' | 'stacked',
+  workspaceSlug: string,
+  aliasPath: string,
+): string {
+  const compShort = composition;
+  const tail = `${workspaceSlug}-${compShort}-full-color-light.svg`;
+  const base = aliasPath
+    ? `/${aliasPath}/brand/render/${tail}`
+    : `/_ensemble/brand/render/${tail}`;
+  // Cache-bust on policy changes by appending a counter — we don't
+  // know when policy actually changed from here, so we use Date.now()
+  // bucketed to the second to balance freshness against thrashing.
+  const bucket = Math.floor(Date.now() / 1000);
+  return `${base}?_=${bucket}`;
+}

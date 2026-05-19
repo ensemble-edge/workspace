@@ -20,10 +20,55 @@ export interface CompositionConfig {
   iconScale?: number;
   /** Spacing in em (relative to wordmark font-size). */
   spacing?: number;
-  /** Horizontal alignment of icon vs wordmark (stacked only). */
+  /**
+   * Horizontal alignment of icon vs wordmark (stacked only — legacy
+   * v0.1.32 field, kept for back-compat reads; new editor writes
+   * iconPosition instead).
+   */
   hAlign?: 'left' | 'center' | 'right';
-  /** Vertical alignment of icon vs wordmark cap-height (horizontal only). */
+  /**
+   * Vertical alignment of icon vs wordmark cap-height (horizontal
+   * only — legacy v0.1.32 field, kept for back-compat reads).
+   */
   vAlign?: 'top' | 'middle' | 'bottom';
+  /**
+   * v0.1.47+ stacked-composition operator control: which side of the
+   * wordmark the icon (bug) appears on. 'top' = icon above wordmark,
+   * 'bottom' = icon below wordmark. Default: 'top'.
+   */
+  iconPosition?: 'top' | 'bottom';
+  /**
+   * v0.1.47+ horizontal-composition operator control: which side of
+   * the wordmark the icon (bug) appears on. 'left' = icon left of
+   * wordmark, 'right' = icon right of wordmark. Default: 'left'.
+   */
+  iconSide?: 'left' | 'right';
+}
+
+/**
+ * v0.1.47+ Backgrounded lockup — a containerization, not a
+ * composition. Wraps any approved composition in a brand-background
+ * tile with operator-configurable padding. When `allowed: false`,
+ * the brand guide renders the backgrounded variant with a red X
+ * banned-use treatment.
+ *
+ * Uses the existing brand-background-light / brand-background-dark
+ * tokens for the tile color (no separate hex pickers — the operator
+ * already configured these in Brand → Colors).
+ */
+export interface BackgroundedConfig {
+  /** Master toggle for the backgrounded variant. */
+  allowed: boolean;
+  /** Backgrounded-on-light variant approved (uses brand-background-light). */
+  lightAllowed: boolean;
+  /** Backgrounded-on-dark variant approved (uses brand-background-dark). */
+  darkAllowed: boolean;
+  /**
+   * Outer padding between the logo and the background-tile edge, in
+   * em (relative to the wordmark/icon height inside the tile).
+   * Default: 0.5em.
+   */
+  padding: number;
 }
 
 export interface FinishOption {
@@ -59,6 +104,12 @@ export interface LogoPolicy {
   finishes: FinishOption[];
   backgrounds: BackgroundOption[];
   bannedPairs: BannedPair[];
+  /**
+   * v0.1.47+: backgrounded-lockup configuration. Optional in the
+   * stored policy (older workspaces don't have it); defaultPolicy()
+   * supplies sensible defaults on read.
+   */
+  backgrounded?: BackgroundedConfig;
 }
 
 /**
@@ -72,8 +123,8 @@ export function defaultPolicy(): LogoPolicy {
     compositions: {
       'wordmark-only': { allowed: true },
       'icon-only':     { allowed: true },
-      'stacked':       { allowed: true, iconScale: 1.5, spacing: 0.4, hAlign: 'center' },
-      'horizontal':    { allowed: true, iconScale: 1.2, spacing: 0.4, vAlign: 'middle' },
+      'stacked':       { allowed: true, iconScale: 1.5, spacing: 0.4, hAlign: 'center', iconPosition: 'top' },
+      'horizontal':    { allowed: true, iconScale: 1.2, spacing: 0.4, vAlign: 'middle', iconSide: 'left' },
     },
     finishes: [
       { id: 'full-color',  label: 'Full color', allowed: true,  fillOverride: null },
@@ -92,6 +143,17 @@ export function defaultPolicy(): LogoPolicy {
       // we don't bake them into the stored policy because background
       // colors can change.
     ],
+    backgrounded: {
+      // Default off — operators opt into the backgrounded variant
+      // when they actually want it as a brand-approved use. Keeping
+      // it off by default avoids polluting the variants matrix and
+      // brand guide with a third "container" axis that most brands
+      // don't need.
+      allowed: false,
+      lightAllowed: true,
+      darkAllowed: true,
+      padding: 0.5,
+    },
   };
 }
 
@@ -113,10 +175,18 @@ export async function loadPolicy(
     const def = defaultPolicy();
     return {
       version: 1,
-      compositions: { ...def.compositions, ...(parsed.compositions ?? {}) },
+      compositions: {
+        // Per-composition merge so older policies missing
+        // iconPosition / iconSide auto-receive the defaults.
+        'wordmark-only': { ...def.compositions['wordmark-only'], ...(parsed.compositions?.['wordmark-only'] ?? {}) },
+        'icon-only':     { ...def.compositions['icon-only'],     ...(parsed.compositions?.['icon-only']     ?? {}) },
+        'stacked':       { ...def.compositions['stacked'],       ...(parsed.compositions?.['stacked']       ?? {}) },
+        'horizontal':    { ...def.compositions['horizontal'],    ...(parsed.compositions?.['horizontal']    ?? {}) },
+      },
       finishes: parsed.finishes ?? def.finishes,
       backgrounds: parsed.backgrounds ?? def.backgrounds,
       bannedPairs: parsed.bannedPairs ?? def.bannedPairs,
+      backgrounded: { ...def.backgrounded!, ...(parsed.backgrounded ?? {}) },
     };
   } catch {
     return defaultPolicy();
