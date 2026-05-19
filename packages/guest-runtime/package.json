@@ -1,6 +1,6 @@
 {
   "name": "@ensemble-edge/guest-runtime",
-  "version": "0.1.0",
+  "version": "0.1.38",
   "description": "Browser-side runtime for Ensemble guest apps — serves React, workspace UI, and layout primitives so guest workers ship as tiny bundles",
   "type": "module",
   "main": "./src/index.ts",
