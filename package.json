@@ -1,6 +1,6 @@
 {
   "name": "@ensemble-edge/workspace",
-  "version": "0.1.11",
+  "version": "0.1.46",
   "description": "Ensemble Workspace — shell, gateway, services, and UI for building team-collaboration platforms on Cloudflare",
   "type": "module",
   "license": "MIT",
