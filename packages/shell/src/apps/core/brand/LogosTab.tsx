@@ -799,6 +799,12 @@ type CompositionPolicy = {
   spacing?: number;
   iconPosition?: 'top' | 'bottom';
   iconSide?: 'left' | 'right';
+  /**
+   * v0.1.50+ cross-axis offset of the smaller element. -1..1, default 0.
+   * Horizontal: vertical position of the shorter element.
+   * Stacked: horizontal position of the narrower element.
+   */
+  crossAlign?: number;
 };
 
 type LogoPolicyShape = {
@@ -978,6 +984,7 @@ function LockupCard({
   const params = new URLSearchParams();
   params.set('iconScale', String(draft.iconScale ?? defaults.iconScale));
   params.set('spacing', String(draft.spacing ?? defaults.spacing));
+  params.set('crossAlign', String(draft.crossAlign ?? 0));
   if (kind === 'horizontal') params.set('iconSide', draft.iconSide ?? 'left');
   else params.set('iconPosition', draft.iconPosition ?? 'top');
   const previewUrl = `${base}?${params.toString()}`;
@@ -997,70 +1004,108 @@ function LockupCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Live preview — always rendered even when allowed=false so
-            the operator can see what enabling it would look like. */}
-        <div className="flex items-center justify-center h-32 rounded-md border bg-muted/30 overflow-hidden">
-          <img
-            src={previewUrl}
-            alt={`${title} preview`}
-            className="max-h-28 max-w-full object-contain"
-          />
-        </div>
+        {/* Configuration is hidden when the lockup is disabled —
+            no point tuning sliders for a banned composition. The
+            preview, position toggle, and sliders only render when
+            draft.allowed is true. The Save row stays visible when
+            the card is dirty (e.g. just toggled off) so the on→off
+            transition can be committed without flipping back on. */}
+        {draft.allowed && (
+          <>
+            {/* Live preview */}
+            <div className="flex items-center justify-center h-32 rounded-md border bg-muted/30 overflow-hidden">
+              <img
+                src={previewUrl}
+                alt={`${title} preview`}
+                className="max-h-28 max-w-full object-contain"
+              />
+            </div>
 
-        {/* Position toggle */}
-        <div className="space-y-1.5">
-          <Label className="text-xs">Icon position</Label>
-          <div className="grid grid-cols-2 rounded-md border p-1 gap-1">
-            {kind === 'horizontal' ? (
-              <>
-                <PositionButton
-                  active={(draft.iconSide ?? 'left') === 'left'}
-                  onClick={() => setDraft({ ...draft, iconSide: 'left' })}
-                  label="Left"
-                />
-                <PositionButton
-                  active={(draft.iconSide ?? 'left') === 'right'}
-                  onClick={() => setDraft({ ...draft, iconSide: 'right' })}
-                  label="Right"
-                />
-              </>
-            ) : (
-              <>
-                <PositionButton
-                  active={(draft.iconPosition ?? 'top') === 'top'}
-                  onClick={() => setDraft({ ...draft, iconPosition: 'top' })}
-                  label="Top"
-                />
-                <PositionButton
-                  active={(draft.iconPosition ?? 'top') === 'bottom'}
-                  onClick={() => setDraft({ ...draft, iconPosition: 'bottom' })}
-                  label="Bottom"
-                />
-              </>
-            )}
-          </div>
-        </div>
+            {/* Position toggle */}
+            <div className="space-y-1.5">
+              <Label className="text-xs">Icon position</Label>
+              <div className="grid grid-cols-2 rounded-md border p-1 gap-1">
+                {kind === 'horizontal' ? (
+                  <>
+                    <PositionButton
+                      active={(draft.iconSide ?? 'left') === 'left'}
+                      onClick={() => setDraft({ ...draft, iconSide: 'left' })}
+                      label="Left"
+                    />
+                    <PositionButton
+                      active={(draft.iconSide ?? 'left') === 'right'}
+                      onClick={() => setDraft({ ...draft, iconSide: 'right' })}
+                      label="Right"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <PositionButton
+                      active={(draft.iconPosition ?? 'top') === 'top'}
+                      onClick={() => setDraft({ ...draft, iconPosition: 'top' })}
+                      label="Top"
+                    />
+                    <PositionButton
+                      active={(draft.iconPosition ?? 'top') === 'bottom'}
+                      onClick={() => setDraft({ ...draft, iconPosition: 'bottom' })}
+                      label="Bottom"
+                    />
+                  </>
+                )}
+              </div>
+            </div>
 
-        {/* Sliders */}
-        <SmoothSlider
-          label="Icon size"
-          help="Relative to wordmark height"
-          value={draft.iconScale ?? defaults.iconScale}
-          min={0.5} max={kind === 'horizontal' ? 2 : 2.5} step={0.01}
-          format={(v) => `${v.toFixed(2)}×`}
-          onChange={(v) => setDraft({ ...draft, iconScale: v })}
-        />
-        <SmoothSlider
-          label="Spacing"
-          help="Gap between icon and wordmark (em-relative)"
-          value={draft.spacing ?? defaults.spacing}
-          min={0} max={1.5} step={0.01}
-          format={(v) => `${v.toFixed(2)}em`}
-          onChange={(v) => setDraft({ ...draft, spacing: v })}
-        />
+            {/* Sliders. v0.1.50: icon-size minimum lowered from 0.5
+                to 0.2 because the prior floor was still huge relative
+                to the wordmark — operators couldn't actually shrink
+                the icon to match cap-height. Spacing max tightened
+                from 1.5em to 0.8em — beyond that the lockup is
+                visually a *gap with two logos*, not a lockup. */}
+            <SmoothSlider
+              label="Icon size"
+              help="Relative to wordmark height"
+              value={draft.iconScale ?? defaults.iconScale}
+              min={0.2} max={kind === 'horizontal' ? 2 : 2.5} step={0.01}
+              format={(v) => `${v.toFixed(2)}×`}
+              onChange={(v) => setDraft({ ...draft, iconScale: v })}
+            />
+            <SmoothSlider
+              label="Spacing"
+              help="Gap between icon and wordmark (em-relative)"
+              value={draft.spacing ?? defaults.spacing}
+              min={0} max={0.8} step={0.01}
+              format={(v) => `${v.toFixed(2)}em`}
+              onChange={(v) => setDraft({ ...draft, spacing: v })}
+            />
+            {/* v0.1.50: cross-axis alignment. For horizontal, this is
+                vertical offset of the shorter element (top/center/
+                bottom). For stacked, horizontal offset of the
+                narrower element (left/center/right). Range -1..1
+                stored numerically so operators can fine-tune for
+                optical alignment, not just snap to discrete options. */}
+            <SmoothSlider
+              label={kind === 'horizontal' ? 'Vertical alignment' : 'Horizontal alignment'}
+              help={kind === 'horizontal'
+                ? 'Vertical position of the shorter element (top / centered / bottom)'
+                : 'Horizontal position of the narrower element (left / centered / right)'}
+              value={draft.crossAlign ?? 0}
+              min={-1} max={1} step={0.01}
+              format={(v) => {
+                if (Math.abs(v) < 0.02) return 'Centered';
+                if (kind === 'horizontal') return v < 0 ? `${(-v).toFixed(2)} ↑` : `${v.toFixed(2)} ↓`;
+                return v < 0 ? `${(-v).toFixed(2)} ←` : `${v.toFixed(2)} →`;
+              }}
+              onChange={(v) => setDraft({ ...draft, crossAlign: v })}
+            />
+          </>
+        )}
 
-        {/* Save row */}
-        <SaveRow dirty={dirty} saving={saving} onSave={handleSave} />
+        {/* Save row — visible when dirty regardless of allowed state
+            so toggle-off transitions can be committed. When clean and
+            disabled, the card is just the header + toggle. */}
+        {(draft.allowed || dirty) && (
+          <SaveRow dirty={dirty} saving={saving} onSave={handleSave} />
+        )}
       </CardContent>
     </Card>
   );
@@ -1139,71 +1184,83 @@ function BackgroundedCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Live preview — bug on the active background variant. */}
-        <div className="flex items-center justify-center h-32 rounded-md border bg-muted/30 overflow-hidden">
-          <img
-            src={previewUrl}
-            alt="Backgrounded preview"
-            className="max-h-28 max-w-full object-contain"
-          />
-        </div>
-
-        {/* Light/Dark sub-variant toggles + preview-mode selector */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-md border p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium">Light tile</p>
-                <p className="text-[10px] text-muted-foreground">Uses brand-background-light</p>
-              </div>
-              <Switch
-                checked={draft.lightAllowed}
-                onCheckedChange={(v) => setDraft({ ...draft, lightAllowed: v })}
+        {/* Configuration is hidden when backgrounded is disabled —
+            symmetric with LockupCard. The light/dark sub-toggles,
+            padding slider, and preview only render when the operator
+            has actually enabled this composition. */}
+        {draft.allowed && (
+          <>
+            {/* Live preview — bug on the active background variant. */}
+            <div className="flex items-center justify-center h-32 rounded-md border bg-muted/30 overflow-hidden">
+              <img
+                src={previewUrl}
+                alt="Backgrounded preview"
+                className="max-h-28 max-w-full object-contain"
               />
             </div>
-            <Button
-              type="button"
-              variant={previewMode === 'light' ? 'default' : 'outline'}
-              size="sm"
-              className="w-full h-7 text-xs"
-              onClick={() => setPreviewMode('light')}
-            >
-              Preview
-            </Button>
-          </div>
-          <div className="rounded-md border p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium">Dark tile</p>
-                <p className="text-[10px] text-muted-foreground">Uses brand-background-dark</p>
+
+            {/* Light/Dark sub-variant toggles + preview-mode selector */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-md border p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-medium">Light tile</p>
+                    <p className="text-[10px] text-muted-foreground">Uses brand-background-light</p>
+                  </div>
+                  <Switch
+                    checked={draft.lightAllowed}
+                    onCheckedChange={(v) => setDraft({ ...draft, lightAllowed: v })}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant={previewMode === 'light' ? 'default' : 'outline'}
+                  size="sm"
+                  className="w-full h-7 text-xs"
+                  onClick={() => setPreviewMode('light')}
+                >
+                  Preview
+                </Button>
               </div>
-              <Switch
-                checked={draft.darkAllowed}
-                onCheckedChange={(v) => setDraft({ ...draft, darkAllowed: v })}
-              />
+              <div className="rounded-md border p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-medium">Dark tile</p>
+                    <p className="text-[10px] text-muted-foreground">Uses brand-background-dark</p>
+                  </div>
+                  <Switch
+                    checked={draft.darkAllowed}
+                    onCheckedChange={(v) => setDraft({ ...draft, darkAllowed: v })}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant={previewMode === 'dark' ? 'default' : 'outline'}
+                  size="sm"
+                  className="w-full h-7 text-xs"
+                  onClick={() => setPreviewMode('dark')}
+                >
+                  Preview
+                </Button>
+              </div>
             </div>
-            <Button
-              type="button"
-              variant={previewMode === 'dark' ? 'default' : 'outline'}
-              size="sm"
-              className="w-full h-7 text-xs"
-              onClick={() => setPreviewMode('dark')}
-            >
-              Preview
-            </Button>
-          </div>
-        </div>
 
-        <SmoothSlider
-          label="Outer padding"
-          help="Space between the bug and the tile edge"
-          value={draft.padding}
-          min={0} max={2} step={0.01}
-          format={(v) => `${v.toFixed(2)}em`}
-          onChange={(v) => setDraft({ ...draft, padding: v })}
-        />
+            <SmoothSlider
+              label="Outer padding"
+              help="Space between the bug and the tile edge"
+              value={draft.padding}
+              min={0} max={2} step={0.01}
+              format={(v) => `${v.toFixed(2)}em`}
+              onChange={(v) => setDraft({ ...draft, padding: v })}
+            />
+          </>
+        )}
 
-        <SaveRow dirty={dirty} saving={saving} onSave={handleSave} />
+        {/* Save row visible when allowed OR dirty (so on→off
+            transitions remain committable). */}
+        {(draft.allowed || dirty) && (
+          <SaveRow dirty={dirty} saving={saving} onSave={handleSave} />
+        )}
       </CardContent>
     </Card>
   );

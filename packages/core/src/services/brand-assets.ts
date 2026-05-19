@@ -475,8 +475,15 @@ export function composeLockup(
     const iconPosition = config.iconPosition ?? (config.hAlign === 'left' || config.hAlign === 'right' ? 'top' : 'top');
     const lockupWidth = Math.max(targetIconWidth, ww);
     const lockupHeight = targetIconHeight + spacing + wh;
-    const iconX = (lockupWidth - targetIconWidth) / 2;
-    const wordmarkX = (lockupWidth - ww) / 2;
+    // v0.1.50+ crossAlign: -1 = left, 0 = centered, +1 = right.
+    // Only the *narrower* element moves; the wider one fills the
+    // lockup width naturally. Slack = (lockupWidth - elementWidth)/2
+    // so at crossAlign=0 we get the existing centered behavior.
+    const crossAlign = Math.max(-1, Math.min(1, config.crossAlign ?? 0));
+    const iconSlack = (lockupWidth - targetIconWidth) / 2;
+    const wordmarkSlack = (lockupWidth - ww) / 2;
+    const iconX = iconSlack + crossAlign * iconSlack;
+    const wordmarkX = wordmarkSlack + crossAlign * wordmarkSlack;
     const iconY = iconPosition === 'top' ? 0 : (lockupHeight - targetIconHeight);
     const wordmarkY = iconPosition === 'top' ? (targetIconHeight + spacing) : 0;
 
@@ -496,8 +503,15 @@ export function composeLockup(
     const iconSide = config.iconSide ?? 'left';
     const lockupWidth = targetIconWidth + spacing + ww;
     const lockupHeight = Math.max(targetIconHeight, wh);
-    const iconY = (lockupHeight - targetIconHeight) / 2;
-    const wordmarkY = (lockupHeight - wh) / 2;
+    // v0.1.50+ crossAlign on horizontal: vertical offset. -1 = top,
+    // 0 = centered (existing cap-height align), +1 = bottom. Only
+    // the *shorter* element slides; the taller one fills the lockup
+    // height. Same slack-fraction math as stacked.
+    const crossAlign = Math.max(-1, Math.min(1, config.crossAlign ?? 0));
+    const iconSlackY = (lockupHeight - targetIconHeight) / 2;
+    const wordmarkSlackY = (lockupHeight - wh) / 2;
+    const iconY = iconSlackY + crossAlign * iconSlackY;
+    const wordmarkY = wordmarkSlackY + crossAlign * wordmarkSlackY;
     const iconX = iconSide === 'left' ? 0 : (targetIconWidth + spacing + ww - targetIconWidth);
     const wordmarkX = iconSide === 'left' ? (targetIconWidth + spacing) : 0;
 

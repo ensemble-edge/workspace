@@ -43,6 +43,21 @@ export interface CompositionConfig {
    * wordmark, 'right' = icon right of wordmark. Default: 'left'.
    */
   iconSide?: 'left' | 'right';
+  /**
+   * v0.1.50+ cross-axis offset for the *smaller* element inside the
+   * lockup bounding box. Range -1..1, default 0 (perfectly centered).
+   *
+   * Horizontal lockup: vertical offset of the shorter element. -1 =
+   * top edge, 0 = vertically centered, +1 = bottom edge.
+   *
+   * Stacked lockup: horizontal offset of the narrower element. -1 =
+   * left edge, 0 = horizontally centered, +1 = right edge.
+   *
+   * The taller/wider element is anchored to its natural position;
+   * only the smaller one slides along the cross axis, so the lockup
+   * bounding box stays the same shape regardless of offset.
+   */
+  crossAlign?: number;
 }
 
 /**
@@ -123,8 +138,8 @@ export function defaultPolicy(): LogoPolicy {
     compositions: {
       'wordmark-only': { allowed: true },
       'icon-only':     { allowed: true },
-      'stacked':       { allowed: true, iconScale: 1.5, spacing: 0.4, hAlign: 'center', iconPosition: 'top' },
-      'horizontal':    { allowed: true, iconScale: 1.2, spacing: 0.4, vAlign: 'middle', iconSide: 'left' },
+      'stacked':       { allowed: true, iconScale: 1.5, spacing: 0.4, hAlign: 'center', iconPosition: 'top', crossAlign: 0 },
+      'horizontal':    { allowed: true, iconScale: 1.2, spacing: 0.4, vAlign: 'middle', iconSide: 'left', crossAlign: 0 },
     },
     finishes: [
       { id: 'full-color',  label: 'Full color', allowed: true,  fillOverride: null },

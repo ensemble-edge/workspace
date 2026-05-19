@@ -451,6 +451,12 @@ interface PolicyResponse {
     compositions: Record<CompositionId, { allowed: boolean }>;
     finishes: Array<{ id: FinishId; label: string; allowed: boolean }>;
     backgrounds: Array<{ id: string; label: string; allowed: boolean }>;
+    backgrounded?: {
+      allowed: boolean;
+      lightAllowed: boolean;
+      darkAllowed: boolean;
+      padding: number;
+    };
   };
   effectiveBans: Array<{ finishId: FinishId; backgroundId: string; reason?: string }>;
   workspaceSlug?: string;
@@ -525,6 +531,43 @@ function LogoVariantsCard() {
             </div>
           </div>
         ))}
+
+        {/* v0.1.50: Backgrounded variant row. Renders the bug-on-tile
+            composition for each enabled sub-variant (light/dark). Only
+            shown when the operator has enabled the Backgrounded
+            lockup in policy. Matches the same matrix UX as the other
+            compositions — these are first-class brand assets. */}
+        {policy.policy.backgrounded?.allowed && (
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-wider text-muted-foreground">
+              backgrounded
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {policy.policy.backgrounded.lightAllowed && (
+                <VariantCell
+                  key="bg-light"
+                  composition="icon-only"
+                  finish={{ id: 'full-color', label: 'Backgrounded' }}
+                  background={{ id: 'light', label: 'Light tile' }}
+                  workspaceSlug={policy.workspaceSlug || 'workspace'}
+                  assetAliasPath={policy.assetAliasPath || ''}
+                  backgrounded
+                />
+              )}
+              {policy.policy.backgrounded.darkAllowed && (
+                <VariantCell
+                  key="bg-dark"
+                  composition="icon-only"
+                  finish={{ id: 'full-color', label: 'Backgrounded' }}
+                  background={{ id: 'dark', label: 'Dark tile' }}
+                  workspaceSlug={policy.workspaceSlug || 'workspace'}
+                  assetAliasPath={policy.assetAliasPath || ''}
+                  backgrounded
+                />
+              )}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -536,6 +579,7 @@ function VariantCell({
   background,
   workspaceSlug,
   assetAliasPath,
+  backgrounded,
 }: {
   composition: CompositionId;
   finish: { id: FinishId; label: string };
@@ -543,6 +587,11 @@ function VariantCell({
   workspaceSlug: string;
   /** Pretty alias path (e.g. 'assets'). Empty → use canonical /_ensemble/. */
   assetAliasPath: string;
+  /** When true, the cell represents a Backgrounded variant — the
+   *  underlying composition is wrapped in a brand-color tile by the
+   *  renderer. We use the icon-only composition slug as the path
+   *  base and rely on the server to interpret the slot. */
+  backgrounded?: boolean;
 }) {
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   // Unified URL model (v0.1.46+): every brand resource lives under
@@ -556,18 +605,27 @@ function VariantCell({
     composition === 'wordmark-only' ? 'wordmark'
     : composition === 'icon-only' ? 'icon'
     : composition;
-  const tail = `${workspaceSlug}-${compShort}-${finish.id}-${background.id}.svg`;
+  // v0.1.50: Backgrounded variants get a `bg-` token in the path
+  // (NOT a query param) — keeps distribution URLs clean and the
+  // filename itself is still self-describing. Path-style render
+  // route recognizes both `slug-bg-comp-finish-bg` (backgrounded)
+  // and `slug-comp-finish-bg` (plain).
+  const compPart = backgrounded ? `bg-${compShort}` : compShort;
+  const tail = `${workspaceSlug}-${compPart}-${finish.id}-${background.id}.svg`;
   const renderUrl = assetAliasPath
     ? `/${assetAliasPath}/brand/render/${tail}`
     : `/_ensemble/brand/render/${tail}`;
   // Same URL — browser auto-saves with the filename from the URL path.
   const downloadUrl = renderUrl;
 
-  // Dark backgrounds render the cell with a dark frame so the operator
-  // sees the variant in its intended context. Light/transparent stay
-  // light. We rely on a few hex heuristics rather than re-fetching the
-  // brand colors.
-  const isDarkBg = background.id === 'dark';
+  // v0.1.50: card chrome is dark only for *regular* dark-background
+  // variants (where the logo sits on a dark background and the card
+  // is showing it in context). Backgrounded variants already encode
+  // their tile color INSIDE the SVG, so the outer card should stay
+  // neutral — otherwise the dark card frame around an already-dark
+  // tile looks like a redundant double-frame, and the action buttons
+  // below disappear into the dark surface.
+  const isDarkBg = background.id === 'dark' && !backgrounded;
 
   async function copyMarkup() {
     try {
@@ -584,6 +642,15 @@ function VariantCell({
     await navigator.clipboard.writeText(baseUrl + renderUrl);
     toast.success('URL copied');
   }
+
+  // v0.1.50: dark-card cells need explicit light-on-dark button
+  // styling, otherwise the shadcn `outline` variant uses
+  // foreground-on-background tokens that resolve to white-on-white
+  // (invisible) in the workspace's light theme. We override with
+  // an explicit border + text color so labels stay readable.
+  const buttonClass = isDarkBg
+    ? 'h-7 px-2 text-xs border-zinc-700 bg-zinc-800/50 text-zinc-100 hover:bg-zinc-800 hover:text-zinc-50'
+    : 'h-7 px-2 text-xs';
 
   return (
     <div
@@ -609,15 +676,15 @@ function VariantCell({
         />
       </div>
       <div className="flex flex-wrap gap-1">
-        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs"
+        <Button type="button" variant="outline" size="sm" className={buttonClass}
           onClick={copyMarkup}>
           Copy SVG
         </Button>
-        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs"
+        <Button type="button" variant="outline" size="sm" className={buttonClass}
           onClick={copyUrl}>
           Copy URL
         </Button>
-        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" asChild>
+        <Button type="button" variant="outline" size="sm" className={buttonClass} asChild>
           <a href={downloadUrl} download>
             <Download className="h-3 w-3 mr-1" /> SVG
           </a>

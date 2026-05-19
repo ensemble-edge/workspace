@@ -194,6 +194,34 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
             ).join('')}
           </div>
         `).join('')}
+
+        ${policy.backgrounded?.allowed ? `
+          <p style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;margin:16px 0 8px;">
+            backgrounded
+          </p>
+          <div class="logo-grid">
+            ${[
+              policy.backgrounded.lightAllowed ? { id: 'light', label: 'Light tile', dark: false } : null,
+              policy.backgrounded.darkAllowed  ? { id: 'dark',  label: 'Dark tile',  dark: true  } : null,
+            ].filter(Boolean).map((v) => {
+              const variant = v as { id: string; label: string; dark: boolean };
+              // v0.1.50: Backgrounded variants encode the wrap into the
+              // path via the `-bg-` token (no query params on
+              // distribution URLs). Path-style route recognizes this
+              // grammar and sets backgrounded=true on the renderer.
+              const renderUrl = applyAssetAlias(
+                `/_ensemble/brand/render/${brand.workspace_slug}-bg-icon-full-color-${variant.id}.svg`,
+                aliasPath,
+              ) ?? '';
+              return `<div>
+                <div class="logo-tile${variant.dark ? ' dark' : ''}">
+                  <img src="${escapeAttr(renderUrl)}" alt="${escapeHtml(`Backgrounded · ${variant.label}`)}">
+                </div>
+                <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">${escapeHtml(`Backgrounded · ${variant.label}`)}</p>
+              </div>`;
+            }).join('')}
+          </div>
+        ` : ''}
       </section>
 
       ${(bannedPairs.length > 0 || bannedComps.length > 0) ? `

@@ -299,6 +299,7 @@ export function createCredentialsRoutes(): App {
         spacing?: number;
         iconSide?: 'left' | 'right';
         iconPosition?: 'top' | 'bottom';
+        crossAlign?: number;
         backgroundedPadding?: number;
       };
     },
@@ -326,6 +327,7 @@ export function createCredentialsRoutes(): App {
           ...(o.spacing != null ? { spacing: o.spacing } : {}),
           ...(o.iconSide != null ? { iconSide: o.iconSide } : {}),
           ...(o.iconPosition != null ? { iconPosition: o.iconPosition } : {}),
+          ...(o.crossAlign != null ? { crossAlign: o.crossAlign } : {}),
         };
       }
       if (o.backgroundedPadding != null && policy.backgrounded) {
@@ -376,11 +378,20 @@ export function createCredentialsRoutes(): App {
     const filename = options.filename || `${slug}-${composition}-${finish}-${backgroundId}.svg`;
     // Editorial overrides (live preview) should NOT be cached — the
     // operator is actively dragging sliders and expects the response
-    // to reflect each new combination. Saved-policy renders get the
-    // standard 1h cache.
+    // to reflect each new combination. Saved-policy renders use a
+    // SHORT 60s cache so policy edits become visible quickly (the
+    // operator hits Save on the Logos tab and within ~60s sees the
+    // change on Brand Overview / /brand without manual refresh) while
+    // still benefitting from CDN caching under real traffic.
+    //
+    // v0.1.50: dropped from 3600s → 60s because operators couldn't
+    // see their saved crossAlign changes reflected in the variants
+    // matrix without a hard refresh. We deliberately don't use a
+    // ?v=<hash> cache-bust pattern because operators want clean
+    // distribution URLs (no GET parameters).
     const cacheControl = options.overrides
       ? 'no-store, max-age=0, must-revalidate'
-      : 'public, max-age=3600';
+      : 'public, max-age=60';
     const headers = new Headers({
       'Content-Type': 'image/svg+xml; charset=utf-8',
       'Cache-Control': cacheControl,
@@ -414,6 +425,7 @@ export function createCredentialsRoutes(): App {
       spacing: numQ('spacing'),
       iconSide: c.req.query('iconSide') as 'left' | 'right' | undefined,
       iconPosition: c.req.query('iconPosition') as 'top' | 'bottom' | undefined,
+      crossAlign: numQ('crossAlign'),
       backgroundedPadding: numQ('backgroundedPadding'),
     };
     const hasOverride = Object.values(overrides).some((v) => v !== undefined);
@@ -499,21 +511,42 @@ export function createCredentialsRoutes(): App {
       spacing: numQ('spacing'),
       iconSide: c.req.query('iconSide') as 'left' | 'right' | undefined,
       iconPosition: c.req.query('iconPosition') as 'top' | 'bottom' | undefined,
+      crossAlign: numQ('crossAlign'),
       backgroundedPadding: numQ('backgroundedPadding'),
     };
     const hasOverride = Object.values(overrides).some((v) => v !== undefined);
-    const backgrounded = c.req.query('backgrounded') === '1';
+    // v0.1.50: Backgrounded variants previously required ?backgrounded=1
+    // which polluted the URL with a GET param. The new grammar bakes
+    // it into the path: a `-bg` token *immediately before* the comp
+    // segment means "backgrounded". Example:
+    //   acme-icon-full-color-light.svg            ← plain icon-only
+    //   acme-bg-icon-full-color-light.svg         ← backgrounded
+    // The token is detected by trying each variant suffix with and
+    // without the bg- prefix; whichever matches wins.
+    const queryBackgrounded = c.req.query('backgrounded') === '1';
     const download = c.req.query('download') === '1';
 
     for (const comp of COMPOSITIONS) {
       for (const finish of FINISHES) {
         for (const bg of BGS) {
+          // Try the backgrounded form first so `bg-icon-...` is
+          // recognized as backgrounded icon, not "ends with -icon-..."
+          // on a stem that happens to have bg as part of its slug.
+          const bgSuffix = `-bg-${comp.slug}-${finish}-${bg}`;
+          if (stem.endsWith(bgSuffix)) {
+            return handleBrandRender(c, comp.id, finish, bg, {
+              download,
+              filename,
+              backgrounded: true,
+              overrides: hasOverride ? overrides : undefined,
+            });
+          }
           const suffix = `-${comp.slug}-${finish}-${bg}`;
           if (stem.endsWith(suffix)) {
             return handleBrandRender(c, comp.id, finish, bg, {
               download,
               filename,
-              backgrounded,
+              backgrounded: queryBackgrounded,
               overrides: hasOverride ? overrides : undefined,
             });
           }
@@ -525,7 +558,7 @@ export function createCredentialsRoutes(): App {
     return c.json({
       error: 'unrecognized_brand_variant_url',
       filename,
-      hint: 'Expected: /brand/<slug>-<composition>-<finish>-<bg>.svg where composition is one of wordmark|icon|stacked|horizontal, finish is full-color|mono-black|mono-white|mono-brand, bg is transparent|light|dark.',
+      hint: 'Expected: /brand/<slug>[-bg]-<composition>-<finish>-<bg>.svg where composition is one of wordmark|icon|stacked|horizontal, finish is full-color|mono-black|mono-white|mono-brand, bg is transparent|light|dark. The optional -bg token marks a backgrounded (tile-wrapped) variant.',
     }, 404);
   });
 
@@ -539,7 +572,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.49-preview-override-path-style',
+      buildFingerprint: 'v0.1.50-crossalign-bg-path-prefix',
       timestamp: new Date().toISOString(),
     });
   });
