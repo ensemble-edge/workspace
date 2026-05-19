@@ -194,6 +194,12 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   app.use('/_ensemble/users/*', auth());
   // v0.1.14: brand upload is admin-only (asset GET stays public for img tags).
   app.use('/_ensemble/brand/upload', auth());
+  // v0.1.47: mutations under /_ensemble/core/brand/* (logo-policy
+  // PUT etc.) need an authenticated user so requireAdmin can read
+  // membership.role. GET reads on these paths stay open to public
+  // brand-guide consumers, so we attach auth as optional — passes
+  // through when no cookie is present and only gates per-handler.
+  app.use('/_ensemble/core/brand/*', auth({ required: false }));
   // v0.1.15: workspace policy (settings) and content locales.
   app.use('/_ensemble/settings/*', auth());
   app.use('/_ensemble/locales/*', auth());

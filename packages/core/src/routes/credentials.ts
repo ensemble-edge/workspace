@@ -284,7 +284,24 @@ export function createCredentialsRoutes(): App {
     composition: 'wordmark-only' | 'icon-only' | 'stacked' | 'horizontal',
     finish: 'full-color' | 'mono-black' | 'mono-white' | 'mono-brand',
     backgroundId: string,
-    options: { download: boolean; filename?: string; backgrounded?: boolean },
+    options: {
+      download: boolean;
+      filename?: string;
+      backgrounded?: boolean;
+      /**
+       * v0.1.48+: when set, the render uses these policy overrides
+       * instead of the stored policy values. Powers the live-preview
+       * tiles in the Logos composition editor so operators see slider
+       * changes immediately without saving first.
+       */
+      overrides?: {
+        iconScale?: number;
+        spacing?: number;
+        iconSide?: 'left' | 'right';
+        iconPosition?: 'top' | 'bottom';
+        backgroundedPadding?: number;
+      };
+    },
   ): Promise<Response> {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
@@ -293,6 +310,32 @@ export function createCredentialsRoutes(): App {
     const { renderBrandAsset } = await import('../services/brand-assets');
 
     const policy = await loadPolicy(c.env.DB, workspace.id);
+
+    // Apply preview overrides on top of the stored policy. The
+    // composition-allowed flag is FORCED true here so the preview
+    // renders even when the card's toggle is currently off — the
+    // operator needs to see what the composition would look like in
+    // order to decide whether to enable it.
+    if (options.overrides) {
+      const o = options.overrides;
+      if (composition === 'stacked' || composition === 'horizontal') {
+        policy.compositions[composition] = {
+          ...policy.compositions[composition],
+          allowed: true,
+          ...(o.iconScale != null ? { iconScale: o.iconScale } : {}),
+          ...(o.spacing != null ? { spacing: o.spacing } : {}),
+          ...(o.iconSide != null ? { iconSide: o.iconSide } : {}),
+          ...(o.iconPosition != null ? { iconPosition: o.iconPosition } : {}),
+        };
+      }
+      if (o.backgroundedPadding != null && policy.backgrounded) {
+        policy.backgrounded = {
+          ...policy.backgrounded,
+          allowed: true,
+          padding: o.backgroundedPadding,
+        };
+      }
+    }
 
     // Brand colors for finish resolution + WCAG contrast checks.
     const rows = await c.env.DB.prepare(
@@ -307,7 +350,10 @@ export function createCredentialsRoutes(): App {
       else if (r.key === 'brand-background-dark') brandColors.bgDark = r.value;
     }
 
-    if (!isPairAllowed(policy, brandColors, finish, backgroundId)) {
+    // Skip the pair-allowed check when overrides are present — the
+    // preview is editorial; the policy editor is what enforces
+    // allowed pairs on the saved side.
+    if (!options.overrides && !isPairAllowed(policy, brandColors, finish, backgroundId)) {
       return c.json({
         error: 'banned_combination',
         detail: `${finish} on ${backgroundId} is not an approved brand use.`,
@@ -350,7 +396,25 @@ export function createCredentialsRoutes(): App {
     const backgroundId = c.req.query('bg') || 'transparent';
     const download = c.req.query('download') === '1';
     const backgrounded = c.req.query('backgrounded') === '1';
-    return handleBrandRender(c, composition, finish, backgroundId, { download, backgrounded });
+    // v0.1.48+: optional inline policy overrides for live preview.
+    const numQ = (k: string): number | undefined => {
+      const v = c.req.query(k);
+      const n = v != null ? Number(v) : NaN;
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const overrides = {
+      iconScale: numQ('iconScale'),
+      spacing: numQ('spacing'),
+      iconSide: c.req.query('iconSide') as 'left' | 'right' | undefined,
+      iconPosition: c.req.query('iconPosition') as 'top' | 'bottom' | undefined,
+      backgroundedPadding: numQ('backgroundedPadding'),
+    };
+    const hasOverride = Object.values(overrides).some((v) => v !== undefined);
+    return handleBrandRender(c, composition, finish, backgroundId, {
+      download,
+      backgrounded,
+      overrides: hasOverride ? overrides : undefined,
+    });
   });
 
   /**
@@ -445,7 +509,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.47-composition-policy-editors',
+      buildFingerprint: 'v0.1.48-composition-editor-save-button',
       timestamp: new Date().toISOString(),
     });
   });

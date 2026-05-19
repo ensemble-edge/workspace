@@ -816,276 +816,172 @@ type LogoPolicyShape = {
   };
 };
 
+
+/**
+ * v0.1.48 rewrite — Composition policy editors.
+ *
+ * Save model: explicit Save button per card with a dirty-state hint
+ * ("Unsaved changes" / "Saving…" / "Saved"). Matches the manual-save
+ * UX everywhere else in Brand (Colors, Typography, Identity).
+ *
+ * Live preview model: each card holds a local DRAFT of its slice of
+ * the policy. Slider changes update the draft (smooth, no network).
+ * The preview <img> URL embeds the draft as query overrides, so the
+ * server renders with the draft values without anything being saved.
+ * Save commits the draft to the server. Refresh-before-save reloads
+ * the last saved values, so an abandoned edit is non-destructive.
+ *
+ * The preview URL is plain GET (cacheable by the browser per-URL),
+ * and the image's `key` prop is tied to the override-signature so
+ * React updates the <img> element when the URL changes — no manual
+ * cache-bust needed.
+ */
 function CompositionPolicyEditors() {
-  const [policy, setPolicy] = useState<LogoPolicyShape | null>(null);
+  const [savedPolicy, setSavedPolicy] = useState<LogoPolicyShape | null>(null);
   const [workspaceSlug, setWorkspaceSlug] = useState<string>('');
   const [aliasPath, setAliasPath] = useState<string>('');
+  const [reloadKey, setReloadKey] = useState(0);
 
-  // Load policy on mount.
   useEffect(() => {
     authedFetch('/_ensemble/core/brand/logo-policy')
       .then((r) => r.json() as Promise<{ policy: LogoPolicyShape; workspaceSlug?: string; assetAliasPath?: string }>)
       .then((res) => {
-        setPolicy(res.policy);
+        setSavedPolicy(res.policy);
         setWorkspaceSlug(res.workspaceSlug || 'workspace');
         setAliasPath(res.assetAliasPath || '');
       })
       .catch(() => { /* card hidden */ });
-  }, []);
+  }, [reloadKey]);
 
-  if (!policy) return null;
+  if (!savedPolicy) return null;
 
-  // Save the whole policy. We send the merged object so the server's
-  // default-merge layer fills in any fields we didn't touch.
-  async function savePolicy(next: LogoPolicyShape) {
-    setPolicy(next);
+  /**
+   * Save just the slice this card owns. Server merges with the rest
+   * of the policy, so concurrent edits to different cards don't
+   * stomp each other.
+   */
+  async function saveSlice(slice: Partial<LogoPolicyShape>): Promise<boolean> {
+    if (!savedPolicy) return false;
+    const merged: LogoPolicyShape = {
+      ...savedPolicy,
+      ...slice,
+      compositions: {
+        ...savedPolicy.compositions,
+        ...(slice.compositions ?? {}),
+      },
+    };
     try {
       const res = await authedFetch('/_ensemble/core/brand/logo-policy', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(next),
+        body: JSON.stringify(merged),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string; detail?: string };
+        throw new Error(body.detail || body.error || `HTTP ${res.status}`);
+      }
+      setSavedPolicy(merged);
+      return true;
     } catch (e) {
-      toast.error('Could not save policy', {
+      toast.error('Could not save', {
         description: e instanceof Error ? e.message : String(e),
       });
+      return false;
     }
-  }
-
-  function updateComposition(key: 'stacked' | 'horizontal', patch: Partial<CompositionPolicy>) {
-    if (!policy) return;
-    savePolicy({
-      ...policy,
-      compositions: {
-        ...policy.compositions,
-        [key]: { ...policy.compositions[key], ...patch },
-      },
-    });
-  }
-
-  function updateBackgrounded(patch: Partial<NonNullable<LogoPolicyShape['backgrounded']>>) {
-    if (!policy) return;
-    const current = policy.backgrounded ?? { allowed: false, lightAllowed: true, darkAllowed: true, padding: 0.5 };
-    savePolicy({ ...policy, backgrounded: { ...current, ...patch } });
   }
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
-      <HorizontalLockupCard
-        config={policy.compositions.horizontal}
-        onChange={(p) => updateComposition('horizontal', p)}
+      <LockupCard
+        kind="horizontal"
+        savedConfig={savedPolicy.compositions.horizontal}
         workspaceSlug={workspaceSlug}
         aliasPath={aliasPath}
+        onSave={(c) => saveSlice({ compositions: { ...savedPolicy!.compositions, horizontal: c } })}
+        // Force re-render of local draft when savedPolicy changes
+        // (e.g. after Save commits or a sibling card saves).
+        key={`h-${reloadKey}`}
       />
-      <StackedLockupCard
-        config={policy.compositions.stacked}
-        onChange={(p) => updateComposition('stacked', p)}
+      <LockupCard
+        kind="stacked"
+        savedConfig={savedPolicy.compositions.stacked}
         workspaceSlug={workspaceSlug}
         aliasPath={aliasPath}
+        onSave={(c) => saveSlice({ compositions: { ...savedPolicy!.compositions, stacked: c } })}
+        key={`s-${reloadKey}`}
       />
-      <BackgroundedLockupCard
-        config={policy.backgrounded ?? { allowed: false, lightAllowed: true, darkAllowed: true, padding: 0.5 }}
-        onChange={updateBackgrounded}
+      <BackgroundedCard
+        savedConfig={savedPolicy.backgrounded ?? { allowed: false, lightAllowed: true, darkAllowed: true, padding: 0.5 }}
         workspaceSlug={workspaceSlug}
         aliasPath={aliasPath}
+        onSave={(c) => saveSlice({ backgrounded: c })}
+        key={`b-${reloadKey}`}
       />
     </div>
   );
 }
 
-function HorizontalLockupCard({
-  config, onChange, workspaceSlug, aliasPath,
+/* ──────────────────────────────────────────────────────────────
+ * Lockup card (horizontal + stacked share this shape)
+ * ──────────────────────────────────────────────────────────── */
+
+function LockupCard({
+  kind,
+  savedConfig,
+  workspaceSlug,
+  aliasPath,
+  onSave,
 }: {
-  config: CompositionPolicy;
-  onChange: (p: Partial<CompositionPolicy>) => void;
+  kind: 'horizontal' | 'stacked';
+  savedConfig: CompositionPolicy;
   workspaceSlug: string;
   aliasPath: string;
+  onSave: (config: CompositionPolicy) => Promise<boolean>;
 }) {
-  return (
-    <CompositionCard
-      title="Horizontal lockup"
-      description="Icon and wordmark side by side. Common for headers, signatures, and nav bars."
-      allowed={config.allowed}
-      onToggle={(v) => onChange({ allowed: v })}
-      previewUrl={buildPreviewUrl('horizontal', workspaceSlug, aliasPath)}
-      sliders={[
-        {
-          label: 'Icon size',
-          help: 'Relative to wordmark height',
-          value: config.iconScale ?? 1.2,
-          min: 0.5, max: 2, step: 0.05,
-          format: (v) => `${v.toFixed(2)}×`,
-          onChange: (v) => onChange({ iconScale: v }),
-        },
-        {
-          label: 'Spacing',
-          help: 'Gap between icon and wordmark (em-relative)',
-          value: config.spacing ?? 0.4,
-          min: 0, max: 1.5, step: 0.05,
-          format: (v) => `${v.toFixed(2)}em`,
-          onChange: (v) => onChange({ spacing: v }),
-        },
-      ]}
-      position={{
-        label: 'Icon position',
-        options: [
-          { value: 'left', label: 'Left' },
-          { value: 'right', label: 'Right' },
-        ],
-        current: config.iconSide ?? 'left',
-        onChange: (v) => onChange({ iconSide: v as 'left' | 'right' }),
-      }}
-    />
-  );
-}
+  // Local draft — sliders + toggles write here without server roundtrips.
+  const [draft, setDraft] = useState<CompositionPolicy>(savedConfig);
+  const [saving, setSaving] = useState(false);
 
-function StackedLockupCard({
-  config, onChange, workspaceSlug, aliasPath,
-}: {
-  config: CompositionPolicy;
-  onChange: (p: Partial<CompositionPolicy>) => void;
-  workspaceSlug: string;
-  aliasPath: string;
-}) {
-  return (
-    <CompositionCard
-      title="Stacked lockup"
-      description="Icon above (or below) the wordmark. Common for app launchers, splash screens, and badges."
-      allowed={config.allowed}
-      onToggle={(v) => onChange({ allowed: v })}
-      previewUrl={buildPreviewUrl('stacked', workspaceSlug, aliasPath)}
-      sliders={[
-        {
-          label: 'Icon size',
-          help: 'Relative to wordmark height',
-          value: config.iconScale ?? 1.5,
-          min: 0.5, max: 2.5, step: 0.05,
-          format: (v) => `${v.toFixed(2)}×`,
-          onChange: (v) => onChange({ iconScale: v }),
-        },
-        {
-          label: 'Spacing',
-          help: 'Vertical gap between icon and wordmark',
-          value: config.spacing ?? 0.4,
-          min: 0, max: 1.5, step: 0.05,
-          format: (v) => `${v.toFixed(2)}em`,
-          onChange: (v) => onChange({ spacing: v }),
-        },
-      ]}
-      position={{
-        label: 'Icon position',
-        options: [
-          { value: 'top', label: 'Top' },
-          { value: 'bottom', label: 'Bottom' },
-        ],
-        current: config.iconPosition ?? 'top',
-        onChange: (v) => onChange({ iconPosition: v as 'top' | 'bottom' }),
-      }}
-    />
-  );
-}
+  // Reset draft when savedConfig changes (after a successful save or
+  // initial load).
+  useEffect(() => { setDraft(savedConfig); }, [savedConfig]);
 
-function BackgroundedLockupCard({
-  config, onChange, workspaceSlug, aliasPath,
-}: {
-  config: { allowed: boolean; lightAllowed: boolean; darkAllowed: boolean; padding: number };
-  onChange: (p: Partial<{ allowed: boolean; lightAllowed: boolean; darkAllowed: boolean; padding: number }>) => void;
-  workspaceSlug: string;
-  aliasPath: string;
-}) {
-  const [paddingLocal, setPaddingLocal] = useState(config.padding);
-  useEffect(() => { setPaddingLocal(config.padding); }, [config.padding]);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(savedConfig);
 
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1 flex-1">
-            <CardTitle className="text-base">Backgrounded lockup</CardTitle>
-            <CardDescription>
-              Wrap the lockup in a brand-color tile with padding. Useful for app icons,
-              social embeds, or any context where the logo needs a controlled background.
-            </CardDescription>
-          </div>
-          <Switch checked={config.allowed} onCheckedChange={(v) => onChange({ allowed: v })} />
-        </div>
-      </CardHeader>
-      {config.allowed && (
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-md border p-3 flex items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium">On light background</p>
-                <p className="text-[10px] text-muted-foreground">Uses brand-background-light</p>
-              </div>
-              <Switch checked={config.lightAllowed} onCheckedChange={(v) => onChange({ lightAllowed: v })} />
-            </div>
-            <div className="rounded-md border p-3 flex items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium">On dark background</p>
-                <p className="text-[10px] text-muted-foreground">Uses brand-background-dark</p>
-              </div>
-              <Switch checked={config.darkAllowed} onCheckedChange={(v) => onChange({ darkAllowed: v })} />
-            </div>
-          </div>
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await onSave(draft);
+    } finally {
+      setSaving(false);
+    }
+  }
 
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs">Outer padding</Label>
-              <span className="text-xs font-mono text-muted-foreground">{paddingLocal.toFixed(2)}em</span>
-            </div>
-            <Slider
-              value={[paddingLocal]}
-              min={0} max={2} step={0.05}
-              onValueChange={(v) => setPaddingLocal(v[0])}
-              onValueCommit={(v) => onChange({ padding: v[0] })}
-            />
-            <p className="text-[10px] text-muted-foreground">
-              Space between the logo and the tile edge.
-            </p>
-          </div>
-        </CardContent>
-      )}
-    </Card>
-  );
-}
+  const title = kind === 'horizontal' ? 'Horizontal lockup' : 'Stacked lockup';
+  const description = kind === 'horizontal'
+    ? 'Icon and wordmark side by side. Common for headers, signatures, and nav bars.'
+    : 'Icon above (or below) the wordmark. Common for app launchers, splash screens, and badges.';
 
-interface SliderConfig {
-  label: string;
-  help: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  format: (v: number) => string;
-  onChange: (v: number) => void;
-}
+  // Default slider/position config per kind.
+  const defaults = kind === 'horizontal'
+    ? { iconScale: 1.2, spacing: 0.4 }
+    : { iconScale: 1.5, spacing: 0.4 };
 
-interface PositionConfig {
-  label: string;
-  options: Array<{ value: string; label: string }>;
-  current: string;
-  onChange: (v: string) => void;
-}
+  // Build preview URL with draft overrides so the preview updates
+  // every render — no cache-bust trickery needed, the URL itself
+  // changes when the draft changes.
+  const compShort = kind;
+  const tail = `${workspaceSlug}-${compShort}-full-color-transparent.svg`;
+  const base = aliasPath
+    ? `/${aliasPath}/brand/render/${tail}`
+    : `/_ensemble/brand/render/${tail}`;
+  const params = new URLSearchParams();
+  params.set('iconScale', String(draft.iconScale ?? defaults.iconScale));
+  params.set('spacing', String(draft.spacing ?? defaults.spacing));
+  if (kind === 'horizontal') params.set('iconSide', draft.iconSide ?? 'left');
+  else params.set('iconPosition', draft.iconPosition ?? 'top');
+  const previewUrl = `${base}?${params.toString()}`;
 
-function CompositionCard({
-  title,
-  description,
-  allowed,
-  onToggle,
-  previewUrl,
-  sliders,
-  position,
-}: {
-  title: string;
-  description: string;
-  allowed: boolean;
-  onToggle: (v: boolean) => void;
-  previewUrl: string;
-  sliders: SliderConfig[];
-  position: PositionConfig;
-}) {
   return (
     <Card>
       <CardHeader>
@@ -1094,94 +990,298 @@ function CompositionCard({
             <CardTitle className="text-base">{title}</CardTitle>
             <CardDescription>{description}</CardDescription>
           </div>
-          <Switch checked={allowed} onCheckedChange={onToggle} />
+          <Switch
+            checked={draft.allowed}
+            onCheckedChange={(v) => setDraft({ ...draft, allowed: v })}
+          />
         </div>
       </CardHeader>
-      {allowed && (
-        <CardContent className="space-y-4">
-          {/* Live preview tile */}
-          <div className="flex items-center justify-center h-32 rounded-md border bg-muted/30 overflow-hidden">
-            <img
-              src={previewUrl}
-              alt={`${title} preview`}
-              className="max-h-28 max-w-full object-contain"
-              // Cache-bust so policy changes update the preview
-              // immediately. Tiny URL noise; not user-visible.
-              key={previewUrl}
-            />
-          </div>
+      <CardContent className="space-y-4">
+        {/* Live preview — always rendered even when allowed=false so
+            the operator can see what enabling it would look like. */}
+        <div className="flex items-center justify-center h-32 rounded-md border bg-muted/30 overflow-hidden">
+          <img
+            src={previewUrl}
+            alt={`${title} preview`}
+            className="max-h-28 max-w-full object-contain"
+          />
+        </div>
 
-          {/* Position toggle */}
-          <div className="space-y-1.5">
-            <Label className="text-xs">{position.label}</Label>
-            <div className="grid grid-cols-2 rounded-md border p-1 gap-1">
-              {position.options.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  className={
-                    position.current === opt.value
-                      ? 'rounded px-2 py-1 text-xs font-medium bg-primary text-primary-foreground'
-                      : 'rounded px-2 py-1 text-xs font-medium hover:bg-muted text-muted-foreground'
-                  }
-                  onClick={() => position.onChange(opt.value)}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+        {/* Position toggle */}
+        <div className="space-y-1.5">
+          <Label className="text-xs">Icon position</Label>
+          <div className="grid grid-cols-2 rounded-md border p-1 gap-1">
+            {kind === 'horizontal' ? (
+              <>
+                <PositionButton
+                  active={(draft.iconSide ?? 'left') === 'left'}
+                  onClick={() => setDraft({ ...draft, iconSide: 'left' })}
+                  label="Left"
+                />
+                <PositionButton
+                  active={(draft.iconSide ?? 'left') === 'right'}
+                  onClick={() => setDraft({ ...draft, iconSide: 'right' })}
+                  label="Right"
+                />
+              </>
+            ) : (
+              <>
+                <PositionButton
+                  active={(draft.iconPosition ?? 'top') === 'top'}
+                  onClick={() => setDraft({ ...draft, iconPosition: 'top' })}
+                  label="Top"
+                />
+                <PositionButton
+                  active={(draft.iconPosition ?? 'top') === 'bottom'}
+                  onClick={() => setDraft({ ...draft, iconPosition: 'bottom' })}
+                  label="Bottom"
+                />
+              </>
+            )}
           </div>
+        </div>
 
-          {/* Sliders */}
-          {sliders.map((s) => (
-            <CardSlider key={s.label} {...s} />
-          ))}
-        </CardContent>
-      )}
+        {/* Sliders */}
+        <SmoothSlider
+          label="Icon size"
+          help="Relative to wordmark height"
+          value={draft.iconScale ?? defaults.iconScale}
+          min={0.5} max={kind === 'horizontal' ? 2 : 2.5} step={0.01}
+          format={(v) => `${v.toFixed(2)}×`}
+          onChange={(v) => setDraft({ ...draft, iconScale: v })}
+        />
+        <SmoothSlider
+          label="Spacing"
+          help="Gap between icon and wordmark (em-relative)"
+          value={draft.spacing ?? defaults.spacing}
+          min={0} max={1.5} step={0.01}
+          format={(v) => `${v.toFixed(2)}em`}
+          onChange={(v) => setDraft({ ...draft, spacing: v })}
+        />
+
+        {/* Save row */}
+        <SaveRow dirty={dirty} saving={saving} onSave={handleSave} />
+      </CardContent>
     </Card>
   );
 }
 
-function CardSlider({
-  label, help, value, min, max, step, format, onChange,
-}: SliderConfig) {
-  const [local, setLocal] = useState(value);
-  useEffect(() => { setLocal(value); }, [value]);
+/* ──────────────────────────────────────────────────────────────
+ * Backgrounded card
+ * ──────────────────────────────────────────────────────────── */
 
+interface BackgroundedConfig {
+  allowed: boolean;
+  lightAllowed: boolean;
+  darkAllowed: boolean;
+  padding: number;
+}
+
+function BackgroundedCard({
+  savedConfig,
+  workspaceSlug,
+  aliasPath,
+  onSave,
+}: {
+  savedConfig: BackgroundedConfig;
+  workspaceSlug: string;
+  aliasPath: string;
+  onSave: (config: BackgroundedConfig) => Promise<boolean>;
+}) {
+  const [draft, setDraft] = useState<BackgroundedConfig>(savedConfig);
+  const [saving, setSaving] = useState(false);
+  // Which sub-variant the preview shows. Default to whichever variant
+  // is enabled (light first if both, otherwise the enabled one).
+  const [previewMode, setPreviewMode] = useState<'light' | 'dark'>(
+    savedConfig.lightAllowed ? 'light' : 'dark',
+  );
+
+  useEffect(() => { setDraft(savedConfig); }, [savedConfig]);
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(savedConfig);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await onSave(draft);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Preview shows the icon-only composition (the "bug") backgrounded
+  // — per operator spec, the bug-on-tile is what backgrounded variants
+  // are typically used for (app icons, social avatars on solid bg).
+  const tail = `${workspaceSlug}-icon-full-color-${previewMode}.svg`;
+  const base = aliasPath
+    ? `/${aliasPath}/brand/render/${tail}`
+    : `/_ensemble/brand/render/${tail}`;
+  const params = new URLSearchParams();
+  params.set('backgrounded', '1');
+  params.set('backgroundedPadding', String(draft.padding));
+  const previewUrl = `${base}?${params.toString()}`;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1 flex-1">
+            <CardTitle className="text-base">Backgrounded lockup</CardTitle>
+            <CardDescription>
+              Wrap the bug in a brand-color tile with padding. Useful for app icons,
+              social embeds, or any context where the logo needs a controlled background.
+            </CardDescription>
+          </div>
+          <Switch
+            checked={draft.allowed}
+            onCheckedChange={(v) => setDraft({ ...draft, allowed: v })}
+          />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Live preview — bug on the active background variant. */}
+        <div className="flex items-center justify-center h-32 rounded-md border bg-muted/30 overflow-hidden">
+          <img
+            src={previewUrl}
+            alt="Backgrounded preview"
+            className="max-h-28 max-w-full object-contain"
+          />
+        </div>
+
+        {/* Light/Dark sub-variant toggles + preview-mode selector */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-md border p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-medium">Light tile</p>
+                <p className="text-[10px] text-muted-foreground">Uses brand-background-light</p>
+              </div>
+              <Switch
+                checked={draft.lightAllowed}
+                onCheckedChange={(v) => setDraft({ ...draft, lightAllowed: v })}
+              />
+            </div>
+            <Button
+              type="button"
+              variant={previewMode === 'light' ? 'default' : 'outline'}
+              size="sm"
+              className="w-full h-7 text-xs"
+              onClick={() => setPreviewMode('light')}
+            >
+              Preview
+            </Button>
+          </div>
+          <div className="rounded-md border p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-medium">Dark tile</p>
+                <p className="text-[10px] text-muted-foreground">Uses brand-background-dark</p>
+              </div>
+              <Switch
+                checked={draft.darkAllowed}
+                onCheckedChange={(v) => setDraft({ ...draft, darkAllowed: v })}
+              />
+            </div>
+            <Button
+              type="button"
+              variant={previewMode === 'dark' ? 'default' : 'outline'}
+              size="sm"
+              className="w-full h-7 text-xs"
+              onClick={() => setPreviewMode('dark')}
+            >
+              Preview
+            </Button>
+          </div>
+        </div>
+
+        <SmoothSlider
+          label="Outer padding"
+          help="Space between the bug and the tile edge"
+          value={draft.padding}
+          min={0} max={2} step={0.01}
+          format={(v) => `${v.toFixed(2)}em`}
+          onChange={(v) => setDraft({ ...draft, padding: v })}
+        />
+
+        <SaveRow dirty={dirty} saving={saving} onSave={handleSave} />
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Shared primitives
+ * ──────────────────────────────────────────────────────────── */
+
+function PositionButton({
+  active, onClick, label,
+}: { active: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      className={
+        active
+          ? 'rounded px-2 py-1 text-xs font-medium bg-primary text-primary-foreground'
+          : 'rounded px-2 py-1 text-xs font-medium hover:bg-muted text-muted-foreground'
+      }
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
+ * Slider with a local-state cursor that updates on every drag frame
+ * (smooth) and propagates the value upward via onChange on every
+ * change too (so the preview <img> URL updates immediately). The
+ * "controlled vs uncontrolled" pattern: parent owns the canonical
+ * draft state, slider mirrors it.
+ */
+function SmoothSlider({
+  label, help, value, min, max, step, format, onChange,
+}: {
+  label: string;
+  help: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  format: (v: number) => string;
+  onChange: (v: number) => void;
+}) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <Label className="text-xs">{label}</Label>
-        <span className="text-xs font-mono text-muted-foreground">{format(local)}</span>
+        <span className="text-xs font-mono text-muted-foreground">{format(value)}</span>
       </div>
       <Slider
-        value={[local]}
+        value={[value]}
         min={min} max={max} step={step}
-        onValueChange={(v) => setLocal(v[0])}
-        onValueCommit={(v) => onChange(v[0])}
+        onValueChange={(v) => onChange(v[0])}
       />
       <p className="text-[10px] text-muted-foreground">{help}</p>
     </div>
   );
 }
 
-/**
- * Build the preview URL for a composition. Uses full-color-on-light
- * by default — picking a banned pair would render nothing.
- */
-function buildPreviewUrl(
-  composition: 'horizontal' | 'stacked',
-  workspaceSlug: string,
-  aliasPath: string,
-): string {
-  const compShort = composition;
-  const tail = `${workspaceSlug}-${compShort}-full-color-light.svg`;
-  const base = aliasPath
-    ? `/${aliasPath}/brand/render/${tail}`
-    : `/_ensemble/brand/render/${tail}`;
-  // Cache-bust on policy changes by appending a counter — we don't
-  // know when policy actually changed from here, so we use Date.now()
-  // bucketed to the second to balance freshness against thrashing.
-  const bucket = Math.floor(Date.now() / 1000);
-  return `${base}?_=${bucket}`;
+function SaveRow({
+  dirty, saving, onSave,
+}: { dirty: boolean; saving: boolean; onSave: () => void }) {
+  return (
+    <div className="flex items-center justify-between pt-2 border-t">
+      <span className="text-xs text-muted-foreground">
+        {saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved'}
+      </span>
+      <Button
+        type="button"
+        size="sm"
+        onClick={onSave}
+        disabled={!dirty || saving}
+      >
+        {saving ? 'Saving…' : 'Save'}
+      </Button>
+    </div>
+  );
 }
