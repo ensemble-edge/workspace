@@ -374,9 +374,16 @@ export function createCredentialsRoutes(): App {
 
     const slug = (workspace.slug || workspace.id).toLowerCase();
     const filename = options.filename || `${slug}-${composition}-${finish}-${backgroundId}.svg`;
+    // Editorial overrides (live preview) should NOT be cached — the
+    // operator is actively dragging sliders and expects the response
+    // to reflect each new combination. Saved-policy renders get the
+    // standard 1h cache.
+    const cacheControl = options.overrides
+      ? 'no-store, max-age=0, must-revalidate'
+      : 'public, max-age=3600';
     const headers = new Headers({
       'Content-Type': 'image/svg+xml; charset=utf-8',
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': cacheControl,
     });
     if (options.download) {
       headers.set('Content-Disposition', `attachment; filename="${filename}"`);
@@ -477,14 +484,37 @@ export function createCredentialsRoutes(): App {
     ];
     const BGS = ['transparent', 'light', 'dark'];
 
+    // v0.1.49: parse override + backgrounded query params so the
+    // path-style route accepts the same live-preview controls as
+    // the query-string route. The composition editor on Logos tab
+    // hits THIS route — without this, slider overrides on path-style
+    // URLs were silently dropped and the preview never updated.
+    const numQ = (k: string): number | undefined => {
+      const v = c.req.query(k);
+      const n = v != null ? Number(v) : NaN;
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const overrides = {
+      iconScale: numQ('iconScale'),
+      spacing: numQ('spacing'),
+      iconSide: c.req.query('iconSide') as 'left' | 'right' | undefined,
+      iconPosition: c.req.query('iconPosition') as 'top' | 'bottom' | undefined,
+      backgroundedPadding: numQ('backgroundedPadding'),
+    };
+    const hasOverride = Object.values(overrides).some((v) => v !== undefined);
+    const backgrounded = c.req.query('backgrounded') === '1';
+    const download = c.req.query('download') === '1';
+
     for (const comp of COMPOSITIONS) {
       for (const finish of FINISHES) {
         for (const bg of BGS) {
           const suffix = `-${comp.slug}-${finish}-${bg}`;
           if (stem.endsWith(suffix)) {
             return handleBrandRender(c, comp.id, finish, bg, {
-              download: false,
+              download,
               filename,
+              backgrounded,
+              overrides: hasOverride ? overrides : undefined,
             });
           }
         }
@@ -509,7 +539,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.48-composition-editor-save-button',
+      buildFingerprint: 'v0.1.49-preview-override-path-style',
       timestamp: new Date().toISOString(),
     });
   });
