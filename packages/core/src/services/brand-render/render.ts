@@ -51,6 +51,14 @@ export interface RenderRequest {
   /** Output format. Default 'svg'. */
   format?: 'svg' | 'png';
   /**
+   * v0.1.53: when set, override the canvas/render dimensions to a
+   * specific pixel size. Used by the favicon suite endpoints which
+   * need the icon rendered at exactly 32/180/192/512px regardless
+   * of the default composition canvas. Square output — width and
+   * height both set to this value, content centered.
+   */
+  faviconSize?: number;
+  /**
    * Live-preview overrides (Logos editor). When present, bypass the
    * pair-allowed check and force composition.allowed=true so the
    * operator can preview an as-yet-banned composition.
@@ -120,10 +128,15 @@ export async function renderBrandAssetV2(req: RenderRequest): Promise<RenderResu
       backgroundId: req.backgroundId,
       backgrounded: !!req.backgrounded,
       format: req.format ?? 'svg',
+      // v0.1.53: include faviconSize in the snapshot so different
+      // favicon sizes don't collide in cache. Square canvas → one
+      // dimension is enough.
+      faviconSize: req.faviconSize,
     },
   };
   const snapshotHash = hashSnapshot(cacheKeySnapshot);
-  const cacheKey = `${req.workspaceSlug}/${snapshotHash}/${req.composition}-${req.finish}-${req.backgroundId}${req.backgrounded ? '-bg' : ''}.${req.format ?? 'svg'}`;
+  const sizeTail = req.faviconSize ? `-${req.faviconSize}` : '';
+  const cacheKey = `${req.workspaceSlug}/${snapshotHash}/${req.composition}-${req.finish}-${req.backgroundId}${req.backgrounded ? '-bg' : ''}${sizeTail}.${req.format ?? 'svg'}`;
 
   // Editorial renders bypass persistent caching (operator is
   // actively dragging sliders; the output is throwaway).
@@ -210,7 +223,13 @@ async function produceAsset(inputs: ProduceInputs): Promise<CachedAsset> {
   }
 
   // Canvas dimensions for Satori.
-  const { width, height } = canvasSize(req.composition);
+  // v0.1.53: favicon suite passes faviconSize to force a square
+  // canvas at the exact pixel size needed (32/180/192/512). When
+  // unset, the default canvasSize() picks a generous canvas based
+  // on composition.
+  const { width, height } = req.faviconSize
+    ? { width: req.faviconSize, height: req.faviconSize }
+    : canvasSize(req.composition);
 
   // Load fonts (text-mode wordmark only — image-mode doesn't need fonts).
   const fontRequests = collectFontRequests(wordmarkInputs);

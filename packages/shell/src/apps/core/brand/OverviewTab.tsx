@@ -271,6 +271,11 @@ export function OverviewTab() {
           the icon mark SVG via /favicon.svg. */}
       <FaviconCard />
 
+      {/* v0.1.53: full favicon suite — operator copies the <head>
+          block into their site to wire up every browser/OS variant
+          (SVG, ICO legacy, iOS apple-touch-icon, Android manifest). */}
+      <FaviconSuiteCard />
+
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Messaging */}
@@ -628,10 +633,18 @@ function VariantCell({
   // route recognizes both `slug-bg-comp-finish-bg` (backgrounded)
   // and `slug-comp-finish-bg` (plain).
   const compPart = backgrounded ? `bg-${compShort}` : compShort;
-  const tail = `${workspaceSlug}-${compPart}-${finish.id}-${background.id}.svg`;
+  const tailSvg = `${workspaceSlug}-${compPart}-${finish.id}-${background.id}.svg`;
+  const tailPng = `${workspaceSlug}-${compPart}-${finish.id}-${background.id}.png`;
   const renderUrl = assetAliasPath
-    ? `/${assetAliasPath}/brand/render/${tail}`
-    : `/_ensemble/brand/render/${tail}`;
+    ? `/${assetAliasPath}/brand/render/${tailSvg}`
+    : `/_ensemble/brand/render/${tailSvg}`;
+  // v0.1.53: PNG variant of the same composition. Same URL grammar,
+  // .png extension instead of .svg — the path-style render route
+  // dispatches to resvg-wasm for rasterization. Operators get
+  // download buttons for both formats per cell.
+  const pngUrl = assetAliasPath
+    ? `/${assetAliasPath}/brand/render/${tailPng}`
+    : `/_ensemble/brand/render/${tailPng}`;
   // Same URL — browser auto-saves with the filename from the URL path.
   const downloadUrl = renderUrl;
 
@@ -704,6 +717,11 @@ function VariantCell({
         <Button type="button" variant="outline" size="sm" className={buttonClass} asChild>
           <a href={downloadUrl} download>
             <Download className="h-3 w-3 mr-1" /> SVG
+          </a>
+        </Button>
+        <Button type="button" variant="outline" size="sm" className={buttonClass} asChild>
+          <a href={pngUrl} download>
+            <Download className="h-3 w-3 mr-1" /> PNG
           </a>
         </Button>
       </div>
@@ -812,10 +830,139 @@ function FaviconCard() {
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Legacy browsers (IE, older Safari) fall back to whatever
-          static favicon you've uploaded as <code className="text-[11px]">logo_favicon</code> —
-          we'll regenerate the canonical 10-file suite (favicon.ico,
-          apple-touch-icon, mstile, etc.) once raster output ships.
+          For the full browser/OS coverage (favicon.ico, apple-touch-icon,
+          Android manifest) see the Favicon Suite card below — it generates
+          all the canonical favicon files and a copy-paste <code className="text-[11px]">&lt;head&gt;</code> block.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Favicon Suite (v0.1.53)
+ *
+ * Renders the canonical favicon files (favicon.ico, favicon-32.png,
+ * favicon-180.png, favicon-192.png, favicon-512.png, manifest.webmanifest)
+ * via the server-side Satori + resvg pipeline. Operator copies a
+ * <head> snippet that references all of them — drops into their
+ * external site to get every browser/OS combination wired up.
+ * ──────────────────────────────────────────────────────────── */
+
+interface FaviconSnippetResponse {
+  snippet: string;
+  baseUrl: string;
+  iconBasePath: string;
+}
+
+function FaviconSuiteCard() {
+  const [data, setData] = useState<FaviconSnippetResponse | null>(null);
+
+  useEffect(() => {
+    authedFetch('/_ensemble/core/brand/favicon-snippet')
+      .then((r) => r.json() as Promise<FaviconSnippetResponse>)
+      .then(setData)
+      .catch(() => { /* admin-only — card hidden for non-admins */ });
+  }, []);
+
+  if (!data) return null;
+
+  const u = (path: string) => `${data.baseUrl}${data.iconBasePath}${path}`;
+
+  async function copySnippet() {
+    if (!data) return;
+    try {
+      await navigator.clipboard.writeText(data.snippet);
+      toast.success('Snippet copied — paste into your site\'s <head>');
+    } catch {
+      toast.error('Copy failed');
+    }
+  }
+
+  // Each entry: a favicon file produced by the server, with its
+  // display dimensions and use-case label. Renders as a small grid
+  // of preview tiles + a Download link below the snippet.
+  const files: Array<{ url: string; label: string; size: number; previewSize: number; note: string }> = [
+    { url: u('/favicon.svg'),       label: 'favicon.svg',      size: 0,   previewSize: 32, note: 'Modern browsers (tab, bookmark, history)' },
+    { url: u('/favicon.ico'),       label: 'favicon.ico',      size: 32,  previewSize: 32, note: 'Legacy IE/Edge, intranet browsers' },
+    { url: u('/favicon-32.png'),    label: 'favicon-32.png',   size: 32,  previewSize: 32, note: 'Bookmark bar, downloaded shortcut' },
+    { url: u('/favicon-180.png'),   label: 'favicon-180.png',  size: 180, previewSize: 48, note: 'iOS home screen (apple-touch-icon)' },
+    { url: u('/favicon-192.png'),   label: 'favicon-192.png',  size: 192, previewSize: 48, note: 'Android home screen' },
+    { url: u('/favicon-512.png'),   label: 'favicon-512.png',  size: 512, previewSize: 64, note: 'Android splash, PWA icon' },
+    { url: u('/manifest.webmanifest'), label: 'manifest.webmanifest', size: 0, previewSize: 0, note: 'PWA + Android (references 192 + 512)' },
+  ];
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2">
+          <Download className="h-5 w-5" /> Favicon suite
+        </CardTitle>
+        <CardDescription>
+          Drop this <code>&lt;head&gt;</code> snippet into your site to wire
+          up every browser/OS variant — SVG for modern browsers, ICO for
+          legacy IE/Edge, apple-touch-icon for iOS home screens, manifest
+          for Android. Every file is generated live from your icon mark.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* The copy-paste <head> block */}
+        <div className="rounded-md border bg-zinc-900 text-zinc-100 p-3 font-mono text-[11px] whitespace-pre overflow-x-auto">
+          {data.snippet}
+        </div>
+        <div className="flex gap-2">
+          <Button type="button" size="sm" onClick={copySnippet}>
+            <Copy className="h-3 w-3 mr-1" /> Copy <code className="ml-1">&lt;head&gt;</code> block
+          </Button>
+        </div>
+
+        <Separator />
+
+        {/* Individual file previews + downloads */}
+        <div>
+          <p className="text-sm font-medium mb-2">Files</p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {files.map((f) => (
+              <div key={f.url} className="rounded-md border p-3 space-y-2">
+                <div className="flex items-center gap-3">
+                  {f.previewSize > 0 ? (
+                    <img
+                      src={f.url}
+                      alt={f.label}
+                      className="rounded shrink-0 object-contain"
+                      style={{ width: f.previewSize, height: f.previewSize }}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center rounded bg-muted shrink-0 text-[10px] text-muted-foreground" style={{ width: 32, height: 32 }}>
+                      JSON
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-mono truncate">{f.label}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">{f.note}</p>
+                  </div>
+                </div>
+                <div className="flex gap-1">
+                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" asChild>
+                    <a href={f.url} download={f.label}>
+                      <Download className="h-3 w-3 mr-1" /> Download
+                    </a>
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" asChild>
+                    <a href={f.url} target="_blank" rel="noreferrer noopener">
+                      <ExternalLink className="h-3 w-3 mr-1" /> View
+                    </a>
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          All files are generated on demand from your icon mark — change
+          your icon in Brand → Logos and the entire suite re-renders the
+          next time anyone loads it. No re-deploy needed.
         </p>
       </CardContent>
     </Card>

@@ -647,7 +647,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.51.1-google-fonts-ttf-direct',
+      buildFingerprint: 'v0.1.53-favicon-suite-png-downloads',
       timestamp: new Date().toISOString(),
     });
   });
@@ -694,6 +694,158 @@ export function createCredentialsRoutes(): App {
         'Cache-Control': 'public, max-age=3600, must-revalidate',
       },
     });
+  });
+
+  /**
+   * v0.1.53: full favicon suite. Together with /favicon.svg these
+   * routes cover every browser/OS combination from IE11 onward:
+   *
+   *   favicon.svg          → modern browsers (already exists above)
+   *   favicon.ico          → legacy IE/Edge, intranet
+   *   favicon-32.png       → bookmark bar, downloaded shortcut
+   *   favicon-180.png      → iOS home screen (apple-touch-icon)
+   *   favicon-192.png      → Android home screen
+   *   favicon-512.png      → Android splash, PWA icon
+   *   manifest.webmanifest → PWA + Android (references 192 + 512)
+   *
+   * All PNGs route through the existing renderBrandAssetV2 pipeline
+   * with icon-only composition + full-color finish, sized to the
+   * pixel value baked into the URL. The cache-key snapshot includes
+   * the brand tokens, so an operator changing their icon mark
+   * naturally invalidates all favicon variants without explicit
+   * busting.
+   */
+  async function renderFaviconPng(c: AppContext, sizePx: number): Promise<Response> {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.notFound();
+    const { renderBrandAssetV2 } = await import('../services/brand-render/render');
+    const result = await renderBrandAssetV2({
+      env: c.env,
+      workspaceId: workspace.id,
+      workspaceSlug: (workspace.slug || workspace.id).toLowerCase(),
+      composition: 'icon-only',
+      finish: 'full-color',
+      backgroundId: 'transparent',
+      format: 'png',
+      // The render pipeline sizes off a canvas hint from canvasSize();
+      // for the favicon suite we override that via the faviconSize
+      // override below. (See render.ts.)
+      overrides: { iconScale: 1 },
+      faviconSize: sizePx,
+    });
+    if (!result) return c.notFound();
+    return new Response(result.body, {
+      headers: {
+        'Content-Type': 'image/png',
+        'Cache-Control': 'public, max-age=2592000, immutable',
+      },
+    });
+  }
+
+  app.get('/_ensemble/brand/favicon-32.png',  (c) => renderFaviconPng(c, 32));
+  app.get('/_ensemble/brand/favicon-180.png', (c) => renderFaviconPng(c, 180));
+  app.get('/_ensemble/brand/favicon-192.png', (c) => renderFaviconPng(c, 192));
+  app.get('/_ensemble/brand/favicon-512.png', (c) => renderFaviconPng(c, 512));
+
+  app.get('/_ensemble/brand/favicon.ico', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.notFound();
+    // Render the 32px PNG, then wrap in an ICO container. IE11+
+    // and every modern browser accept PNG-inside-ICO; older legacy
+    // intranet browsers that demand true BMP-inside-ICO are
+    // vanishingly rare and out of scope.
+    const { renderBrandAssetV2 } = await import('../services/brand-render/render');
+    const { wrapPngInIco } = await import('../services/brand-render/favicon');
+    const result = await renderBrandAssetV2({
+      env: c.env,
+      workspaceId: workspace.id,
+      workspaceSlug: (workspace.slug || workspace.id).toLowerCase(),
+      composition: 'icon-only',
+      finish: 'full-color',
+      backgroundId: 'transparent',
+      format: 'png',
+      overrides: { iconScale: 1 },
+      faviconSize: 32,
+    });
+    if (!result) return c.notFound();
+    const ico = wrapPngInIco(new Uint8Array(result.body), 32);
+    // Slice off the underlying ArrayBuffer view so Response can
+    // consume it — @cloudflare/workers-types Response constructor
+    // wants BodyInit (ArrayBuffer/Blob/string/etc.), not a typed
+    // array view.
+    const icoBuf = ico.buffer.slice(ico.byteOffset, ico.byteOffset + ico.byteLength) as ArrayBuffer;
+    return new Response(icoBuf, {
+      headers: {
+        'Content-Type': 'image/x-icon',
+        'Cache-Control': 'public, max-age=2592000, immutable',
+      },
+    });
+  });
+
+  app.get('/_ensemble/brand/manifest.webmanifest', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.notFound();
+    const { buildWebManifest } = await import('../services/brand-render/favicon');
+    const { getSetting } = await import('../services/workspace-settings');
+
+    // Read display name + brand colors from brand_tokens.
+    const rows = await c.env.DB.prepare(
+      `SELECT key, value FROM brand_tokens
+       WHERE workspace_id = ? AND category IN ('colors','identity') AND locale = ''
+         AND key IN ('display_name', 'workspace_name', 'brand-primary', 'brand-background-light')`,
+    ).bind(workspace.id).all<{ key: string; value: string }>();
+    const tokens: Record<string, string> = {};
+    for (const r of rows.results ?? []) tokens[r.key] = r.value;
+    const name = tokens['display_name'] || tokens['workspace_name'] || workspace.slug || 'Workspace';
+
+    // Manifest URLs need to be ABSOLUTE-ish (root-relative is fine —
+    // the browser resolves them against the page that linked the
+    // manifest). Use the alias path when configured so the manifest
+    // matches the rest of the favicon suite's URLs.
+    const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
+    const iconBasePath = aliasPath ? `/${aliasPath}/brand` : '/_ensemble/brand';
+
+    const manifest = buildWebManifest({
+      name,
+      shortName: name.length > 12 ? name.slice(0, 12) : name,
+      themeColor: tokens['brand-primary'] || '#3b82f6',
+      backgroundColor: tokens['brand-background-light'] || '#ffffff',
+      iconBasePath,
+    });
+    return new Response(manifest, {
+      headers: {
+        // .webmanifest is the canonical extension; servers should
+        // declare manifest+json content-type so the browser parses
+        // it (some browsers reject application/json).
+        'Content-Type': 'application/manifest+json',
+        'Cache-Control': 'public, max-age=300',
+      },
+    });
+  });
+
+  /**
+   * Operator-facing endpoint: returns the canonical <head> snippet
+   * the operator copies into their own site's <head>. Plain JSON so
+   * the shell UI can render it inside a CodeBlock with one-click
+   * copy. Authenticated; admin-only because the snippet exposes the
+   * operator's configured alias path.
+   */
+  app.get('/_ensemble/core/brand/favicon-snippet', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const { buildFaviconHeadSnippet } = await import('../services/brand-render/favicon');
+    const { getSetting } = await import('../services/workspace-settings');
+    const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
+    const iconBasePath = aliasPath ? `/${aliasPath}/brand` : '/_ensemble/brand';
+    // Public origin of this workspace — operators paste this in
+    // their external site, so we need the absolute origin (their
+    // workspace.curalisto.com or whatever).
+    const url = new URL(c.req.url);
+    const baseUrl = `${url.protocol}//${url.host}`;
+    const snippet = buildFaviconHeadSnippet({ baseUrl, iconBasePath });
+    return c.json({ snippet, baseUrl, iconBasePath });
   });
 
   /**
