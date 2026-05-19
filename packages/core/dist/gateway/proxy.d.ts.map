@@ -1,0 +1,1 @@
+{"version":3,"file":"proxy.d.ts","sourceRoot":"","sources":["../../src/gateway/proxy.ts"],"names":[],"mappings":"AAAA;;;;GAIG;AAEH,MAAM,WAAW,cAAc;IAC7B,IAAI,EAAE,MAAM,CAAC;IACb,OAAO,EAAE,OAAO,CAAC;IACjB,MAAM,EAAE,MAAM,CAAC;CAChB;AAED,wBAAgB,oBAAoB;mBAEX,MAAM,YAAY,cAAc;wBAG3B,cAAc;EAI3C"}
