@@ -23,7 +23,11 @@
     "test": "bun test"
   },
   "peerDependencies": {
-    "@ensemble-edge/core": "workspace:*"
+    "@ensemble-edge/core": "workspace:*",
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true }
   },
   "devDependencies": {
     "typescript": "^5.4.0"

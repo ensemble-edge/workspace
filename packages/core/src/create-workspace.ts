@@ -25,7 +25,7 @@ import type {
 } from './types';
 import { cors, workspaceResolver, bootstrapCheck, auth } from './middleware';
 import { runMigrations, hasMigrations, migrations } from './db';
-import { createAuthRoutes, createBootstrapRoutes, createGuestGatewayRoutes } from './routes';
+import { createAuthRoutes, createBootstrapRoutes, createGuestGatewayRoutes, createWorkspaceContextRoutes } from './routes';
 import { registerCoreApps } from './apps';
 import { generateBrandCss, getSavedThemeMode } from './apps/core/brand/css';
 // Shell assets are built by @ensemble-edge/shell and exported as strings
@@ -199,6 +199,13 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   app.use('/_ensemble/locales/*', auth());
   app.use('/_ensemble/locales', auth());
   app.route('/', createCredentialsRoutes());
+
+  // v0.1.40 — unified workspace context for the SDK + guest apps.
+  // Single source of truth for workspace identity, current user,
+  // locale (workspace + user-preferred), theme, brand. Extensible
+  // by addition; see services/workspace-context.ts for the contract.
+  app.use('/_ensemble/workspace/preferences/*', auth());
+  app.route('/', createWorkspaceContextRoutes());
 
   // Core App API Routes (/_ensemble/core/*)
   registerCoreApps(app);

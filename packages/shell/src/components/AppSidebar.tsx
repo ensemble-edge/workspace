@@ -20,6 +20,8 @@ import {
   ScrollText,
   BookOpen,
   PanelLeft,
+  Languages,
+  Check,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -44,7 +46,12 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuPortal,
   Wordmark,
+  toast,
 } from '@ensemble-edge/ui';
 import type { WordmarkSegment } from '@ensemble-edge/ui';
 
@@ -218,6 +225,8 @@ export function AppSidebar() {
                 align="end"
                 sideOffset={4}
               >
+                <LanguageSubmenu />
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout}>
                   <LogOut className="mr-2 h-4 w-4" />
                   Log out
@@ -232,3 +241,121 @@ export function AppSidebar() {
     </Sidebar>
   );
 }
+
+// ─── Language submenu ─────────────────────────────────────────────
+//
+// v0.1.40+: per-user preferred locale picker. Sits above Logout in
+// the user dropdown. Pulls supported locales + current preference
+// from the workspace-context endpoint; PUT to update; reloads the
+// page on change so language-aware components pick up the new
+// locale immediately (most i18n libraries don't reactively re-render
+// without an explicit reload).
+//
+// Lives inside AppSidebar (not extracted to a separate file) because
+// it's tightly coupled to the dropdown menu structure. If we ever
+// add more user preferences (timezone, date format, etc.) this gets
+// extracted to a UserPreferencesSubmenu component.
+
+interface LocaleSlice {
+  default: string;
+  supported: string[];
+  userPreferred: string | null;
+}
+
+function LanguageSubmenu() {
+  const [locale, setLocale] = React.useState<LocaleSlice | null>(null);
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch('/_ensemble/workspace/context', { credentials: 'include' })
+      .then((r) => r.ok ? r.json() as Promise<{ locale?: LocaleSlice }> : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then((data) => { if (!cancelled && data.locale) setLocale(data.locale); })
+      .catch(() => { /* leave null — hide the submenu */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Hide the whole submenu when there's only one supported language —
+  // showing a picker with a single option is bad UX.
+  if (!locale || locale.supported.length <= 1) return null;
+
+  const active = locale.userPreferred ?? locale.default;
+
+  async function pick(code: string) {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const res = await fetch('/_ensemble/workspace/preferences/locale', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ locale: code }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { detail?: string };
+        toast.error('Could not change language', { description: body.detail });
+        return;
+      }
+      toast.success(`Language set to ${LANGUAGE_DISPLAY[code] ?? code}`);
+      // Reload so language-aware components and translated brand
+      // messaging re-render with the new preference.
+      window.location.reload();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <Languages className="mr-2 h-4 w-4" />
+        Language
+        <span className="ml-auto text-xs text-muted-foreground">
+          {LANGUAGE_DISPLAY[active] ?? active}
+        </span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuPortal>
+        <DropdownMenuSubContent>
+          {locale.supported.map((code) => (
+            <DropdownMenuItem
+              key={code}
+              onClick={() => pick(code)}
+              disabled={saving || code === active}
+            >
+              <span className="flex-1">{LANGUAGE_DISPLAY[code] ?? code}</span>
+              {code === active && <Check className="h-3.5 w-3.5 ml-2" />}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuPortal>
+    </DropdownMenuSub>
+  );
+}
+
+/**
+ * BCP-47 code → human-readable display name. Covers the languages
+ * we expect workspaces to ship with; falls back to the raw code
+ * for anything not in the map. Add new entries as needed.
+ */
+const LANGUAGE_DISPLAY: Record<string, string> = {
+  en: 'English',
+  es: 'Español',
+  fr: 'Français',
+  de: 'Deutsch',
+  it: 'Italiano',
+  pt: 'Português',
+  nl: 'Nederlands',
+  pl: 'Polski',
+  sv: 'Svenska',
+  ja: '日本語',
+  ko: '한국어',
+  'zh-CN': '简体中文',
+  'zh-TW': '繁體中文',
+  ar: 'العربية',
+  he: 'עברית',
+  ru: 'Русский',
+  tr: 'Türkçe',
+  hi: 'हिन्दी',
+  vi: 'Tiếng Việt',
+  th: 'ไทย',
+};

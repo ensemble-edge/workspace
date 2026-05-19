@@ -7,3 +7,4 @@
 export { createAuthRoutes } from './auth';
 export { createBootstrapRoutes } from './bootstrap';
 export { createGuestGatewayRoutes } from './guest-gateway';
+export { createWorkspaceContextRoutes } from './workspace-context';

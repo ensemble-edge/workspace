@@ -1,16 +1,10 @@
-// Hook to access and modify theme
+/**
+ * Theme hook.
+ *
+ * Reads theme state from the unified workspace context. Re-exports
+ * the selector from use-workspace.ts so consumers can import from
+ * either location.
+ */
 
-export interface UseThemeReturn {
-  primaryColor: string;
-  mode: 'light' | 'dark' | 'system';
-  setMode: (mode: 'light' | 'dark' | 'system') => void;
-}
-
-export function useTheme(): UseThemeReturn {
-  // TODO: Implement theme hook
-  return {
-    primaryColor: '#3B82F6',
-    mode: 'system',
-    setMode: () => {},
-  };
-}
+export { useTheme } from './use-workspace';
+export type { ThemeMode } from '../types';
