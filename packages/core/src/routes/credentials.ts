@@ -647,7 +647,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.51-satori-resvg-real-metrics',
+      buildFingerprint: 'v0.1.51.1-google-fonts-ttf-direct',
       timestamp: new Date().toISOString(),
     });
   });

@@ -1,23 +1,35 @@
 /**
- * Font install pipeline — Google Fonts woff2 → TTF → R2.
+ * Font install pipeline — Google Fonts → TTF → R2.
  *
- * v0.1.51. Operator picks a Google Font in the Typography tab, hits
- * Save → this module fetches the woff2, decompresses to TTF, and
- * stores the TTF in R2 under the canonical googleFontR2Key path.
+ * v0.1.51.1 fix. The original v0.1.51 implementation fetched WOFF2
+ * from Google Fonts and tried to decompress to TTF via the wawoff2
+ * wasm library. That library is an emscripten-compiled Node-native
+ * binding that does `require('fs')` and `require('path')` — it
+ * doesn't work in the Workers runtime, even with the nodejs_compat
+ * flag. Production hit it with "decompress is not a function".
  *
- * Why TTF not woff2
- * ─────────────────
- * Satori requires TTF — its font parser doesn't accept the woff2
- * Brotli-compressed wrapper. The conversion is a one-time decode
- * step at install; after that the TTF sits in R2 forever.
+ * The fix: skip WOFF2 entirely. Google Fonts' CSS API serves
+ * **different formats** based on the requesting User-Agent. After
+ * testing the matrix we found exactly the right ancient UA: the
+ * Android 2.3 browser. That UA gets raw TTF URLs with proper
+ * `.ttf` extension and `format('truetype')` declaration. (IE
+ * UAs get EOT — Microsoft's proprietary format, also unsupported
+ * by Satori. Old Safari/Opera UAs get WOFF — still compressed,
+ * still needs a decoder.) Android 2.3 → TTF → done.
+ *
+ * What this means in practice
+ * ───────────────────────────
+ * Operator can pick ANY Google Font from the catalog (~1900 families).
+ * For each, we make one HTTP request to Google's CSS API, parse out
+ * the TTF URL, fetch the TTF, store it in R2. No wasm, no decode,
+ * no Node-binding compatibility minefield.
  *
  * In-flight coalescing
  * ────────────────────
  * If two workspaces save the same font in the same isolate at the
- * same time, only one fetch+decode runs — the other awaits the
- * same Promise. After completion the Promise is dropped from the
- * Map so subsequent installs (different isolate, or after the first
- * promise resolved) re-check R2 head and short-circuit on hit.
+ * same time, only one fetch runs — the other awaits the same
+ * Promise. After completion the Promise is dropped from the Map so
+ * subsequent installs re-check R2 head and short-circuit on hit.
  */
 import type { Env } from '../../types';
 import { getR2Bucket } from '../r2-binding';
@@ -27,8 +39,7 @@ const inFlight = new Map<string, Promise<void>>();
 
 /**
  * Ensure the (family, weight) Google Font is in R2. If already
- * present, no-op. If missing, fetch from Google Fonts, decode,
- * and put.
+ * present, no-op. If missing, fetch TTF from Google Fonts and put.
  *
  * Idempotent. Cheap to call on every save. The R2 head-check is
  * the only cost when the font is already installed.
@@ -40,18 +51,17 @@ export async function installFontIfMissing(
   weight: number,
 ): Promise<void> {
   const key = googleFontR2Key(family, weight);
-  const cacheKey = `${key}`;
 
   // Already in-flight in this isolate — piggy-back.
-  const existing = inFlight.get(cacheKey);
+  const existing = inFlight.get(key);
   if (existing) return existing;
 
   const promise = installFontInner(env, workspaceId, family, weight, key);
-  inFlight.set(cacheKey, promise);
+  inFlight.set(key, promise);
   try {
     await promise;
   } finally {
-    inFlight.delete(cacheKey);
+    inFlight.delete(key);
   }
 }
 
@@ -69,25 +79,20 @@ async function installFontInner(
   const head = await r2.head(r2Key);
   if (head) return;
 
-  // Fetch the woff2 URL from Google Fonts CSS API.
-  const woff2Url = await resolveGoogleFontWoff2Url(family, weight);
-  if (!woff2Url) {
-    throw new Error(`No woff2 URL found for ${family} ${weight}`);
+  // Get the TTF URL from Google Fonts CSS API (TTF, not WOFF2 —
+  // see file header for why).
+  const ttfUrl = await resolveGoogleFontTtfUrl(family, weight);
+  if (!ttfUrl) {
+    throw new Error(`No TTF URL found for ${family} ${weight} from Google Fonts. Family may not exist in the catalog.`);
   }
 
-  const res = await fetch(woff2Url);
+  const res = await fetch(ttfUrl);
   if (!res.ok) {
-    throw new Error(`woff2 fetch failed: ${res.status}`);
+    throw new Error(`TTF fetch failed: ${res.status} for ${family} ${weight}`);
   }
-  const woff2Bytes = new Uint8Array(await res.arrayBuffer());
+  const ttfBytes = new Uint8Array(await res.arrayBuffer());
 
-  // Decode woff2 → TTF via wawoff2. The library exports a wasm-
-  // backed `decompress` that accepts a Uint8Array and returns a
-  // Uint8Array of TTF bytes.
-  const { decompress } = await import('wawoff2');
-  const ttf = await decompress(woff2Bytes);
-
-  await r2.put(r2Key, ttf, {
+  await r2.put(r2Key, ttfBytes, {
     httpMetadata: { contentType: 'font/ttf' },
     customMetadata: {
       source: 'google-fonts',
@@ -99,30 +104,43 @@ async function installFontInner(
 }
 
 /**
- * Ask Google Fonts CSS API for the woff2 URL of a (family, weight)
- * combination. The API returns a CSS @font-face block; we parse out
- * the woff2 URL with a regex.
+ * Ask Google Fonts CSS API for the TTF URL of a (family, weight)
+ * combination. Returns null when Google can't serve this family +
+ * weight combination (typo, missing weight, etc.).
  *
- * The User-Agent header forces Google to return woff2 specifically.
- * Without it, the API may return formats based on the requesting
- * client; Workers' default UA gets a mix that doesn't always include
- * woff2.
+ * The Android 2.3 User-Agent is what gets us raw TTF. Verified
+ * against the Google Fonts CSS API directly — UA negotiation matrix:
+ *   Modern Chrome/Safari/Firefox  → WOFF2 (compressed, Brotli)
+ *   Old Safari / Opera Mobile     → WOFF  (compressed, zlib)
+ *   IE 6 / 8                      → EOT   (Microsoft proprietary)
+ *   Android 2.3 browser           → TTF   (uncompressed) ✓
+ *
+ * The Android 2.3 UA returns a CSS @font-face block like:
+ *   src: url(https://fonts.gstatic.com/s/.../something.ttf) format('truetype');
+ *
+ * We parse the .ttf URL with a regex. If Google ever changes the
+ * format-negotiation logic we'll need to update this — but the API
+ * has been stable since 2011 and changing it would break the long
+ * tail of legacy mobile browsers Google still supports.
  */
-async function resolveGoogleFontWoff2Url(family: string, weight: number): Promise<string | null> {
+async function resolveGoogleFontTtfUrl(family: string, weight: number): Promise<string | null> {
   const familyParam = encodeURIComponent(family).replace(/%20/g, '+');
-  const url = `https://fonts.googleapis.com/css2?family=${familyParam}:wght@${weight}`;
+  // css API (not css2) — the older API has a simpler response shape
+  // that's easier to parse with a single regex. Both APIs cover the
+  // same ~1900-family catalog.
+  const url = `https://fonts.googleapis.com/css?family=${familyParam}:${weight}`;
   const res = await fetch(url, {
     headers: {
-      // Modern Chrome UA → woff2 with the latest unicode-range support.
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      // Android 2.3 — Google serves TTF to this UA. See file header
+      // for the UA negotiation matrix. Don't change without testing
+      // every output format.
+      'User-Agent': 'Mozilla/5.0 (Linux; U; Android 2.3; en-us) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1',
     },
   });
   if (!res.ok) return null;
   const css = await res.text();
-  // First woff2 URL in the response. Google returns multiple
-  // unicode-range blocks; we pick the first one (Latin Basic) which
-  // covers most logos. Future improvement: pick the block matching
-  // the wordmark's actual character set.
-  const match = /url\((https:\/\/[^)]+\.woff2)\)\s*format\(['"]woff2['"]\)/.exec(css);
+  // Find the first .ttf url. Google returns one @font-face block
+  // for the requested (family, weight) under the Android UA.
+  const match = /url\((https:\/\/[^)]+\.ttf)\)/i.exec(css);
   return match ? match[1] : null;
 }

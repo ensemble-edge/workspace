@@ -76,8 +76,7 @@
     "hono": "^4.0.0",
     "jose": "^5.0.0",
     "lucide-react": "^0.469.0",
-    "satori": "0.12.0",
-    "wawoff2": "^2.0.1"
+    "satori": "0.12.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240117.0",
