@@ -364,8 +364,16 @@ export function createCredentialsRoutes(): App {
    * map to 'wordmark-only', 'icon-only', and themselves respectively
    * — shorter URL segments without losing meaning.
    */
-  app.get('/brand/:filename{.+\\.svg}', async (c) => {
+  app.get('/brand/:filename{.+}', async (c, next) => {
     const filename = c.req.param('filename');
+    // Only handle .svg requests here. Anything else falls through to
+    // the next handler (which is the public brand guide at /brand
+    // itself, or eventually the SPA catchall). NOTE: this MUST come
+    // before /brand (no extension) — Hono's route precedence is
+    // registration order.
+    if (!filename.endsWith('.svg')) {
+      return next();
+    }
     // Strip the .svg extension and split on dashes. Filename grammar:
     //   <slug-segments...>-<composition>-<finish>-<bg>
     // where slug-segments can contain dashes themselves. We parse
