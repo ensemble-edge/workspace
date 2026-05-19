@@ -402,10 +402,15 @@ export function createCredentialsRoutes(): App {
       : compRaw === 'icon' ? 'icon-only'
       : (compRaw as 'stacked' | 'horizontal');
 
-    // Finish is between compIdx+1 and the last segment exclusive.
-    // It's one of: full-color (2 segs), mono-black (2), mono-white (2),
-    // mono-brand (2). So finish is always 2 segments.
-    if (compIdx + 3 !== parts.length) return c.notFound();
+    // Finish is two segments (mono-black / mono-white / mono-brand /
+    // full-color), background is one segment, so after composition we
+    // need exactly THREE more parts. Off-by-one bug: previous code
+    // checked +3 against parts.length instead of +4, so every valid
+    // URL (composition + 2-segment finish + 1-segment bg) failed.
+    // Example: 'curalisto-wordmark-full-color-transparent'.split('-')
+    // → 5 parts. compIdx=1 (wordmark). Finish + bg need parts[2..4].
+    // Required: compIdx + 4 === parts.length.
+    if (compIdx + 4 !== parts.length) return c.notFound();
     const finish = `${parts[compIdx + 1]}-${parts[compIdx + 2]}` as 'full-color' | 'mono-black' | 'mono-white' | 'mono-brand';
     const KNOWN_FINISHES = new Set(['full-color', 'mono-black', 'mono-white', 'mono-brand']);
     if (!KNOWN_FINISHES.has(finish)) return c.notFound();
