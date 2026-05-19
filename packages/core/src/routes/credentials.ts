@@ -367,64 +367,72 @@ export function createCredentialsRoutes(): App {
   app.get('/brand/:filename{.+}', async (c, next) => {
     const filename = c.req.param('filename');
     // Only handle .svg requests here. Anything else falls through to
-    // the next handler (which is the public brand guide at /brand
-    // itself, or eventually the SPA catchall). NOTE: this MUST come
-    // before /brand (no extension) — Hono's route precedence is
-    // registration order.
+    // the next handler (the SPA catchall serves HTML).
     if (!filename.endsWith('.svg')) {
       return next();
     }
-    // Strip the .svg extension and split on dashes. Filename grammar:
-    //   <slug-segments...>-<composition>-<finish>-<bg>
-    // where slug-segments can contain dashes themselves. We parse
-    // from the RIGHT: last segment is bg, second-to-last is finish,
-    // and we search backward for the composition keyword. Everything
-    // before the composition keyword is treated as the slug.
+
+    // Path-style URL grammar:
+    //   <anything>-<composition>-<finish-multi-segment>-<bg>.svg
+    //
+    // v0.1.45 rewrite: instead of parsing segments by index (which
+    // was off-by-one twice — v0.1.43 buggy, v0.1.44 still 404'd in
+    // prod), use suffix-pattern matching. Try every (composition,
+    // finish, bg) combo against the END of the stem. Whatever
+    // matches IS the variant; whatever precedes it is the slug
+    // (which we ignore — workspace identity is read from
+    // c.get('workspace')).
+    //
+    // Bulletproof: each KNOWN combination is tried explicitly. If
+    // the filename ends with any known variant suffix, we render.
+    // If not, 404 with a JSON error so triage is easy.
     const stem = filename.replace(/\.svg$/i, '');
-    const parts = stem.split('-');
 
-    // Locate composition by scanning from end-3 backward for a known
-    // composition token. (bg is parts[parts.length - 1], finish is
-    // composed of one or two segments, composition is one or two.)
-    // Simpler heuristic: try the canonical positions assuming finish
-    // is always two segments (mono-X or full-color) and composition
-    // is always either 'stacked', 'horizontal', 'wordmark', or 'icon'.
-    const KNOWN_COMPS = new Set(['stacked', 'horizontal', 'wordmark', 'icon']);
-    let compIdx = -1;
-    for (let i = parts.length - 4; i >= 0; i--) {
-      if (KNOWN_COMPS.has(parts[i])) { compIdx = i; break; }
+    const COMPOSITIONS: Array<{ slug: string; id: 'wordmark-only' | 'icon-only' | 'stacked' | 'horizontal' }> = [
+      { slug: 'wordmark',   id: 'wordmark-only' },
+      { slug: 'icon',       id: 'icon-only' },
+      { slug: 'stacked',    id: 'stacked' },
+      { slug: 'horizontal', id: 'horizontal' },
+    ];
+    const FINISHES: Array<'full-color' | 'mono-black' | 'mono-white' | 'mono-brand'> = [
+      'full-color', 'mono-black', 'mono-white', 'mono-brand',
+    ];
+    const BGS = ['transparent', 'light', 'dark'];
+
+    for (const comp of COMPOSITIONS) {
+      for (const finish of FINISHES) {
+        for (const bg of BGS) {
+          const suffix = `-${comp.slug}-${finish}-${bg}`;
+          if (stem.endsWith(suffix)) {
+            return handleBrandRender(c, comp.id, finish, bg, {
+              download: false,
+              filename,
+            });
+          }
+        }
+      }
     }
-    if (compIdx === -1) return c.notFound();
-
-    const compRaw = parts[compIdx];
-    const composition: 'wordmark-only' | 'icon-only' | 'stacked' | 'horizontal' =
-      compRaw === 'wordmark' ? 'wordmark-only'
-      : compRaw === 'icon' ? 'icon-only'
-      : (compRaw as 'stacked' | 'horizontal');
-
-    // Finish is two segments (mono-black / mono-white / mono-brand /
-    // full-color), background is one segment, so after composition we
-    // need exactly THREE more parts. Off-by-one bug: previous code
-    // checked +3 against parts.length instead of +4, so every valid
-    // URL (composition + 2-segment finish + 1-segment bg) failed.
-    // Example: 'curalisto-wordmark-full-color-transparent'.split('-')
-    // → 5 parts. compIdx=1 (wordmark). Finish + bg need parts[2..4].
-    // Required: compIdx + 4 === parts.length.
-    if (compIdx + 4 !== parts.length) return c.notFound();
-    const finish = `${parts[compIdx + 1]}-${parts[compIdx + 2]}` as 'full-color' | 'mono-black' | 'mono-white' | 'mono-brand';
-    const KNOWN_FINISHES = new Set(['full-color', 'mono-black', 'mono-white', 'mono-brand']);
-    if (!KNOWN_FINISHES.has(finish)) return c.notFound();
-
-    const backgroundId = parts[parts.length - 1];
-    // Background is one segment in the canonical case (light/dark/
-    // transparent). Custom-hex backgrounds aren't supported via the
-    // path-style URL today — they'd need encoding.
-    const KNOWN_BGS = new Set(['transparent', 'light', 'dark']);
-    if (!KNOWN_BGS.has(backgroundId)) return c.notFound();
-
-    return handleBrandRender(c, composition, finish, backgroundId, {
-      download: false,
+    // No known variant suffix matched — return JSON so it's easy to
+    // diagnose vs Hono's default plain-text 404.
+    return c.json({
+      error: 'unrecognized_brand_variant_url',
       filename,
+      hint: 'Expected: /brand/<slug>-<composition>-<finish>-<bg>.svg where composition is one of wordmark|icon|stacked|horizontal, finish is full-color|mono-black|mono-white|mono-brand, bg is transparent|light|dark.',
+    }, 404);
+  });
+
+  /**
+   * GET /_ensemble/diagnostic/version
+   *
+   * Diagnostic endpoint. Returns the package version + a deterministic
+   * fingerprint of this build so we can verify deployments without
+   * guessing. Add this near the top of any triage session.
+   */
+  app.get('/_ensemble/diagnostic/version', async (c) => {
+    return c.json({
+      package: '@ensemble-edge/workspace',
+      buildFingerprint: 'v0.1.45-brand-render-suffix-match',
+      timestamp: new Date().toISOString(),
     });
   });
 
