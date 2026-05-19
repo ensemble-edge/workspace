@@ -193,15 +193,15 @@ export async function loadPolicy(
       compositions: {
         // Per-composition merge so older policies missing
         // iconPosition / iconSide auto-receive the defaults.
-        'wordmark-only': { ...def.compositions['wordmark-only'], ...(parsed.compositions?.['wordmark-only'] ?? {}) },
-        'icon-only':     { ...def.compositions['icon-only'],     ...(parsed.compositions?.['icon-only']     ?? {}) },
-        'stacked':       { ...def.compositions['stacked'],       ...(parsed.compositions?.['stacked']       ?? {}) },
-        'horizontal':    { ...def.compositions['horizontal'],    ...(parsed.compositions?.['horizontal']    ?? {}) },
+        'wordmark-only': { ...def.compositions['wordmark-only'], ...parsed.compositions?.['wordmark-only'] },
+        'icon-only':     { ...def.compositions['icon-only'],     ...parsed.compositions?.['icon-only'] },
+        'stacked':       { ...def.compositions['stacked'],       ...parsed.compositions?.['stacked'] },
+        'horizontal':    { ...def.compositions['horizontal'],    ...parsed.compositions?.['horizontal'] },
       },
       finishes: parsed.finishes ?? def.finishes,
       backgrounds: parsed.backgrounds ?? def.backgrounds,
       bannedPairs: parsed.bannedPairs ?? def.bannedPairs,
-      backgrounded: { ...def.backgrounded!, ...(parsed.backgrounded ?? {}) },
+      backgrounded: { ...def.backgrounded!, ...parsed.backgrounded },
     };
   } catch {
     return defaultPolicy();
@@ -273,7 +273,7 @@ export function computeAutoBannedPairs(
     let finishHex = finish.fillOverride;
     if (!finishHex) continue;  // full-color → skip (no single contrast value)
     if (finishHex === 'var(--brand-primary)') finishHex = brandColors.primary;
-    if (!/^#/.test(finishHex)) continue;
+    if (!finishHex.startsWith('#')) continue;
 
     for (const bg of policy.backgrounds) {
       if (!bg.allowed) continue;
@@ -281,7 +281,7 @@ export function computeAutoBannedPairs(
       let bgHex = bg.color;
       if (bgHex === 'var(--brand-background-light)') bgHex = brandColors.bgLight;
       else if (bgHex === 'var(--brand-background-dark)') bgHex = brandColors.bgDark;
-      if (!/^#/.test(bgHex)) continue;
+      if (!bgHex.startsWith('#')) continue;
 
       const ratio = contrastRatio(finishHex, bgHex);
       if (ratio < 4.5) {

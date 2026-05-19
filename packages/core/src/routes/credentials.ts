@@ -258,6 +258,107 @@ export function createCredentialsRoutes(): App {
   });
 
   /**
+   * POST /_ensemble/core/brand/typography/save
+   *
+   * v0.1.51: atomic install + commit endpoint for typography. The
+   * operator picks a Google Font in the Typography tab; on Save:
+   *   1. Server fetches the woff2 from Google Fonts and decodes to TTF
+   *   2. TTF lands in R2 under fonts/google/<slug>-<weight>.ttf
+   *   3. brand_tokens commits the typography settings
+   *
+   * Both steps fire atomically. If install fails, brand_tokens does
+   * not commit. If the commit fails, the font is still in R2 (next
+   * save will reuse it via R2 head-check — no double-install).
+   *
+   * Body shape:
+   *   {
+   *     typography?: { typography_<role>_family: '...', ..., },
+   *     identity?:   { wordmark_family: '...', ..., }
+   *   }
+   *
+   * Both buckets are PUTs; the server enumerates `*_family` keys to
+   * decide which fonts need installing. System fonts (sans-serif,
+   * Georgia, etc.) are skipped — they aren't in R2 and Satori
+   * handles them via its built-in fallback chain.
+   */
+  app.post('/_ensemble/core/brand/typography/save', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+
+    const body = await c.req.json().catch(() => ({})) as {
+      typography?: Record<string, string>;
+      identity?: Record<string, string>;
+    };
+    const typo = body.typography ?? {};
+    const ident = body.identity ?? {};
+
+    // Collect (family, weight) pairs that need installing. Pairs are
+    // discovered by inspecting *_family + *_weight tokens across both
+    // buckets.
+    const pairs: Array<{ family: string; weight: number }> = [];
+    const collect = (tokens: Record<string, string>, prefixes: string[]) => {
+      for (const p of prefixes) {
+        const family = (tokens[`${p}_family`] || '').trim();
+        const weight = parseInt((tokens[`${p}_weight`] || '700').trim(), 10) || 700;
+        if (!family) continue;
+        // Skip system fonts — they're not in R2 and Satori falls back.
+        if (/system-ui|^(serif|sans-serif|monospace)$|Georgia|ui-monospace|-apple-system/i.test(family)) continue;
+        // De-dupe identical (family,weight) requests so two roles
+        // sharing a font only install it once.
+        if (pairs.some((q) => q.family === family && q.weight === weight)) continue;
+        pairs.push({ family, weight });
+      }
+    };
+    collect(typo, ['typography_display', 'typography_heading', 'typography_subheading', 'typography_body', 'typography_eyebrow', 'typography_label', 'typography_caption', 'typography_mono']);
+    collect(ident, ['wordmark']);
+
+    // Install fonts. Errors here abort the save — operator sees a
+    // clear error and brand_tokens stays untouched.
+    const { installFontIfMissing } = await import('../services/brand-render/install-font');
+    const installed: string[] = [];
+    for (const { family, weight } of pairs) {
+      try {
+        await installFontIfMissing(c.env, workspace.id, family, weight);
+        installed.push(`${family}:${weight}`);
+      } catch (err) {
+        return c.json({
+          error: 'font_install_failed',
+          detail: `Couldn't install ${family} ${weight}: ${err instanceof Error ? err.message : String(err)}`,
+          installed,
+        }, 502);
+      }
+    }
+
+    // Commit both token buckets. Use the existing PUT handler logic
+    // by inlining the SQL — atomic-ish (D1 doesn't have multi-table
+    // transactions, but identity + typography sit in the same table).
+    const upserts: Array<{ category: string; key: string; value: string }> = [];
+    for (const [k, v] of Object.entries(typo)) upserts.push({ category: 'typography', key: k, value: v });
+    for (const [k, v] of Object.entries(ident)) upserts.push({ category: 'identity', key: k, value: v });
+
+    // Best-effort batch. Empty values become deletes (operator
+    // cleared a role).
+    for (const row of upserts) {
+      if (row.value === '') {
+        await c.env.DB.prepare(
+          `DELETE FROM brand_tokens WHERE workspace_id = ? AND category = ? AND key = ? AND locale = ''`,
+        ).bind(workspace.id, row.category, row.key).run();
+      } else {
+        await c.env.DB.prepare(
+          `INSERT INTO brand_tokens (workspace_id, category, key, value, type, locale, updated_at)
+           VALUES (?, ?, ?, ?, 'text', '', datetime('now'))
+           ON CONFLICT (workspace_id, category, key, locale)
+           DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        ).bind(workspace.id, row.category, row.key, row.value).run();
+      }
+    }
+
+    return c.json({ ok: true, fontsInstalled: installed });
+  });
+
+  /**
    * GET /_ensemble/core/brand/render
    *
    * The brand-asset generator endpoint. Returns an SVG representation
@@ -288,6 +389,8 @@ export function createCredentialsRoutes(): App {
       download: boolean;
       filename?: string;
       backgrounded?: boolean;
+      /** Output format. Defaults to 'svg' when the URL ends in .svg or has no extension. */
+      format?: 'svg' | 'png';
       /**
        * v0.1.48+: when set, the render uses these policy overrides
        * instead of the stored policy values. Powers the live-preview
@@ -307,99 +410,59 @@ export function createCredentialsRoutes(): App {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
 
-    const { loadPolicy, isPairAllowed } = await import('../services/brand-policy');
-    const { renderBrandAsset } = await import('../services/brand-assets');
+    // v0.1.51: Satori + resvg pipeline replaces the heuristic
+    // composeLockup. Three-tier cache (Cache API → R2 → render)
+    // with content-hashed storage keys means saved-policy edits
+    // auto-invalidate without any URL gymnastics — the storage
+    // path includes a hash of policy + tokens + request, so any
+    // change produces a different path and the old asset is left
+    // untouched. Distribution URLs stay clean (no ?v=hash).
+    const { renderBrandAssetV2 } = await import('../services/brand-render/render');
 
-    const policy = await loadPolicy(c.env.DB, workspace.id);
+    const result = await renderBrandAssetV2({
+      env: c.env,
+      workspaceId: workspace.id,
+      workspaceSlug: (workspace.slug || workspace.id).toLowerCase(),
+      composition,
+      finish,
+      backgroundId,
+      backgrounded: options.backgrounded,
+      format: options.format,
+      overrides: options.overrides,
+    });
 
-    // Apply preview overrides on top of the stored policy. The
-    // composition-allowed flag is FORCED true here so the preview
-    // renders even when the card's toggle is currently off — the
-    // operator needs to see what the composition would look like in
-    // order to decide whether to enable it.
-    if (options.overrides) {
-      const o = options.overrides;
-      if (composition === 'stacked' || composition === 'horizontal') {
-        policy.compositions[composition] = {
-          ...policy.compositions[composition],
-          allowed: true,
-          ...(o.iconScale != null ? { iconScale: o.iconScale } : {}),
-          ...(o.spacing != null ? { spacing: o.spacing } : {}),
-          ...(o.iconSide != null ? { iconSide: o.iconSide } : {}),
-          ...(o.iconPosition != null ? { iconPosition: o.iconPosition } : {}),
-          ...(o.crossAlign != null ? { crossAlign: o.crossAlign } : {}),
-        };
-      }
-      if (o.backgroundedPadding != null && policy.backgrounded) {
-        policy.backgrounded = {
-          ...policy.backgrounded,
-          allowed: true,
-          padding: o.backgroundedPadding,
-        };
-      }
-    }
-
-    // Brand colors for finish resolution + WCAG contrast checks.
-    const rows = await c.env.DB.prepare(
-      `SELECT key, value FROM brand_tokens
-       WHERE workspace_id = ? AND category = 'colors' AND locale = ''
-         AND key IN ('brand-primary', 'brand-background-light', 'brand-background-dark')`,
-    ).bind(workspace.id).all<{ key: string; value: string }>();
-    const brandColors = { bgLight: '#ffffff', bgDark: '#0a0a0a', primary: '#3b82f6' };
-    for (const r of rows.results ?? []) {
-      if (r.key === 'brand-primary') brandColors.primary = r.value;
-      else if (r.key === 'brand-background-light') brandColors.bgLight = r.value;
-      else if (r.key === 'brand-background-dark') brandColors.bgDark = r.value;
-    }
-
-    // Skip the pair-allowed check when overrides are present — the
-    // preview is editorial; the policy editor is what enforces
-    // allowed pairs on the saved side.
-    if (!options.overrides && !isPairAllowed(policy, brandColors, finish, backgroundId)) {
-      return c.json({
-        error: 'banned_combination',
-        detail: `${finish} on ${backgroundId} is not an approved brand use.`,
-      }, 422);
-    }
-
-    const svg = await renderBrandAsset(
-      { composition, finish, backgroundId, backgrounded: options.backgrounded },
-      { workspaceId: workspace.id, env: c.env, policy, brandColors },
-    );
-
-    if (!svg) {
+    if (!result) {
       return c.json({
         error: 'render_failed',
-        detail: 'Source SVG(s) missing or composition not allowed. Upload a wordmark + icon master in Brand → Logos.',
+        detail: 'Source SVG/typography missing, or composition not allowed by policy. Upload a wordmark + icon master in Brand → Logos and pick typography in Brand → Typography.',
       }, 404);
     }
 
     const slug = (workspace.slug || workspace.id).toLowerCase();
-    const filename = options.filename || `${slug}-${composition}-${finish}-${backgroundId}.svg`;
-    // Editorial overrides (live preview) should NOT be cached — the
-    // operator is actively dragging sliders and expects the response
-    // to reflect each new combination. Saved-policy renders use a
-    // SHORT 60s cache so policy edits become visible quickly (the
-    // operator hits Save on the Logos tab and within ~60s sees the
-    // change on Brand Overview / /brand without manual refresh) while
-    // still benefitting from CDN caching under real traffic.
-    //
-    // v0.1.50: dropped from 3600s → 60s because operators couldn't
-    // see their saved crossAlign changes reflected in the variants
-    // matrix without a hard refresh. We deliberately don't use a
-    // ?v=<hash> cache-bust pattern because operators want clean
-    // distribution URLs (no GET parameters).
-    const cacheControl = options.overrides
+    const ext = options.format === 'png' ? 'png' : 'svg';
+    const filename = options.filename || `${slug}-${composition}-${finish}-${backgroundId}.${ext}`;
+
+    // Cache headers
+    // ─────────────
+    // Editorial renders (live preview with overrides): no-store. The
+    // operator is actively dragging sliders.
+    // Saved-policy renders: public, max-age=2592000 (30d). The cache
+    // key includes a snapshot hash of inputs, so saved-policy edits
+    // produce a new path; the OLD path's response will still be
+    // served from CDN if anyone has it bookmarked, but no operator
+    // workflow ever hits a stale render of CURRENT settings.
+    const cacheControl = result.editorial
       ? 'no-store, max-age=0, must-revalidate'
-      : 'public, max-age=60';
+      : 'public, max-age=2592000, immutable';
+
     const headers = new Headers({
-      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Content-Type': result.contentType,
       'Cache-Control': cacheControl,
     });
     if (options.download) {
       headers.set('Content-Disposition', `attachment; filename="${filename}"`);
     }
-    return new Response(svg, { headers });
+    return new Response(result.body, { headers });
   }
 
   /**
@@ -465,12 +528,23 @@ export function createCredentialsRoutes(): App {
    */
   app.get('/_ensemble/brand/render/:filename{.+}', async (c, next) => {
     const filename = c.req.param('filename');
-    if (!filename.endsWith('.svg')) {
+    // v0.1.51: PNG output supported alongside SVG. Same path grammar,
+    // different rasterization tail. Anything else (.jpg/.webp) falls
+    // through — we don't transcode in v0.1.51.
+    let format: 'svg' | 'png';
+    let stem: string;
+    if (filename.endsWith('.svg')) {
+      format = 'svg';
+      stem = filename.replace(/\.svg$/i, '');
+    } else if (filename.endsWith('.png')) {
+      format = 'png';
+      stem = filename.replace(/\.png$/i, '');
+    } else {
       return next();
     }
 
     // Path-style URL grammar:
-    //   <anything>-<composition>-<finish-multi-segment>-<bg>.svg
+    //   <anything>-<composition>-<finish-multi-segment>-<bg>.<ext>
     //
     // v0.1.45 rewrite: instead of parsing segments by index (which
     // was off-by-one twice — v0.1.43 buggy, v0.1.44 still 404'd in
@@ -483,7 +557,6 @@ export function createCredentialsRoutes(): App {
     // Bulletproof: each KNOWN combination is tried explicitly. If
     // the filename ends with any known variant suffix, we render.
     // If not, 404 with a JSON error so triage is easy.
-    const stem = filename.replace(/\.svg$/i, '');
 
     const COMPOSITIONS: Array<{ slug: string; id: 'wordmark-only' | 'icon-only' | 'stacked' | 'horizontal' }> = [
       { slug: 'wordmark',   id: 'wordmark-only' },
@@ -538,6 +611,7 @@ export function createCredentialsRoutes(): App {
               download,
               filename,
               backgrounded: true,
+              format,
               overrides: hasOverride ? overrides : undefined,
             });
           }
@@ -547,6 +621,7 @@ export function createCredentialsRoutes(): App {
               download,
               filename,
               backgrounded: queryBackgrounded,
+              format,
               overrides: hasOverride ? overrides : undefined,
             });
           }
@@ -558,7 +633,7 @@ export function createCredentialsRoutes(): App {
     return c.json({
       error: 'unrecognized_brand_variant_url',
       filename,
-      hint: 'Expected: /brand/<slug>[-bg]-<composition>-<finish>-<bg>.svg where composition is one of wordmark|icon|stacked|horizontal, finish is full-color|mono-black|mono-white|mono-brand, bg is transparent|light|dark. The optional -bg token marks a backgrounded (tile-wrapped) variant.',
+      hint: 'Expected: /brand/<slug>[-bg]-<composition>-<finish>-<bg>.{svg|png} where composition is one of wordmark|icon|stacked|horizontal, finish is full-color|mono-black|mono-white|mono-brand, bg is transparent|light|dark. The optional -bg token marks a backgrounded (tile-wrapped) variant.',
     }, 404);
   });
 
@@ -572,7 +647,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.50-crossalign-bg-path-prefix',
+      buildFingerprint: 'v0.1.51-satori-resvg-real-metrics',
       timestamp: new Date().toISOString(),
     });
   });
@@ -605,7 +680,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/brand/favicon.svg', async (c) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
-    const { getIconSvg } = await import('../services/brand-assets');
+    const { getIconSvg } = await import('../services/brand-render/sources');
     const svg = await getIconSvg(c.env, workspace.id);
     if (!svg) return c.notFound();
     return new Response(svg, {

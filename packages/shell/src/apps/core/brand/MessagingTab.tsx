@@ -222,7 +222,7 @@ export function MessagingTab() {
   function setLocalizedValue(fieldKey: string, locale: string, value: string) {
     setTokens((prev) => {
       const next = { ...prev };
-      const inner = { ...(next[fieldKey] ?? {}) };
+      const inner = { ...next[fieldKey] };
       inner[locale] = value;
       next[fieldKey] = inner;
       return next;

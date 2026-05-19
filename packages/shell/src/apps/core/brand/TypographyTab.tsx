@@ -260,19 +260,20 @@ export function TypographyTab() {
         identityTokens['wordmark_scale_ratio'] = '';
       }
 
-      const [typoRes, idRes] = await Promise.all([
-        authedFetch('/_ensemble/brand/tokens', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ category: 'typography', tokens: typographyTokens }),
-        }),
-        authedFetch('/_ensemble/brand/tokens', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ category: 'identity', tokens: identityTokens }),
-        }),
-      ]);
-      if (!typoRes.ok || !idRes.ok) throw new Error('Failed to save');
+      // v0.1.51: single atomic endpoint installs Google Fonts to R2
+      // (so server-side Satori render has the TTF available) AND
+      // commits brand_tokens. Save button stays disabled until both
+      // steps complete. If install fails, brand_tokens stays unchanged
+      // and the operator sees a clear error.
+      const saveRes = await authedFetch('/_ensemble/core/brand/typography/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ typography: typographyTokens, identity: identityTokens }),
+      });
+      if (!saveRes.ok) {
+        const body = await saveRes.json().catch(() => ({})) as { detail?: string };
+        throw new Error(body.detail || `HTTP ${saveRes.status}`);
+      }
       status.commitSave();
       emitWorkspaceEvent('brand.tokens.changed', { category: 'typography' });
       emitWorkspaceEvent('brand.tokens.changed', { category: 'identity' });

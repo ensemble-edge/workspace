@@ -873,7 +873,7 @@ function CompositionPolicyEditors() {
       ...slice,
       compositions: {
         ...savedPolicy.compositions,
-        ...(slice.compositions ?? {}),
+        ...slice.compositions,
       },
     };
     try {

@@ -30,6 +30,7 @@ import type { WordmarkSegment } from '@ensemble-edge/ui';
 
 import { getRelativeLuminance } from './color-utils';
 import { authedFetch } from '../../../state';
+import { subscribeWorkspaceEvent } from '../../../state/events';
 
 interface BrandSpec {
   ensemble_brand: string;
@@ -474,12 +475,28 @@ interface PolicyResponse {
  */
 function LogoVariantsCard() {
   const [policy, setPolicy] = useState<PolicyResponse | null>(null);
+  // v0.1.51: reloadToken bumps on every brand.tokens.changed event so
+  // the variant cells re-fetch their <img> URLs after typography or
+  // policy edits. The cache key on the server side is content-hashed
+  // (so it auto-invalidates), but the BROWSER also caches the <img>
+  // URL — bumping the token forces a fresh GET so the operator sees
+  // their save reflected immediately, not after the browser cache
+  // happens to expire.
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     authedFetch('/_ensemble/core/brand/logo-policy')
       .then((r) => r.json() as Promise<PolicyResponse>)
       .then(setPolicy)
       .catch(() => { /* no policy → card hidden */ });
+  }, [reloadToken]);
+
+  useEffect(() => {
+    return subscribeWorkspaceEvent((e) => {
+      if (e.type === 'brand.tokens.changed') {
+        setReloadToken((t) => t + 1);
+      }
+    });
   }, []);
 
   if (!policy) return null;
@@ -518,7 +535,7 @@ function LogoVariantsCard() {
                   if (banSet.has(`${finish.id}|${bg.id}`)) return null;
                   return (
                     <VariantCell
-                      key={`${composition}-${finish.id}-${bg.id}`}
+                      key={`${composition}-${finish.id}-${bg.id}-${reloadToken}`}
                       composition={composition}
                       finish={finish}
                       background={bg}
@@ -545,7 +562,7 @@ function LogoVariantsCard() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {policy.policy.backgrounded.lightAllowed && (
                 <VariantCell
-                  key="bg-light"
+                  key={`bg-light-${reloadToken}`}
                   composition="icon-only"
                   finish={{ id: 'full-color', label: 'Backgrounded' }}
                   background={{ id: 'light', label: 'Light tile' }}
@@ -556,7 +573,7 @@ function LogoVariantsCard() {
               )}
               {policy.policy.backgrounded.darkAllowed && (
                 <VariantCell
-                  key="bg-dark"
+                  key={`bg-dark-${reloadToken}`}
                   composition="icon-only"
                   finish={{ id: 'full-color', label: 'Backgrounded' }}
                   background={{ id: 'dark', label: 'Dark tile' }}
