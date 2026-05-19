@@ -175,7 +175,10 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
                 const compShort = composition === 'wordmark-only' ? 'wordmark'
                   : composition === 'icon-only' ? 'icon'
                   : composition;
-                const renderUrl = `/brand/${brand.workspace_slug}-${compShort}-${finish.id}-${bg.id}.svg`;
+                const renderUrl = applyAssetAlias(
+                  `/_ensemble/brand/render/${brand.workspace_slug}-${compShort}-${finish.id}-${bg.id}.svg`,
+                  aliasPath,
+                ) ?? '';
                 const isDark = bg.id === 'dark';
                 return `<div>
                   <div class="logo-tile${isDark ? ' dark' : ''}">
@@ -201,7 +204,10 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
             const finish = policy.finishes.find((f) => f.id === ban.finishId);
             const bg = policy.backgrounds.find((b) => b.id === ban.backgroundId);
             if (!finish || !bg) return '';
-            const renderUrl = `/brand/${brand.workspace_slug}-wordmark-${ban.finishId}-${ban.backgroundId}.svg`;
+            const renderUrl = applyAssetAlias(
+              `/_ensemble/brand/render/${brand.workspace_slug}-wordmark-${ban.finishId}-${ban.backgroundId}.svg`,
+              aliasPath,
+            ) ?? '';
             const isDark = ban.backgroundId === 'dark';
             return `<div>
               <div class="logo-tile${isDark ? ' dark' : ''}" style="position:relative;">

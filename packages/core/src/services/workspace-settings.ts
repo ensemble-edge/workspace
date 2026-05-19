@@ -57,22 +57,27 @@ export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
 };
 
 /**
- * Rewrite a canonical brand-asset URL into the operator's configured
- * "pretty" alias form, when one is set. Used by every endpoint that
- * returns URLs to clients (brand spec, workspace context, brand guide,
- * email templates) so external consumers see the operator's chosen
- * path style.
+ * Rewrite a canonical brand URL into the operator's configured
+ * "pretty" alias form, when one is set. Unified URL model (v0.1.46+):
+ * EVERY brand resource lives under /_ensemble/brand/* canonically;
+ * the alias rewrites the prefix to /<alias>/brand/* for all of them.
+ * One transform, applied uniformly to:
+ *   - /_ensemble/brand/asset/<r2-key>      → /<alias>/brand/asset/<r2-key>
+ *   - /_ensemble/brand/render/<filename>   → /<alias>/brand/render/<filename>
+ *   - /_ensemble/brand/spec                → /<alias>/brand/spec
+ *   - /_ensemble/brand/css                 → /<alias>/brand/css
+ *   - /_ensemble/brand/favicon.svg         → /<alias>/brand/favicon.svg
+ *   - /_ensemble/brand/<future>            → /<alias>/brand/<future>
  *
  * Stored brand_token values stay canonical — changing the alias path
  * never breaks stored data. This helper transforms on read.
  *
  * Inputs that pass through unchanged:
  *   - Empty / null URLs
- *   - Already-aliased URLs (e.g. /assets/...)
+ *   - Already-aliased URLs (don't start with /_ensemble/brand/)
  *   - Absolute URLs (https://...)
- *   - Non-asset URLs (don't match the canonical pattern)
- *   - The path-style brand asset URLs (/brand/...svg) — these are
- *     already pretty and serve directly without the alias mechanism
+ *   - Non-brand /_ensemble paths (auth, runtime, etc. — those are
+ *     system-internal and never operator-distributed)
  */
 export function applyAssetAlias(
   url: string | null | undefined,
@@ -80,10 +85,13 @@ export function applyAssetAlias(
 ): string | null {
   if (!url) return null;
   if (!aliasPath) return url;
-  // Only canonical /_ensemble/brand/asset/<key> URLs get rewritten.
-  const m = /^\/_ensemble\/brand\/asset\/(.+)$/.exec(url);
+  // Rewrite the entire /_ensemble/brand/ prefix → /<alias>/brand/.
+  // Note: we keep the `brand/` segment after the alias so URLs
+  // self-describe (`/assets/brand/spec` is obviously a brand resource;
+  // `/assets/spec` is ambiguous).
+  const m = /^\/_ensemble\/brand\/(.+)$/.exec(url);
   if (!m) return url;
-  return `/${aliasPath}/${m[1]}`;
+  return `/${aliasPath}/brand/${m[1]}`;
 }
 
 /**

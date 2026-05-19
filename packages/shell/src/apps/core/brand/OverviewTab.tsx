@@ -454,6 +454,10 @@ interface PolicyResponse {
   };
   effectiveBans: Array<{ finishId: FinishId; backgroundId: string; reason?: string }>;
   workspaceSlug?: string;
+  /** Operator-configured pretty alias path (e.g. 'assets'). Empty
+   *  string means no alias is set → fall back to canonical
+   *  /_ensemble/brand/render/ URLs. */
+  assetAliasPath?: string;
 }
 
 /**
@@ -513,6 +517,7 @@ function LogoVariantsCard() {
                       finish={finish}
                       background={bg}
                       workspaceSlug={policy.workspaceSlug || 'workspace'}
+                      assetAliasPath={policy.assetAliasPath || ''}
                     />
                   );
                 }),
@@ -530,21 +535,31 @@ function VariantCell({
   finish,
   background,
   workspaceSlug,
+  assetAliasPath,
 }: {
   composition: CompositionId;
   finish: { id: FinishId; label: string };
   background: { id: string; label: string };
   workspaceSlug: string;
+  /** Pretty alias path (e.g. 'assets'). Empty → use canonical /_ensemble/. */
+  assetAliasPath: string;
 }) {
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-  // Path-style URL: /brand/<slug>-<composition>-<finish>-<bg>.svg
-  // Composition aliases: 'wordmark-only' → 'wordmark', 'icon-only' → 'icon'
-  // for shorter URL segments. The server route reverses these aliases.
+  // Unified URL model (v0.1.46+): every brand resource lives under
+  // /_ensemble/brand/* canonically; if the operator has configured
+  // a pretty alias path, we prefer it for Copy URL / Download SVG
+  // actions (the canonical URL also still works). Operators see the
+  // pretty form in their distribution channels.
+  // Composition short aliases: 'wordmark-only' → 'wordmark',
+  // 'icon-only' → 'icon' for shorter URL segments.
   const compShort =
     composition === 'wordmark-only' ? 'wordmark'
     : composition === 'icon-only' ? 'icon'
     : composition;
-  const renderUrl = `/brand/${workspaceSlug}-${compShort}-${finish.id}-${background.id}.svg`;
+  const tail = `${workspaceSlug}-${compShort}-${finish.id}-${background.id}.svg`;
+  const renderUrl = assetAliasPath
+    ? `/${assetAliasPath}/brand/render/${tail}`
+    : `/_ensemble/brand/render/${tail}`;
   // Same URL — browser auto-saves with the filename from the URL path.
   const downloadUrl = renderUrl;
 
@@ -635,7 +650,18 @@ function VariantCell({
  */
 function FaviconCard() {
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-  const faviconUrl = '/favicon.svg';
+  // v0.1.46+: favicon lives canonically at /_ensemble/brand/favicon.svg.
+  // Pretty alias preferred for the Copy URL action when configured.
+  const [aliasPath, setAliasPath] = useState<string>('');
+  useEffect(() => {
+    authedFetch('/_ensemble/core/brand/logo-policy')
+      .then((r) => r.json() as Promise<{ assetAliasPath?: string }>)
+      .then((p) => setAliasPath(p.assetAliasPath || ''))
+      .catch(() => { /* leave empty */ });
+  }, []);
+  const faviconUrl = aliasPath
+    ? `/${aliasPath}/brand/favicon.svg`
+    : '/_ensemble/brand/favicon.svg';
   const fullUrl = baseUrl + faviconUrl;
 
   const sizes: Array<{ px: number; label: string; context: string }> = [

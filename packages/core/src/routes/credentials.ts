@@ -235,7 +235,12 @@ export function createCredentialsRoutes(): App {
     // matrix) to construct the path-style render URL
     // /brand/<slug>-<composition>-<finish>-<bg>.svg
     const slug = (workspace.slug || workspace.id).toLowerCase();
-    return c.json({ policy, effectiveBans, brandColors: colors, workspaceSlug: slug });
+    // Include the operator's pretty alias path so the variants matrix
+    // can prefer it for Copy URL / Download SVG actions. When empty,
+    // clients fall back to the canonical /_ensemble/brand/render/ URL.
+    const { getSetting } = await import('../services/workspace-settings');
+    const assetAliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
+    return c.json({ policy, effectiveBans, brandColors: colors, workspaceSlug: slug, assetAliasPath });
   });
 
   /** PUT /_ensemble/core/brand/logo-policy — admin-only policy update. */
@@ -364,10 +369,18 @@ export function createCredentialsRoutes(): App {
    * map to 'wordmark-only', 'icon-only', and themselves respectively
    * — shorter URL segments without losing meaning.
    */
-  app.get('/brand/:filename{.+}', async (c, next) => {
+  /**
+   * GET /_ensemble/brand/render/<filename>.svg
+   *
+   * Canonical URL for generated logo variants (composition × finish ×
+   * background). Operators distribute these in decks/emails via the
+   * configured pretty alias path (e.g. /assets/brand/render/...).
+   * Same surface, same rules as every other brand resource: lives
+   * under /_ensemble/brand/ canonically, rewrites to /<alias>/brand/
+   * via the unified alias mechanism.
+   */
+  app.get('/_ensemble/brand/render/:filename{.+}', async (c, next) => {
     const filename = c.req.param('filename');
-    // Only handle .svg requests here. Anything else falls through to
-    // the next handler (the SPA catchall serves HTML).
     if (!filename.endsWith('.svg')) {
       return next();
     }
@@ -431,7 +444,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.45-brand-render-suffix-match',
+      buildFingerprint: 'v0.1.46-unified-brand-url-model',
       timestamp: new Date().toISOString(),
     });
   });
@@ -453,7 +466,15 @@ export function createCredentialsRoutes(): App {
    * via the standard brand-asset path when an operator pre-uploaded
    * one. Older browsers consume that.
    */
-  app.get('/favicon.svg', async (c) => {
+  /**
+   * GET /_ensemble/brand/favicon.svg
+   *
+   * Modern-browser favicon. The shell HTML's <link rel="icon"> points
+   * at this canonical URL; if the operator has configured an alias
+   * path, the link gets rewritten to /<alias>/brand/favicon.svg by
+   * the unified alias mechanism.
+   */
+  app.get('/_ensemble/brand/favicon.svg', async (c) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
     const { getIconSvg } = await import('../services/brand-assets');

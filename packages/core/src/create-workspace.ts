@@ -565,29 +565,32 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
     // before serving the SPA. Shape: /<configured-alias>/<r2-key...>
     // where <configured-alias> is the operator's chosen path segment
     // (e.g. 'assets', 'media', 'static-files').
+    // Unified alias rewrite (v0.1.46+): the operator-configured pretty
+    // alias path rewrites `/<alias>/brand/*` URLs to their canonical
+    // `/_ensemble/brand/*` equivalents and re-dispatches via internal
+    // fetch. One transform, applied uniformly to every brand resource
+    // (asset, render, spec, css, favicon, messaging).
+    //
+    // Why this works: the canonical handlers under /_ensemble/brand/*
+    // are already registered and tested. The alias is purely a URL
+    // rewrite — same handler, prettier URL.
     if (workspace?.id) {
       const url = new URL(c.req.url);
       const segments = url.pathname.split('/').filter(Boolean);
-      if (segments.length >= 2) {
+      if (segments.length >= 2 && segments[1] === 'brand') {
         const { getSetting } = await import('./services/workspace-settings');
         const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
         if (aliasPath && segments[0] === aliasPath) {
-          // Looks like a brand-asset request via the configured alias.
-          // Reuse the credentials/routes serveBrandAsset semantics:
-          // R2 must be bound (under the operator's configured binding
-          // name), key must live under `brand/`.
-          const { getR2Bucket } = await import('./services/r2-binding');
-          const r2 = await getR2Bucket(c.env, workspace.id);
-          if (!r2) return c.notFound();
-          const key = decodeURIComponent(segments.slice(1).join('/'));
-          if (!key.startsWith('brand/')) return c.notFound();
-          const obj = await r2.get(key);
-          if (!obj) return c.notFound();
-          const headers = new Headers();
-          obj.writeHttpMetadata(headers);
-          headers.set('etag', obj.httpEtag);
-          headers.set('Cache-Control', 'public, max-age=3600');
-          return new Response(obj.body, { headers });
+          // Build the canonical URL: /_ensemble/brand/<rest>
+          const rest = segments.slice(1).join('/'); // 'brand/...'
+          const canonicalUrl = `${url.origin}/_ensemble/${rest}${url.search}`;
+          // Internal re-dispatch — Hono runs the canonical handler
+          // and returns the same response back through us.
+          return app.fetch(
+            new Request(canonicalUrl, c.req.raw),
+            c.env,
+            c.executionCtx,
+          );
         }
       }
     }
@@ -659,7 +662,7 @@ function generateShellHtml(workspaceName: string, accentColor: string, themeMode
   ${systemScript}
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>${workspaceName}</title>
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/svg+xml" href="/_ensemble/brand/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -743,7 +746,7 @@ function generateLoginHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="${accentColor}">
   <title>Login — ${workspaceName}</title>
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="icon" type="image/svg+xml" href="/_ensemble/brand/favicon.svg">
   ${systemScript}
   <link rel="stylesheet" href="/_ensemble/shell/shell.css">
   <link rel="stylesheet" href="/_ensemble/brand/css">
