@@ -1,6 +1,6 @@
 {
   "name": "@ensemble-edge/guest-sandbox",
-  "version": "0.1.6",
+  "version": "0.1.49",
   "description": "Typed postMessage SDK for sandboxed Ensemble guest apps (untrusted/third-party)",
   "type": "module",
   "main": "./src/index.ts",
