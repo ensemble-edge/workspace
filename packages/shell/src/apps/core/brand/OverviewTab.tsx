@@ -265,6 +265,11 @@ export function OverviewTab() {
           guide shows the same matrix + the banned-uses gallery. */}
       <LogoVariantsCard />
 
+      {/* Favicon specimen — shows what the operator's browser tab,
+          home screen icon, and bookmark will display. Generated from
+          the icon mark SVG via /favicon.svg. */}
+      <FaviconCard />
+
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Messaging */}
@@ -592,5 +597,105 @@ function VariantCell({
         </Button>
       </div>
     </div>
+  );
+}
+
+// ─── Favicon ─────────────────────────────────────────────────────
+
+/**
+ * Favicon specimen card. Shows the operator's icon mark rendered at
+ * the canonical favicon sizes a browser actually uses:
+ *
+ *   16  — historical browser tab
+ *   32  — high-DPI browser tab + bookmark
+ *   48  — Windows taskbar
+ *   180 — iOS home screen ("apple-touch-icon")
+ *   192 — Android home screen
+ *   512 — Android splash + PWA icon
+ *
+ * All sizes come from one source: /favicon.svg (the icon mark SVG
+ * served via the v0.1.36 endpoint). Modern browsers scale the SVG
+ * natively at every requested size — no rasterization needed.
+ *
+ * Includes a Copy URL action so operators can drop the favicon
+ * URL into external systems (analytics dashboards, PWA configs,
+ * partner deck templates).
+ */
+function FaviconCard() {
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const faviconUrl = '/favicon.svg';
+  const fullUrl = baseUrl + faviconUrl;
+
+  const sizes: Array<{ px: number; label: string; context: string }> = [
+    { px: 16,  label: '16',  context: 'Browser tab' },
+    { px: 32,  label: '32',  context: 'Tab @ 2×' },
+    { px: 48,  label: '48',  context: 'Windows taskbar' },
+    { px: 180, label: '180', context: 'iOS home screen' },
+    { px: 192, label: '192', context: 'Android home' },
+    { px: 512, label: '512', context: 'PWA splash' },
+  ];
+
+  async function copyUrl() {
+    await navigator.clipboard.writeText(fullUrl);
+    toast.success('Favicon URL copied');
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2">
+          <Palette className="h-5 w-5" /> Favicon
+        </CardTitle>
+        <CardDescription>
+          Generated from your icon mark. Modern browsers (Chrome 92+,
+          Firefox 41+, Safari 16+) scale this SVG at every requested
+          size — one source covers tab icons, home-screen icons, and
+          PWA splash screens.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-end gap-4">
+          {sizes.map((s) => (
+            <div key={s.px} className="flex flex-col items-center gap-1.5">
+              <div
+                className="rounded border bg-muted/30 flex items-center justify-center"
+                style={{ width: Math.max(s.px, 32), height: Math.max(s.px, 32) }}
+              >
+                <img
+                  src={faviconUrl}
+                  alt={`Favicon ${s.label}px`}
+                  style={{ width: s.px, height: s.px, display: 'block' }}
+                />
+              </div>
+              <div className="text-center">
+                <p className="text-xs font-mono">{s.label}px</p>
+                <p className="text-[10px] text-muted-foreground">{s.context}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button type="button" variant="outline" size="sm" onClick={copyUrl}>
+            <Copy className="h-3 w-3 mr-1" /> Copy URL
+          </Button>
+          <Button type="button" variant="outline" size="sm" asChild>
+            <a href={faviconUrl} download="favicon.svg">
+              <Download className="h-3 w-3 mr-1" /> Download SVG
+            </a>
+          </Button>
+          <Button type="button" variant="outline" size="sm" asChild>
+            <a href={faviconUrl} target="_blank" rel="noreferrer noopener">
+              <ExternalLink className="h-3 w-3 mr-1" /> View raw
+            </a>
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Legacy browsers (IE, older Safari) fall back to whatever
+          static favicon you've uploaded as <code className="text-[11px]">logo_favicon</code> —
+          we'll regenerate the canonical 10-file suite (favicon.ico,
+          apple-touch-icon, mstile, etc.) once raster output ships.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
