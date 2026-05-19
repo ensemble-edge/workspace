@@ -26,6 +26,7 @@ interface BrandData {
    * workspaces only carries identity, not narrative copy.
    */
   workspace_description: string | null;
+  workspace_slug: string;
   tagline: string | null;
   accent: string;
   tokens: Record<string, string>;
@@ -33,9 +34,9 @@ interface BrandData {
 }
 
 async function loadBrandData(env: Env, workspaceId: string): Promise<BrandData> {
-  const ws = await env.DB.prepare(`SELECT name FROM workspaces WHERE id = ?`)
+  const ws = await env.DB.prepare(`SELECT name, slug FROM workspaces WHERE id = ?`)
     .bind(workspaceId)
-    .first<{ name: string }>();
+    .first<{ name: string; slug: string }>();
 
   const rows = await env.DB.prepare(
     `SELECT key, value, category FROM brand_tokens
@@ -50,6 +51,7 @@ async function loadBrandData(env: Env, workspaceId: string): Promise<BrandData> 
 
   return {
     workspace_name: ws?.name ?? 'Workspace',
+    workspace_slug: (ws?.slug ?? workspaceId).toLowerCase(),
     // Source description from elevator_pitch — it's the closest
     // operator-curated "what does this workspace do" string we have.
     // Falls back to null so the brand-guide renderer can hide the
@@ -165,7 +167,10 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
             ${approvedFinishes.flatMap((finish) =>
               approvedBgs.map((bg) => {
                 if (banSet.has(`${finish.id}|${bg.id}`)) return '';
-                const renderUrl = `/_ensemble/core/brand/render?composition=${composition}&finish=${finish.id}&bg=${encodeURIComponent(bg.id)}`;
+                const compShort = composition === 'wordmark-only' ? 'wordmark'
+                  : composition === 'icon-only' ? 'icon'
+                  : composition;
+                const renderUrl = `/brand/${brand.workspace_slug}-${compShort}-${finish.id}-${bg.id}.svg`;
                 const isDark = bg.id === 'dark';
                 return `<div>
                   <div class="logo-tile${isDark ? ' dark' : ''}">
@@ -191,7 +196,7 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
             const finish = policy.finishes.find((f) => f.id === ban.finishId);
             const bg = policy.backgrounds.find((b) => b.id === ban.backgroundId);
             if (!finish || !bg) return '';
-            const renderUrl = `/_ensemble/core/brand/render?composition=wordmark-only&finish=${ban.finishId}&bg=${encodeURIComponent(ban.backgroundId)}`;
+            const renderUrl = `/brand/${brand.workspace_slug}-wordmark-${ban.finishId}-${ban.backgroundId}.svg`;
             const isDark = ban.backgroundId === 'dark';
             return `<div>
               <div class="logo-tile${isDark ? ' dark' : ''}" style="position:relative;">

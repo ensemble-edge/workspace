@@ -231,7 +231,11 @@ export function createCredentialsRoutes(): App {
       else if (r.key === 'brand-background-dark') colors.bgDark = r.value;
     }
     const effectiveBans = effectiveBannedPairs(policy, colors);
-    return c.json({ policy, effectiveBans, brandColors: colors });
+    // Workspace slug is used by clients (e.g. Brand Overview variants
+    // matrix) to construct the path-style render URL
+    // /brand/<slug>-<composition>-<finish>-<bg>.svg
+    const slug = (workspace.slug || workspace.id).toLowerCase();
+    return c.json({ policy, effectiveBans, brandColors: colors, workspaceSlug: slug });
   });
 
   /** PUT /_ensemble/core/brand/logo-policy — admin-only policy update. */
@@ -266,13 +270,19 @@ export function createCredentialsRoutes(): App {
    * release — operators wanting raster today download SVG and convert
    * externally, OR use a modern browser which renders SVG natively.
    */
-  app.get('/_ensemble/core/brand/render', async (c) => {
+  /**
+   * Shared render body for both URL shapes (query-string + path-style).
+   * Returns the SVG response or a JSON error response.
+   */
+  async function handleBrandRender(
+    c: AppContext,
+    composition: 'wordmark-only' | 'icon-only' | 'stacked' | 'horizontal',
+    finish: 'full-color' | 'mono-black' | 'mono-white' | 'mono-brand',
+    backgroundId: string,
+    options: { download: boolean; filename?: string },
+  ): Promise<Response> {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
-
-    const composition = (c.req.query('composition') || 'wordmark-only') as 'wordmark-only' | 'icon-only' | 'stacked' | 'horizontal';
-    const finish = (c.req.query('finish') || 'full-color') as 'full-color' | 'mono-black' | 'mono-white' | 'mono-brand';
-    const backgroundId = c.req.query('bg') || 'transparent';
 
     const { loadPolicy, isPairAllowed } = await import('../services/brand-policy');
     const { renderBrandAsset } = await import('../services/brand-assets');
@@ -311,16 +321,98 @@ export function createCredentialsRoutes(): App {
       }, 404);
     }
 
+    const slug = (workspace.slug || workspace.id).toLowerCase();
+    const filename = options.filename || `${slug}-${composition}-${finish}-${backgroundId}.svg`;
     const headers = new Headers({
       'Content-Type': 'image/svg+xml; charset=utf-8',
       'Cache-Control': 'public, max-age=3600',
     });
-    const slug = (workspace.slug || workspace.id).toLowerCase();
-    const filename = `${slug}-${composition}-${finish}-${backgroundId}.svg`;
-    if (c.req.query('download') === '1') {
+    if (options.download) {
       headers.set('Content-Disposition', `attachment; filename="${filename}"`);
     }
     return new Response(svg, { headers });
+  }
+
+  /**
+   * Query-string form. Kept for backward compatibility — anyone with
+   * an old `/_ensemble/core/brand/render?composition=...&finish=...&bg=...`
+   * URL in a deck or doc continues to work. The path-style form below
+   * is the preferred public URL going forward.
+   */
+  app.get('/_ensemble/core/brand/render', async (c) => {
+    const composition = (c.req.query('composition') || 'wordmark-only') as 'wordmark-only' | 'icon-only' | 'stacked' | 'horizontal';
+    const finish = (c.req.query('finish') || 'full-color') as 'full-color' | 'mono-black' | 'mono-white' | 'mono-brand';
+    const backgroundId = c.req.query('bg') || 'transparent';
+    const download = c.req.query('download') === '1';
+    return handleBrandRender(c, composition, finish, backgroundId, { download });
+  });
+
+  /**
+   * Path-style form. Operators paste this into decks, emails, partner
+   * docs, anywhere — and the URL itself describes what the file is.
+   *
+   *   /brand/<slug>-<composition>-<finish>-<bg>.svg
+   *
+   * Example: /brand/cl-workspace-stacked-mono-white-dark.svg
+   *
+   * The browser saves the file with that filename automatically when
+   * an operator right-clicks → Save As, so no Content-Disposition
+   * gymnastics needed. Same generator under the hood — this route is
+   * pure URL rewriting.
+   *
+   * Composition aliases: 'wordmark', 'icon', 'stacked', 'horizontal'
+   * map to 'wordmark-only', 'icon-only', and themselves respectively
+   * — shorter URL segments without losing meaning.
+   */
+  app.get('/brand/:filename{.+\\.svg}', async (c) => {
+    const filename = c.req.param('filename');
+    // Strip the .svg extension and split on dashes. Filename grammar:
+    //   <slug-segments...>-<composition>-<finish>-<bg>
+    // where slug-segments can contain dashes themselves. We parse
+    // from the RIGHT: last segment is bg, second-to-last is finish,
+    // and we search backward for the composition keyword. Everything
+    // before the composition keyword is treated as the slug.
+    const stem = filename.replace(/\.svg$/i, '');
+    const parts = stem.split('-');
+
+    // Locate composition by scanning from end-3 backward for a known
+    // composition token. (bg is parts[parts.length - 1], finish is
+    // composed of one or two segments, composition is one or two.)
+    // Simpler heuristic: try the canonical positions assuming finish
+    // is always two segments (mono-X or full-color) and composition
+    // is always either 'stacked', 'horizontal', 'wordmark', or 'icon'.
+    const KNOWN_COMPS = new Set(['stacked', 'horizontal', 'wordmark', 'icon']);
+    let compIdx = -1;
+    for (let i = parts.length - 4; i >= 0; i--) {
+      if (KNOWN_COMPS.has(parts[i])) { compIdx = i; break; }
+    }
+    if (compIdx === -1) return c.notFound();
+
+    const compRaw = parts[compIdx];
+    const composition: 'wordmark-only' | 'icon-only' | 'stacked' | 'horizontal' =
+      compRaw === 'wordmark' ? 'wordmark-only'
+      : compRaw === 'icon' ? 'icon-only'
+      : (compRaw as 'stacked' | 'horizontal');
+
+    // Finish is between compIdx+1 and the last segment exclusive.
+    // It's one of: full-color (2 segs), mono-black (2), mono-white (2),
+    // mono-brand (2). So finish is always 2 segments.
+    if (compIdx + 3 !== parts.length) return c.notFound();
+    const finish = `${parts[compIdx + 1]}-${parts[compIdx + 2]}` as 'full-color' | 'mono-black' | 'mono-white' | 'mono-brand';
+    const KNOWN_FINISHES = new Set(['full-color', 'mono-black', 'mono-white', 'mono-brand']);
+    if (!KNOWN_FINISHES.has(finish)) return c.notFound();
+
+    const backgroundId = parts[parts.length - 1];
+    // Background is one segment in the canonical case (light/dark/
+    // transparent). Custom-hex backgrounds aren't supported via the
+    // path-style URL today — they'd need encoding.
+    const KNOWN_BGS = new Set(['transparent', 'light', 'dark']);
+    if (!KNOWN_BGS.has(backgroundId)) return c.notFound();
+
+    return handleBrandRender(c, composition, finish, backgroundId, {
+      download: false,
+      filename,
+    });
   });
 
   /**

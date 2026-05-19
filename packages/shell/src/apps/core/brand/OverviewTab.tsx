@@ -453,6 +453,7 @@ interface PolicyResponse {
     backgrounds: Array<{ id: string; label: string; allowed: boolean }>;
   };
   effectiveBans: Array<{ finishId: FinishId; backgroundId: string; reason?: string }>;
+  workspaceSlug?: string;
 }
 
 /**
@@ -511,6 +512,7 @@ function LogoVariantsCard() {
                       composition={composition}
                       finish={finish}
                       background={bg}
+                      workspaceSlug={policy.workspaceSlug || 'workspace'}
                     />
                   );
                 }),
@@ -527,14 +529,24 @@ function VariantCell({
   composition,
   finish,
   background,
+  workspaceSlug,
 }: {
   composition: CompositionId;
   finish: { id: FinishId; label: string };
   background: { id: string; label: string };
+  workspaceSlug: string;
 }) {
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-  const renderUrl = `/_ensemble/core/brand/render?composition=${composition}&finish=${finish.id}&bg=${encodeURIComponent(background.id)}`;
-  const downloadUrl = `${renderUrl}&download=1`;
+  // Path-style URL: /brand/<slug>-<composition>-<finish>-<bg>.svg
+  // Composition aliases: 'wordmark-only' → 'wordmark', 'icon-only' → 'icon'
+  // for shorter URL segments. The server route reverses these aliases.
+  const compShort =
+    composition === 'wordmark-only' ? 'wordmark'
+    : composition === 'icon-only' ? 'icon'
+    : composition;
+  const renderUrl = `/brand/${workspaceSlug}-${compShort}-${finish.id}-${background.id}.svg`;
+  // Same URL — browser auto-saves with the filename from the URL path.
+  const downloadUrl = renderUrl;
 
   // Dark backgrounds render the cell with a dark frame so the operator
   // sees the variant in its intended context. Light/transparent stay
