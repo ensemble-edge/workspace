@@ -19,6 +19,7 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
   Toaster,
+  ViewportContextProvider,
 } from '@ensemble-edge/ui';
 
 import { AppSidebar } from './AppSidebar';
@@ -89,9 +90,19 @@ export function Shell() {
             and look broken even though the iframe content is rendering
             correctly. Diagnosed in v0.1.6 by curalisto's agent in a
             deployed v0.1.5 environment. */}
-        <div className="flex-1 overflow-y-auto flex flex-col" style={{ padding: 'var(--content-padding, 1.5rem)' }}>
-          <Viewport />
-        </div>
+        {/* v0.1.42: ViewportContextProvider tells EnsemblePage that
+            --content-padding is already applied at this level — so
+            <Page> renderings beneath this skip their internal padding
+            and we avoid double-padding. Iframe-tier guests live in
+            their own DOM tree and don't see this provider, so
+            EnsemblePage applies its own padding correctly inside
+            iframes. Core apps and component-tier guests rendered
+            inline see the context and stay padding-clean. */}
+        <ViewportContextProvider outerPaddingApplied>
+          <div className="flex-1 overflow-y-auto flex flex-col" style={{ padding: 'var(--content-padding, 1.5rem)' }}>
+            <Viewport />
+          </div>
+        </ViewportContextProvider>
       </SidebarInset>
 
       {/* Toast notifications (alert-styled) */}

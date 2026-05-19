@@ -252,8 +252,8 @@ export type { PageHeaderProps } from "./components/ensemble/page-header";
 // EnsemblePage + EnsembleSection - the canonical page chrome.
 // Both core apps and guest apps render through these primitives so a
 // workspace settings change propagates everywhere automatically.
-export { EnsemblePage, EnsembleSection } from "./components/ensemble/page";
-export type { EnsemblePageProps, EnsembleSectionProps } from "./components/ensemble/page";
+export { EnsemblePage, EnsembleSection, ViewportContext, ViewportContextProvider } from "./components/ensemble/page";
+export type { EnsemblePageProps, EnsembleSectionProps, ViewportContextValue } from "./components/ensemble/page";
 
 // Data Row - label/value pairs for details views
 export { DataRow } from "./components/ensemble/data-row";
