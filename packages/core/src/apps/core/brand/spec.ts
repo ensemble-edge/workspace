@@ -153,6 +153,13 @@ export async function assembleBrandSpec(
   db: D1Database,
   workspaceId: string,
   baseUrl?: string,
+  /**
+   * Operator-configured pretty alias path (e.g. 'assets'). When set,
+   * canonical /_ensemble/brand/asset/<key> URLs are rewritten to
+   * /<aliasPath>/<key>. Stored brand_tokens remain canonical —
+   * transforming on read keeps the data layer stable.
+   */
+  assetAliasPath?: string,
 ): Promise<EnsembleBrandSpec> {
   // Fetch all tokens and groups in parallel
   const [tokensResult, groupsResult] = await Promise.all([
@@ -244,11 +251,16 @@ export async function assembleBrandSpec(
   }
 
   // ── Logos ──
+  // Apply the operator's pretty asset alias on emit. Stored token
+  // values stay canonical; this transforms on read so external
+  // consumers see the chosen path style.
+  const { applyAssetAlias } = await import('../../../services/workspace-settings');
   const logos: EnsembleBrandSpec['logos'] = {};
   for (const t of identityTokens) {
     if (t.key.startsWith('logo_')) {
       const logoKey = t.key.replace('logo_', '') as keyof typeof logos;
-      (logos as Record<string, string>)[logoKey] = t.value;
+      const aliased = applyAssetAlias(t.value, assetAliasPath ?? '');
+      if (aliased) (logos as Record<string, string>)[logoKey] = aliased;
     }
   }
 

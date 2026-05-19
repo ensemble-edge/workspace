@@ -22,7 +22,9 @@ export function registerBrandRoutes(
 
     try {
       const baseUrl = new URL(c.req.url).origin;
-      const spec = await assembleBrandSpec(c.env.DB, workspace.id, baseUrl);
+      const { getSetting } = await import('../../../services/workspace-settings');
+      const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
+      const spec = await assembleBrandSpec(c.env.DB, workspace.id, baseUrl, aliasPath);
 
       const format = c.req.query('format');
       if (format === 'yaml') {
@@ -43,7 +45,9 @@ export function registerBrandRoutes(
     if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
 
     try {
-      const spec = await assembleBrandSpec(c.env.DB, workspace.id);
+      const { getSetting } = await import('../../../services/workspace-settings');
+      const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
+      const spec = await assembleBrandSpec(c.env.DB, workspace.id, undefined, aliasPath);
       const markdown = generateContextFromSpec(spec);
       return c.text(markdown, 200, { 'Content-Type': 'text/markdown' });
     } catch (error) {

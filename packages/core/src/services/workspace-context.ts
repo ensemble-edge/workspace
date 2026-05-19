@@ -259,17 +259,23 @@ async function resolveBrand(
     for (const r of tokRows.results ?? []) tokens[r.key] = r.value;
 
     tagline = tokens['tagline'] ?? null;
+    // Load the operator's asset alias setting once for this resolver.
+    // Canonical /_ensemble/brand/asset URLs get rewritten to
+    // /<alias>/<key>; path-style /brand/...svg URLs are already
+    // pretty and pass through unchanged.
+    const { applyAssetAlias, getSetting } = await import('./workspace-settings');
+    const aliasPath = (await getSetting(env, workspaceId, 'asset_public_alias_path')).trim();
     // Prefer the path-style URL when slug is set (cleaner for guests
-    // to embed). Fall back to the canonical asset path.
+    // to embed). Fall back to the canonical asset path (alias-transformed).
     if (slug && (tokens['logo_wordmark_svg'] || tokens['wordmark_text'])) {
       wordmarkUrl = `/brand/${slug}-wordmark-full-color-transparent.svg`;
     } else if (tokens['logo_wordmark']) {
-      wordmarkUrl = tokens['logo_wordmark'];
+      wordmarkUrl = applyAssetAlias(tokens['logo_wordmark'], aliasPath);
     }
     if (slug && tokens['logo_icon_mark_svg']) {
       iconUrl = `/brand/${slug}-icon-full-color-transparent.svg`;
     } else if (tokens['logo_icon_mark']) {
-      iconUrl = tokens['logo_icon_mark'];
+      iconUrl = applyAssetAlias(tokens['logo_icon_mark'], aliasPath);
     }
   } catch {
     // fall through

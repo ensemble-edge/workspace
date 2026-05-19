@@ -57,6 +57,49 @@ export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
 };
 
 /**
+ * Rewrite a canonical brand-asset URL into the operator's configured
+ * "pretty" alias form, when one is set. Used by every endpoint that
+ * returns URLs to clients (brand spec, workspace context, brand guide,
+ * email templates) so external consumers see the operator's chosen
+ * path style.
+ *
+ * Stored brand_token values stay canonical — changing the alias path
+ * never breaks stored data. This helper transforms on read.
+ *
+ * Inputs that pass through unchanged:
+ *   - Empty / null URLs
+ *   - Already-aliased URLs (e.g. /assets/...)
+ *   - Absolute URLs (https://...)
+ *   - Non-asset URLs (don't match the canonical pattern)
+ *   - The path-style brand asset URLs (/brand/...svg) — these are
+ *     already pretty and serve directly without the alias mechanism
+ */
+export function applyAssetAlias(
+  url: string | null | undefined,
+  aliasPath: string,
+): string | null {
+  if (!url) return null;
+  if (!aliasPath) return url;
+  // Only canonical /_ensemble/brand/asset/<key> URLs get rewritten.
+  const m = /^\/_ensemble\/brand\/asset\/(.+)$/.exec(url);
+  if (!m) return url;
+  return `/${aliasPath}/${m[1]}`;
+}
+
+/**
+ * Convenience: load the alias-path setting and return a transform
+ * function. Callers that emit multiple URLs in one response do this
+ * once and reuse the returned function.
+ */
+export async function getAssetAliasTransform(
+  env: Env,
+  workspaceId: string,
+): Promise<(url: string | null | undefined) => string | null> {
+  const aliasPath = (await getSetting(env, workspaceId, 'asset_public_alias_path')).trim();
+  return (url) => applyAssetAlias(url, aliasPath);
+}
+
+/**
  * Reserved path segments that operators cannot use for the asset
  * alias. Anything that would shadow a real workspace route, plus
  * anything starting with `_` (the internal-namespace prefix). The

@@ -66,10 +66,15 @@ async function loadBrandData(env: Env, workspaceId: string): Promise<BrandData> 
 
 export async function renderBrandGuide(env: Env, workspaceId: string): Promise<string> {
   const brand = await loadBrandData(env, workspaceId);
-  const wordmarkLight = resolveBrandImage(brand.tokens, 'wordmark', { mode: 'light' });
-  const iconLight = resolveBrandImage(brand.tokens, 'icon_mark', { mode: 'light' });
-  const wordmarkDark = resolveBrandImage(brand.tokens, 'wordmark', { mode: 'dark' });
-  const iconDark = resolveBrandImage(brand.tokens, 'icon_mark', { mode: 'dark' });
+  // Apply the operator's pretty asset alias on every URL we render.
+  // Stored brand_token values stay canonical — transforming on read
+  // means changing the alias path never breaks the stored data.
+  const { applyAssetAlias, getSetting } = await import('./workspace-settings');
+  const aliasPath = (await getSetting(env as { DB: D1Database }, workspaceId, 'asset_public_alias_path')).trim();
+  const wordmarkLight = applyAssetAlias(resolveBrandImage(brand.tokens, 'wordmark', { mode: 'light' }), aliasPath);
+  const iconLight = applyAssetAlias(resolveBrandImage(brand.tokens, 'icon_mark', { mode: 'light' }), aliasPath);
+  const wordmarkDark = applyAssetAlias(resolveBrandImage(brand.tokens, 'wordmark', { mode: 'dark' }), aliasPath);
+  const iconDark = applyAssetAlias(resolveBrandImage(brand.tokens, 'icon_mark', { mode: 'dark' }), aliasPath);
 
   // v0.1.32+: policy-driven approved + banned variants. The variants
   // gallery pulls live from the generator endpoint; the banned-uses
