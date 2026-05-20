@@ -191,35 +191,31 @@ async function produceAsset(inputs: ProduceInputs): Promise<CachedAsset> {
   };
   let tree = composeLockup(composeInputs);
 
-  // Background composition: solid bg-color rect under the lockup.
-  // We bake it into the wrapper element rather than a separate SVG
-  // step so Satori sees the bg as part of the layout.
+  // v0.1.54 unified background pass. Previously we had two paths:
+  // (a) backgrounds axis = solid color, no padding; (b) a separate
+  // `backgrounded` flag = same color, with padding. Operators saw
+  // both as "logo on a light background" and the distinction was
+  // confusing. We collapsed them: when the background is light or
+  // dark (anything other than transparent), the policy's
+  // backgrounded.padding setting applies. Single source of truth.
+  //
+  // req.backgrounded is kept as a back-compat input but no longer
+  // gates anything — the background axis itself decides.
   const bg = policy.backgrounds.find((b) => b.id === req.backgroundId);
   if (bg && bg.id !== 'transparent') {
     let bgColor = bg.color;
     if (bgColor === 'var(--brand-background-light)') bgColor = brandColors.bgLight;
     else if (bgColor === 'var(--brand-background-dark)') bgColor = brandColors.bgDark;
-    tree = {
-      type: 'div',
-      props: {
-        style: { display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: bgColor },
-        children: [tree],
-      },
-    };
-  }
-
-  // Backgrounded tile.
-  if (req.backgrounded && policy.backgrounded?.allowed) {
-    const wantsLight = req.backgroundId === 'light' || req.backgroundId === 'transparent';
-    const wantsDark = req.backgroundId === 'dark';
-    if ((wantsLight && policy.backgrounded.lightAllowed) || (wantsDark && policy.backgrounded.darkAllowed)) {
-      const tileColor = wantsDark ? brandColors.bgDark : brandColors.bgLight;
-      tree = wrapInBackground({
-        inner: tree,
-        tileColor,
-        paddingEm: policy.backgrounded.padding,
-      });
-    }
+    // Padding pulls from policy.backgrounded.padding when present;
+    // defaults to 0.5em when the policy doesn't have the field
+    // (older workspaces). 0 padding = full-bleed (the old "no
+    // padding" behavior is now just "set padding to 0").
+    const paddingEm = policy.backgrounded?.padding ?? 0.5;
+    tree = wrapInBackground({
+      inner: tree,
+      tileColor: bgColor,
+      paddingEm,
+    });
   }
 
   // Canvas dimensions for Satori.

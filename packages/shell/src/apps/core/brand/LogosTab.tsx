@@ -916,8 +916,8 @@ function CompositionPolicyEditors() {
         onSave={(c) => saveSlice({ compositions: { ...savedPolicy!.compositions, stacked: c } })}
         key={`s-${reloadKey}`}
       />
-      <BackgroundedCard
-        savedConfig={savedPolicy.backgrounded ?? { allowed: false, lightAllowed: true, darkAllowed: true, padding: 0.5 }}
+      <BackgroundSettingsCard
+        savedConfig={savedPolicy.backgrounded ?? { allowed: true, lightAllowed: true, darkAllowed: true, padding: 0.5 }}
         workspaceSlug={workspaceSlug}
         aliasPath={aliasPath}
         onSave={(c) => saveSlice({ backgrounded: c })}
@@ -1112,7 +1112,20 @@ function LockupCard({
 }
 
 /* ──────────────────────────────────────────────────────────────
- * Backgrounded card
+ * Background settings card (v0.1.54 rename)
+ *
+ * Was: BackgroundedCard — controlled a *separate* "Backgrounded"
+ *      variant that lived alongside the regular background axis.
+ *
+ * Now: BackgroundSettingsCard — controls how the regular light/dark
+ *      background variants render across every composition. The
+ *      padding here applies to wordmark-only/icon-only/stacked/
+ *      horizontal whenever they sit on a light or dark background.
+ *
+ * The `allowed` field on the saved config is vestigial — the
+ * backgrounds axis itself governs whether light/dark variants exist
+ * (via lightAllowed/darkAllowed below). We always treat it as true
+ * server-side so older policies don't break.
  * ──────────────────────────────────────────────────────────── */
 
 interface BackgroundedConfig {
@@ -1122,7 +1135,7 @@ interface BackgroundedConfig {
   padding: number;
 }
 
-function BackgroundedCard({
+function BackgroundSettingsCard({
   savedConfig,
   workspaceSlug,
   aliasPath,
@@ -1133,17 +1146,17 @@ function BackgroundedCard({
   aliasPath: string;
   onSave: (config: BackgroundedConfig) => Promise<boolean>;
 }) {
-  const [draft, setDraft] = useState<BackgroundedConfig>(savedConfig);
+  // Force allowed=true on load — the master toggle is gone; the
+  // light/dark sub-toggles govern whether each variant exists.
+  const [draft, setDraft] = useState<BackgroundedConfig>({ ...savedConfig, allowed: true });
   const [saving, setSaving] = useState(false);
-  // Which sub-variant the preview shows. Default to whichever variant
-  // is enabled (light first if both, otherwise the enabled one).
   const [previewMode, setPreviewMode] = useState<'light' | 'dark'>(
     savedConfig.lightAllowed ? 'light' : 'dark',
   );
 
-  useEffect(() => { setDraft(savedConfig); }, [savedConfig]);
+  useEffect(() => { setDraft({ ...savedConfig, allowed: true }); }, [savedConfig]);
 
-  const dirty = JSON.stringify(draft) !== JSON.stringify(savedConfig);
+  const dirty = JSON.stringify(draft) !== JSON.stringify({ ...savedConfig, allowed: true });
 
   async function handleSave() {
     setSaving(true);
@@ -1154,113 +1167,99 @@ function BackgroundedCard({
     }
   }
 
-  // Preview shows the icon-only composition (the "bug") backgrounded
-  // — per operator spec, the bug-on-tile is what backgrounded variants
-  // are typically used for (app icons, social avatars on solid bg).
-  const tail = `${workspaceSlug}-icon-full-color-${previewMode}.svg`;
+  // Preview shows the stacked composition on the active background
+  // — most operators see this as the canonical "what does my logo
+  // look like on a brand color" view. (Icon-only on tile is also
+  // common, but stacked exercises both icon AND wordmark padding.)
+  const tail = `${workspaceSlug}-stacked-full-color-${previewMode}.svg`;
   const base = aliasPath
     ? `/${aliasPath}/brand/render/${tail}`
     : `/_ensemble/brand/render/${tail}`;
+  // Live-preview override: bypasses cache so slider drags update
+  // immediately without waiting on the content-hashed render path.
   const params = new URLSearchParams();
-  params.set('backgrounded', '1');
   params.set('backgroundedPadding', String(draft.padding));
   const previewUrl = `${base}?${params.toString()}`;
 
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1 flex-1">
-            <CardTitle className="text-base">Backgrounded lockup</CardTitle>
-            <CardDescription>
-              Wrap the bug in a brand-color tile with padding. Useful for app icons,
-              social embeds, or any context where the logo needs a controlled background.
-            </CardDescription>
-          </div>
-          <Switch
-            checked={draft.allowed}
-            onCheckedChange={(v) => setDraft({ ...draft, allowed: v })}
-          />
+        <div className="space-y-1">
+          <CardTitle className="text-base">Background settings</CardTitle>
+          <CardDescription>
+            Controls how every logo variant renders on a brand-color background
+            (light or dark). The padding here applies to wordmark, icon, stacked,
+            and horizontal lockups whenever they sit on a background. Operators
+            who want zero padding (full-bleed) can slide padding to 0.
+          </CardDescription>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Configuration is hidden when backgrounded is disabled —
-            symmetric with LockupCard. The light/dark sub-toggles,
-            padding slider, and preview only render when the operator
-            has actually enabled this composition. */}
-        {draft.allowed && (
-          <>
-            {/* Live preview — bug on the active background variant. */}
-            <div className="flex items-center justify-center h-32 rounded-md border bg-muted/30 overflow-hidden">
-              <img
-                src={previewUrl}
-                alt="Backgrounded preview"
-                className="max-h-28 max-w-full object-contain"
+        {/* Live preview — stacked composition on the active background. */}
+        <div className="flex items-center justify-center h-32 rounded-md border bg-muted/30 overflow-hidden">
+          <img
+            src={previewUrl}
+            alt="Background preview"
+            className="max-h-28 max-w-full object-contain"
+          />
+        </div>
+
+        {/* Light/Dark sub-variant toggles + preview-mode selector */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-md border p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-medium">Light background</p>
+                <p className="text-[10px] text-muted-foreground">Uses brand-background-light</p>
+              </div>
+              <Switch
+                checked={draft.lightAllowed}
+                onCheckedChange={(v) => setDraft({ ...draft, lightAllowed: v })}
               />
             </div>
-
-            {/* Light/Dark sub-variant toggles + preview-mode selector */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-md border p-3 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-medium">Light tile</p>
-                    <p className="text-[10px] text-muted-foreground">Uses brand-background-light</p>
-                  </div>
-                  <Switch
-                    checked={draft.lightAllowed}
-                    onCheckedChange={(v) => setDraft({ ...draft, lightAllowed: v })}
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant={previewMode === 'light' ? 'default' : 'outline'}
-                  size="sm"
-                  className="w-full h-7 text-xs"
-                  onClick={() => setPreviewMode('light')}
-                >
-                  Preview
-                </Button>
+            <Button
+              type="button"
+              variant={previewMode === 'light' ? 'default' : 'outline'}
+              size="sm"
+              className="w-full h-7 text-xs"
+              onClick={() => setPreviewMode('light')}
+            >
+              Preview
+            </Button>
+          </div>
+          <div className="rounded-md border p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-medium">Dark background</p>
+                <p className="text-[10px] text-muted-foreground">Uses brand-background-dark</p>
               </div>
-              <div className="rounded-md border p-3 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-medium">Dark tile</p>
-                    <p className="text-[10px] text-muted-foreground">Uses brand-background-dark</p>
-                  </div>
-                  <Switch
-                    checked={draft.darkAllowed}
-                    onCheckedChange={(v) => setDraft({ ...draft, darkAllowed: v })}
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant={previewMode === 'dark' ? 'default' : 'outline'}
-                  size="sm"
-                  className="w-full h-7 text-xs"
-                  onClick={() => setPreviewMode('dark')}
-                >
-                  Preview
-                </Button>
-              </div>
+              <Switch
+                checked={draft.darkAllowed}
+                onCheckedChange={(v) => setDraft({ ...draft, darkAllowed: v })}
+              />
             </div>
+            <Button
+              type="button"
+              variant={previewMode === 'dark' ? 'default' : 'outline'}
+              size="sm"
+              className="w-full h-7 text-xs"
+              onClick={() => setPreviewMode('dark')}
+            >
+              Preview
+            </Button>
+          </div>
+        </div>
 
-            <SmoothSlider
-              label="Outer padding"
-              help="Space between the bug and the tile edge"
-              value={draft.padding}
-              min={0} max={2} step={0.01}
-              format={(v) => `${v.toFixed(2)}em`}
-              onChange={(v) => setDraft({ ...draft, padding: v })}
-            />
-          </>
-        )}
+        <SmoothSlider
+          label="Padding"
+          help="Space between the logo and the background edge (applies to every composition with a background)"
+          value={draft.padding}
+          min={0} max={2} step={0.01}
+          format={(v) => `${v.toFixed(2)}em`}
+          onChange={(v) => setDraft({ ...draft, padding: v })}
+        />
 
-        {/* Save row visible when allowed OR dirty (so on→off
-            transitions remain committable). */}
-        {(draft.allowed || dirty) && (
-          <SaveRow dirty={dirty} saving={saving} onSave={handleSave} />
-        )}
+        <SaveRow dirty={dirty} saving={saving} onSave={handleSave} />
       </CardContent>
     </Card>
   );

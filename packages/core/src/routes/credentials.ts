@@ -588,29 +588,27 @@ export function createCredentialsRoutes(): App {
       backgroundedPadding: numQ('backgroundedPadding'),
     };
     const hasOverride = Object.values(overrides).some((v) => v !== undefined);
-    // v0.1.50: Backgrounded variants previously required ?backgrounded=1
-    // which polluted the URL with a GET param. The new grammar bakes
-    // it into the path: a `-bg` token *immediately before* the comp
-    // segment means "backgrounded". Example:
-    //   acme-icon-full-color-light.svg            ← plain icon-only
-    //   acme-bg-icon-full-color-light.svg         ← backgrounded
-    // The token is detected by trying each variant suffix with and
-    // without the bg- prefix; whichever matches wins.
-    const queryBackgrounded = c.req.query('backgrounded') === '1';
+    // v0.1.54: the `-bg-` path prefix is now a no-op alias. Earlier
+    // releases used it to opt into a separate "Backgrounded" tile
+    // variant; v0.1.54 collapsed that distinction — every light/dark
+    // background variant uses the policy's padding setting, so there
+    // is no longer a separate "backgrounded" thing to opt into.
+    //
+    // We still RECOGNIZE the prefix so older distribution URLs in
+    // the wild (decks, emails, partner docs) keep working. The
+    // generated output is identical with or without the prefix.
     const download = c.req.query('download') === '1';
 
     for (const comp of COMPOSITIONS) {
       for (const finish of FINISHES) {
         for (const bg of BGS) {
-          // Try the backgrounded form first so `bg-icon-...` is
-          // recognized as backgrounded icon, not "ends with -icon-..."
-          // on a stem that happens to have bg as part of its slug.
+          // Back-compat: `bg-` prefix still parses, just produces the
+          // same render as the unprefixed form.
           const bgSuffix = `-bg-${comp.slug}-${finish}-${bg}`;
           if (stem.endsWith(bgSuffix)) {
             return handleBrandRender(c, comp.id, finish, bg, {
               download,
               filename,
-              backgrounded: true,
               format,
               overrides: hasOverride ? overrides : undefined,
             });
@@ -620,7 +618,6 @@ export function createCredentialsRoutes(): App {
             return handleBrandRender(c, comp.id, finish, bg, {
               download,
               filename,
-              backgrounded: queryBackgrounded,
               format,
               overrides: hasOverride ? overrides : undefined,
             });
@@ -633,7 +630,7 @@ export function createCredentialsRoutes(): App {
     return c.json({
       error: 'unrecognized_brand_variant_url',
       filename,
-      hint: 'Expected: /brand/<slug>[-bg]-<composition>-<finish>-<bg>.{svg|png} where composition is one of wordmark|icon|stacked|horizontal, finish is full-color|mono-black|mono-white|mono-brand, bg is transparent|light|dark. The optional -bg token marks a backgrounded (tile-wrapped) variant.',
+      hint: 'Expected: /brand/<slug>-<composition>-<finish>-<bg>.{svg|png} where composition is one of wordmark|icon|stacked|horizontal, finish is full-color|mono-black|mono-white|mono-brand, bg is transparent|light|dark. (Light and dark variants automatically use the brand-background padding configured in Brand → Logos → Background settings.)',
     }, 404);
   });
 
@@ -647,7 +644,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.53-favicon-suite-png-downloads',
+      buildFingerprint: 'v0.1.54-unified-backgrounds-neutral-chrome',
       timestamp: new Date().toISOString(),
     });
   });

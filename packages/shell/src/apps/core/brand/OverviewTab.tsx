@@ -554,42 +554,12 @@ function LogoVariantsCard() {
           </div>
         ))}
 
-        {/* v0.1.50: Backgrounded variant row. Renders the bug-on-tile
-            composition for each enabled sub-variant (light/dark). Only
-            shown when the operator has enabled the Backgrounded
-            lockup in policy. Matches the same matrix UX as the other
-            compositions — these are first-class brand assets. */}
-        {policy.policy.backgrounded?.allowed && (
-          <div className="space-y-2">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">
-              backgrounded
-            </p>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {policy.policy.backgrounded.lightAllowed && (
-                <VariantCell
-                  key={`bg-light-${reloadToken}`}
-                  composition="icon-only"
-                  finish={{ id: 'full-color', label: 'Backgrounded' }}
-                  background={{ id: 'light', label: 'Light tile' }}
-                  workspaceSlug={policy.workspaceSlug || 'workspace'}
-                  assetAliasPath={policy.assetAliasPath || ''}
-                  backgrounded
-                />
-              )}
-              {policy.policy.backgrounded.darkAllowed && (
-                <VariantCell
-                  key={`bg-dark-${reloadToken}`}
-                  composition="icon-only"
-                  finish={{ id: 'full-color', label: 'Backgrounded' }}
-                  background={{ id: 'dark', label: 'Dark tile' }}
-                  workspaceSlug={policy.workspaceSlug || 'workspace'}
-                  assetAliasPath={policy.assetAliasPath || ''}
-                  backgrounded
-                />
-              )}
-            </div>
-          </div>
-        )}
+        {/* v0.1.54: separate "Backgrounded" row removed. Light/dark
+            background variants now automatically use the padding
+            configured in Brand → Logos → Background settings, so
+            there's no longer a distinct "backgrounded" concept to
+            display. Operators see one cohesive variants matrix:
+            Composition × Finish × Background. */}
       </CardContent>
     </Card>
   );
@@ -601,7 +571,6 @@ function VariantCell({
   background,
   workspaceSlug,
   assetAliasPath,
-  backgrounded,
 }: {
   composition: CompositionId;
   finish: { id: FinishId; label: string };
@@ -609,11 +578,6 @@ function VariantCell({
   workspaceSlug: string;
   /** Pretty alias path (e.g. 'assets'). Empty → use canonical /_ensemble/. */
   assetAliasPath: string;
-  /** When true, the cell represents a Backgrounded variant — the
-   *  underlying composition is wrapped in a brand-color tile by the
-   *  renderer. We use the icon-only composition slug as the path
-   *  base and rely on the server to interpret the slot. */
-  backgrounded?: boolean;
 }) {
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   // Unified URL model (v0.1.46+): every brand resource lives under
@@ -627,14 +591,8 @@ function VariantCell({
     composition === 'wordmark-only' ? 'wordmark'
     : composition === 'icon-only' ? 'icon'
     : composition;
-  // v0.1.50: Backgrounded variants get a `bg-` token in the path
-  // (NOT a query param) — keeps distribution URLs clean and the
-  // filename itself is still self-describing. Path-style render
-  // route recognizes both `slug-bg-comp-finish-bg` (backgrounded)
-  // and `slug-comp-finish-bg` (plain).
-  const compPart = backgrounded ? `bg-${compShort}` : compShort;
-  const tailSvg = `${workspaceSlug}-${compPart}-${finish.id}-${background.id}.svg`;
-  const tailPng = `${workspaceSlug}-${compPart}-${finish.id}-${background.id}.png`;
+  const tailSvg = `${workspaceSlug}-${compShort}-${finish.id}-${background.id}.svg`;
+  const tailPng = `${workspaceSlug}-${compShort}-${finish.id}-${background.id}.png`;
   const renderUrl = assetAliasPath
     ? `/${assetAliasPath}/brand/render/${tailSvg}`
     : `/_ensemble/brand/render/${tailSvg}`;
@@ -647,15 +605,6 @@ function VariantCell({
     : `/_ensemble/brand/render/${tailPng}`;
   // Same URL — browser auto-saves with the filename from the URL path.
   const downloadUrl = renderUrl;
-
-  // v0.1.50: card chrome is dark only for *regular* dark-background
-  // variants (where the logo sits on a dark background and the card
-  // is showing it in context). Backgrounded variants already encode
-  // their tile color INSIDE the SVG, so the outer card should stay
-  // neutral — otherwise the dark card frame around an already-dark
-  // tile looks like a redundant double-frame, and the action buttons
-  // below disappear into the dark surface.
-  const isDarkBg = background.id === 'dark' && !backgrounded;
 
   async function copyMarkup() {
     try {
@@ -673,25 +622,20 @@ function VariantCell({
     toast.success('URL copied');
   }
 
-  // v0.1.50: dark-card cells need explicit light-on-dark button
-  // styling, otherwise the shadcn `outline` variant uses
-  // foreground-on-background tokens that resolve to white-on-white
-  // (invisible) in the workspace's light theme. We override with
-  // an explicit border + text color so labels stay readable.
-  const buttonClass = isDarkBg
-    ? 'h-7 px-2 text-xs border-zinc-700 bg-zinc-800/50 text-zinc-100 hover:bg-zinc-800 hover:text-zinc-50'
-    : 'h-7 px-2 text-xs';
+  // v0.1.54: every cell uses the same mid-grey #808080 chrome — the
+  // neutral-luminance background designers use for previewing
+  // because it shows true relationships against both light and dark
+  // logo finishes without bias. Replaces the old isDarkBg branching
+  // that was needed when cells reflected the variant's literal
+  // background — that context is now baked into the SVG itself via
+  // the unified backgrounds axis (v0.1.54), so the cell chrome no
+  // longer needs to "match" the variant.
+  const buttonClass = 'h-7 px-2 text-xs border-zinc-500/50 bg-white/80 text-zinc-900 hover:bg-white hover:text-zinc-950';
 
   return (
-    <div
-      className={
-        isDarkBg
-          ? 'rounded-md border p-3 bg-zinc-900 text-zinc-100'
-          : 'rounded-md border p-3 bg-muted/30'
-      }
-    >
+    <div className="rounded-md border p-3" style={{ backgroundColor: '#808080', color: '#0a0a0a' }}>
       <div className="flex items-center justify-between mb-2">
-        <p className="text-[10px] uppercase tracking-wider opacity-70">
+        <p className="text-[10px] uppercase tracking-wider opacity-80">
           {finish.label} · {background.label}
         </p>
       </div>
@@ -857,12 +801,29 @@ interface FaviconSnippetResponse {
 
 function FaviconSuiteCard() {
   const [data, setData] = useState<FaviconSnippetResponse | null>(null);
+  // v0.1.54: same event-driven refresh pattern as LogoVariantsCard.
+  // The browser caches <img> srcs by URL — even though our server
+  // cache is content-hashed and auto-invalidates on icon-mark
+  // changes, the browser doesn't know to re-fetch unless the URL
+  // changes OR the element remounts. reloadToken bumps on every
+  // brand.tokens.changed event; appending it to each preview tile's
+  // React key forces a remount so the operator sees their new icon
+  // reflected here immediately, not after a refresh.
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     authedFetch('/_ensemble/core/brand/favicon-snippet')
       .then((r) => r.json() as Promise<FaviconSnippetResponse>)
       .then(setData)
       .catch(() => { /* admin-only — card hidden for non-admins */ });
+  }, []);
+
+  useEffect(() => {
+    return subscribeWorkspaceEvent((e) => {
+      if (e.type === 'brand.tokens.changed') {
+        setReloadToken((t) => t + 1);
+      }
+    });
   }, []);
 
   if (!data) return null;
@@ -923,7 +884,12 @@ function FaviconSuiteCard() {
           <p className="text-sm font-medium mb-2">Files</p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {files.map((f) => (
-              <div key={f.url} className="rounded-md border p-3 space-y-2">
+              // Append reloadToken to the React key so each tile
+              // remounts when brand.tokens.changed fires — the
+              // <img> tag re-fetches from the URL (whose underlying
+              // server response is already fresh because the
+              // content-hash cache key changed).
+              <div key={`${f.url}-${reloadToken}`} className="rounded-md border p-3 space-y-2">
                 <div className="flex items-center gap-3">
                   {f.previewSize > 0 ? (
                     <img
