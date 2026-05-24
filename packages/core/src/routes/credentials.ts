@@ -660,7 +660,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.67-ai-tier-elements-email-zone-fallback',
+      buildFingerprint: 'v0.1.68-dns-scope-name-translation-chat-completion',
       timestamp: new Date().toISOString(),
     });
   });
@@ -1022,17 +1022,54 @@ export function createCredentialsRoutes(): App {
       return c.json({ scopes });
     }
 
-    // 2. Zone DNS:Edit — list zones (read implies the token can target zones).
+    // 2. Zone:Read — list zones. Required to find the zone for email
+    // domain verification. Doesn't imply DNS-record read access.
     const zonesR = await fetch('https://api.cloudflare.com/client/v4/zones?per_page=1', {
       headers: auth,
     });
     scopes.push({
-      name: 'Zone DNS:Edit',
+      name: 'Zone:Read',
       ok: zonesR.ok,
       detail: zonesR.ok
         ? 'Token can list zones.'
-        : `HTTP ${zonesR.status} — token likely missing Zone DNS scope.`,
+        : `HTTP ${zonesR.status} — token missing Zone:Read scope.`,
     });
+
+    // 3. Zone — DNS:Read — read DNS records inside a zone. This is a
+    // SEPARATE scope from Zone:Read, and is required for email-sending
+    // domain verification (SPF/DKIM record checks). v0.1.68: this used
+    // to be conflated with Zone:Read above, and operators with the
+    // narrower scope saw their email verification fail with an opaque
+    // "DNS read failed: 403" mid-flow.
+    if (zonesR.ok) {
+      const zonesBody = await zonesR.json<{ result?: Array<{ id: string; name: string }> }>();
+      const probeZone = zonesBody.result?.[0];
+      if (probeZone) {
+        const dnsR = await fetch(
+          `https://api.cloudflare.com/client/v4/zones/${probeZone.id}/dns_records?per_page=1`,
+          { headers: auth },
+        );
+        scopes.push({
+          name: 'Zone — DNS:Read',
+          ok: dnsR.ok,
+          detail: dnsR.ok
+            ? `Token can read DNS records (probed zone: ${probeZone.name}).`
+            : `HTTP ${dnsR.status} on zone ${probeZone.name} — token missing Zone:DNS:Read scope. Required for email domain verification.`,
+        });
+      } else {
+        scopes.push({
+          name: 'Zone — DNS:Read',
+          ok: false,
+          detail: 'No zones in this account to probe DNS access against.',
+        });
+      }
+    } else {
+      scopes.push({
+        name: 'Zone — DNS:Read',
+        ok: false,
+        detail: 'Cannot test — Zone:Read failed above.',
+      });
+    }
 
     // 3. Email Routing — list addresses on the account.
     if (accountId) {

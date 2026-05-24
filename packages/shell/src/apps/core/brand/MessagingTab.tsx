@@ -203,12 +203,27 @@ export function MessagingTab() {
     [locales],
   );
 
+  // v0.1.68: translation tier selection. We now treat translation as a
+  // chat-completion task (instruction prompt → output text) rather
+  // than as a dedicated workers-ai translation-model call. That makes
+  // it work with any tier whose provider speaks the openai/anthropic
+  // chat shape — including the smarter, non-workers-ai tiers operators
+  // typically prefer for translation quality.
+  //
+  // Order: smart → good → translate → simple → first chat-capable.
+  // 'custom' is excluded because we don't know its body shape.
   const translationTier = useMemo<AiTier | null>(() => {
-    const named = tiers.find(
-      (t) => t.name === 'translate' && t.provider === 'workers-ai' && t.route_provisioned,
-    );
-    if (named) return named;
-    return tiers.find((t) => t.provider === 'workers-ai' && t.route_provisioned) ?? null;
+    const chatProvider = (t: AiTier) =>
+      (t.provider === 'openai-chat' ||
+        t.provider === 'anthropic-messages' ||
+        t.provider === 'workers-ai') &&
+      t.route_provisioned;
+    const preference = ['smart', 'good', 'translate', 'simple'];
+    for (const name of preference) {
+      const match = tiers.find((t) => t.name === name && chatProvider(t));
+      if (match) return match;
+    }
+    return tiers.find(chatProvider) ?? null;
   }, [tiers]);
 
   // Storage slot for a locale code. Default locale lives in '' so a
@@ -267,26 +282,74 @@ export function MessagingTab() {
         return null;
       }
       try {
+        // v0.1.68: chat-completion style instruction prompt, normalized
+        // across providers. The system message constrains the model to
+        // return ONLY the translation (no preamble, no quotes). Body
+        // shape is picked per provider — every supported provider has
+        // a chat-style API; the gateway dispatches to the right one.
+        const sysPrompt = `You are a professional translator. Translate the user's text from ${bcp47ToHumanName(sourceCode)} to ${bcp47ToHumanName(targetCode)}. Respond with ONLY the translated text — no preamble, no quotes, no explanations.`;
+        const body =
+          translationTier.provider === 'anthropic-messages'
+            ? {
+                model: 'claude-3-5-sonnet-latest',
+                max_tokens: 1024,
+                system: sysPrompt,
+                messages: [{ role: 'user', content: sourceText }],
+              }
+            : translationTier.provider === 'workers-ai'
+              ? {
+                  messages: [
+                    { role: 'system', content: sysPrompt },
+                    { role: 'user', content: sourceText },
+                  ],
+                  max_tokens: 1024,
+                }
+              : {
+                  // openai-chat — the lingua-franca shape. Custom
+                  // providers that don't accept this should be picked
+                  // up by the operator wiring smart/good/translate
+                  // tiers to a chat-capable provider.
+                  messages: [
+                    { role: 'system', content: sysPrompt },
+                    { role: 'user', content: sourceText },
+                  ],
+                  max_tokens: 1024,
+                };
         const r = await authedFetch(`/_ensemble/ai/call/${encodeURIComponent(translationTier.name)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: sourceText,
-            source_lang: bcp47ToHumanName(sourceCode),
-            target_lang: bcp47ToHumanName(targetCode),
-          }),
+          body: JSON.stringify(body),
         });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const body = (await r.json()) as {
-          result?: { translated_text?: string };
+        if (!r.ok) {
+          const errText = await r.text();
+          throw new Error(`HTTP ${r.status}: ${errText.slice(0, 200)}`);
+        }
+        // Parse the response. Multiple shapes supported:
+        //   openai-chat:        { choices: [{ message: { content } }] }
+        //   anthropic-messages: { content: [{ text }] }
+        //   workers-ai chat:    { result: { response } } or { response }
+        //   legacy translation: { result: { translated_text } } or { translated_text }
+        const json = (await r.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+          content?: Array<{ text?: string }>;
+          result?: { response?: string; translated_text?: string };
+          response?: string;
           translated_text?: string;
         };
-        const out = body.result?.translated_text ?? body.translated_text;
+        const out =
+          json.choices?.[0]?.message?.content ??
+          json.content?.[0]?.text ??
+          json.result?.response ??
+          json.response ??
+          json.result?.translated_text ??
+          json.translated_text;
         if (!out) {
-          toast.error('Translation returned no text');
+          toast.error('Translation returned no text', {
+            description: 'The AI tier responded but no translated content was found. Check the tier\'s model configuration in Cloudflare.',
+          });
           return null;
         }
-        return out;
+        return out.trim();
       } catch (e) {
         toast.error('Translation failed', {
           description: e instanceof Error ? e.message : String(e),

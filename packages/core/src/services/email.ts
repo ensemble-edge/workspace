@@ -197,7 +197,19 @@ async function verifyViaCloudflare(env: Env, workspaceId: string): Promise<Verif
     `https://api.cloudflare.com/client/v4/zones/${zone.id}/dns_records?type=TXT&per_page=200`,
     { headers: { Authorization: `Bearer ${cfToken}` } },
   );
-  if (!dnsR.ok) return { status: 'failed', message: `DNS read failed: ${dnsR.status}` };
+  if (!dnsR.ok) {
+    // v0.1.68: name the missing scope so the operator knows exactly
+    // which permission to add to their Cloudflare API token. 403 on
+    // dns_records means the token can list zones (it found ${zone.name})
+    // but cannot read DNS records inside them.
+    if (dnsR.status === 403 || dnsR.status === 401) {
+      return {
+        status: 'failed',
+        message: `Cloudflare API token is missing "Zone — DNS:Read" permission for zone ${zone.name}. Add it at dash.cloudflare.com → My Profile → API Tokens.`,
+      };
+    }
+    return { status: 'failed', message: `DNS read failed: HTTP ${dnsR.status} for zone ${zone.name}` };
+  }
   const dnsBody = await dnsR.json<{ result?: Array<{ name: string; content: string }> }>();
   const records = dnsBody.result ?? [];
 
