@@ -653,7 +653,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.63-uniform-padding-white-black-toggles-live-tile-preview',
+      buildFingerprint: 'v0.1.64-tile-flex-shrink-zero-border-box',
       timestamp: new Date().toISOString(),
     });
   });

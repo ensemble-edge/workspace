@@ -362,18 +362,26 @@ export interface BackgroundedInputs {
 export function wrapInBackground(inputs: BackgroundedInputs): SatoriElement {
   const paddingPx = WORDMARK_SIZE_PX * inputs.paddingEm;
   const isGradient = /^(linear|radial)-gradient\(/.test(inputs.tileColor);
-  // v0.1.63: explicit pixel dimensions from caller. v0.1.62 used
-  // width:'100%' / height:'100%' to stretch the tile to fill the
-  // canvas, but Satori's percentage resolution was inconsistent
-  // across flex contexts — yielding tile sizes that varied across
-  // variants of the same composition and made the padding slider
-  // appear inert in the live preview. Explicit pixel dims (passed by
-  // produceAsset, sourced from canvasSize()) remove ambiguity and
-  // guarantee identical layout across every background variant.
+  // v0.1.64: critical Satori fix for non-square canvases. v0.1.63
+  // passed explicit pixel dimensions but Satori's flex layout shrank
+  // the tile to fit the inner lockup whenever the canvas was wider
+  // than tall (horizontal/stacked compositions). Two additions:
+  //
+  //   • flexShrink:0 — tell Satori not to collapse this element below
+  //     its declared width/height when its inner content is smaller.
+  //   • boxSizing:'border-box' — padding lives INSIDE the declared
+  //     dimensions, not outside. Otherwise the tile would exceed the
+  //     canvas (canvas 1536×768 + padding 64 → tile 1664×896).
+  //
+  // With both set, the tile fills the canvas uniformly across every
+  // composition × background combination, and padding is the visible
+  // inner whitespace between logo and tile edge.
   const style: Record<string, unknown> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    boxSizing: 'border-box',
+    flexShrink: 0,
     width: inputs.canvasWidth,
     height: inputs.canvasHeight,
     padding: paddingPx,
