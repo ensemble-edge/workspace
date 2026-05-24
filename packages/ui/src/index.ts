@@ -275,6 +275,22 @@ export type { WordmarkProps, WordmarkSegment } from "./components/ensemble/wordm
 export { FontCombobox } from "./components/ensemble/font-combobox";
 export type { FontComboboxProps, FontComboboxOption } from "./components/ensemble/font-combobox";
 
+// BrandCard - unified brand color display (palettes + neutral + gradients + semantic).
+// Same component, two consumers: Brand Overview tab (display mode) and the
+// /brand public guide (display mode) + Brand Colors editor tab (edit mode).
+export { BrandCard } from "./components/brand/BrandCard";
+export type {
+  BrandCardProps, BrandCardData, BrandCardMode, BrandCardSize,
+  BrandCardPalette, BrandCardGradient, BrandCardSemanticPair,
+  ResolvedPalette, ResolvedPalettes,
+} from "./components/brand/BrandCard";
+
+// BrandTokenPicker - token-first picker (palette rungs + optional hex / auto / system).
+// Used by theme binding editors and gradient stop editors where the operator
+// should pick from the workspace's known tokens rather than a raw hex.
+export { BrandTokenPicker } from "./components/brand/BrandTokenPicker";
+export type { BrandTokenPickerProps } from "./components/brand/BrandTokenPicker";
+
 // Future components:
 // export { NavItem } from "./components/ensemble/nav-item";
 // export { FilterBar } from "./components/ensemble/filter-bar";

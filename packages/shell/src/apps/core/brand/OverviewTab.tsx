@@ -24,9 +24,10 @@ import {
   Skeleton,
   Separator,
   Wordmark,
+  BrandCard,
   toast,
 } from '@ensemble-edge/ui';
-import type { WordmarkSegment } from '@ensemble-edge/ui';
+import type { WordmarkSegment, BrandCardData } from '@ensemble-edge/ui';
 
 import { getRelativeLuminance } from './color-utils';
 import { authedFetch } from '../../../state';
@@ -195,61 +196,12 @@ export function OverviewTab() {
         </CardContent>
       </Card>
 
-      {/* Color Palette */}
-      {hasColors && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2">
-              <Palette className="h-5 w-5" /> Color Palette
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {spec.colors.groups.map((group) => (
-              <div key={group.slug}>
-                <p className="text-sm font-medium text-muted-foreground mb-2">{group.label}</p>
-                <div className="flex gap-1 overflow-hidden rounded-lg">
-                  {Object.entries(group.shades)
-                    .sort(([a], [b]) => {
-                      const numA = Number(a), numB = Number(b);
-                      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
-                      return a.localeCompare(b);
-                    })
-                    .map(([shade, hex]) => {
-                      const lum = getRelativeLuminance(hex);
-                      return (
-                        <div
-                          key={shade}
-                          className="flex flex-1 h-12 items-end justify-center pb-1 text-[10px] font-medium min-w-[32px]"
-                          style={{ backgroundColor: hex, color: lum < 0.5 ? '#fff' : '#000' }}
-                          title={`${group.slug}-${shade}: ${hex}`}
-                        >
-                          {shade}
-                        </div>
-                      );
-                    })}
-                </div>
-              </div>
-            ))}
-
-            {/* Semantic */}
-            <div>
-              <p className="text-sm font-medium text-muted-foreground mb-2">Semantic</p>
-              <div className="flex gap-2">
-                {(['success', 'warning', 'error', 'info'] as const).map((key) => {
-                  const hex = spec.colors.semantic[key];
-                  if (!hex) return null;
-                  return (
-                    <div key={key} className="flex items-center gap-2">
-                      <div className="h-6 w-6 rounded" style={{ backgroundColor: hex }} />
-                      <span className="text-xs text-muted-foreground capitalize">{key}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* v0.1.55: Brand colors — unified BrandCard display.
+          Replaces the old "Color Palette" Card with the new five-rung
+          palettes + neutral + gradients + semantic layout. Same
+          component renders on /brand public guide too, so what
+          operators see here is what external collaborators see. */}
+      <BrandColorsSection />
 
       {/* Typography specimen — full width, renders every content role at
           its real brand tokens (family/weight/size/letter-spacing/case)
@@ -930,6 +882,66 @@ function FaviconSuiteCard() {
           your icon in Brand → Logos and the entire suite re-renders the
           next time anyone loads it. No re-deploy needed.
         </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * BrandColorsSection — Overview tab's color display
+ *
+ * Mounts <BrandCard mode="display"> against the same /resolved
+ * endpoint the editor + /brand public guide consume. Subscribes
+ * to brand.tokens.changed so it refetches when the operator saves.
+ * ──────────────────────────────────────────────────────────── */
+
+function BrandColorsSection() {
+  const [data, setData] = useState<BrandCardData | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    authedFetch('/_ensemble/core/brand/colors-doc/resolved')
+      .then((r) => r.json() as Promise<{
+        doc: { palettes: BrandCardData['palettes']; semantic: BrandCardData['semantic'] };
+        palettes: BrandCardData['resolvedPalettes'];
+        gradients: BrandCardData['gradients'];
+        onColor: BrandCardData['onColor'];
+      }>)
+      .then((res) => {
+        if (cancelled) return;
+        setData({
+          palettes: res.doc.palettes,
+          resolvedPalettes: res.palettes,
+          onColor: res.onColor,
+          gradients: res.gradients,
+          semantic: res.doc.semantic,
+        });
+      })
+      .catch(() => { /* card hidden on error */ });
+    return () => { cancelled = true; };
+  }, [reloadToken]);
+
+  useEffect(() => {
+    return subscribeWorkspaceEvent((e) => {
+      if (e.type === 'brand.tokens.changed') {
+        setReloadToken((t) => t + 1);
+      }
+    });
+  }, []);
+
+  if (!data) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>Brand colors</CardTitle>
+        <CardDescription>
+          Palettes, gradients, and semantic colors. Configure in <strong>Brand → Colors</strong>.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <BrandCard data={data} mode="display" />
       </CardContent>
     </Card>
   );

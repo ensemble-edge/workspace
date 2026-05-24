@@ -261,6 +261,88 @@ export function registerBrandRoutes(
     }
   });
 
+  /* ──────────────────────────────────────────────────────────────
+   * v0.1.55 — Brand Colors Doc (palettes + themes + gradients + semantic)
+   *
+   * Single-document model replacing the sprawl of per-token rows.
+   * Stored as one JSON blob in brand_tokens; read via the resolver
+   * to produce concrete hex maps.
+   * ──────────────────────────────────────────────────────────── */
+
+  /** GET /_ensemble/core/brand/colors-doc — return the typed doc. */
+  app.get('/_ensemble/core/brand/colors-doc', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    const { loadBrandColors } = await import('../../../services/brand-colors/load');
+    const doc = await loadBrandColors(c.env.DB, workspace.id);
+    return c.json({ doc });
+  });
+
+  /** PUT /_ensemble/core/brand/colors-doc — atomic save.
+   *  Body: { doc: BrandColorsDoc } */
+  app.put('/_ensemble/core/brand/colors-doc', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    const body = await c.req.json().catch(() => ({})) as { doc?: unknown };
+    if (!body.doc || typeof body.doc !== 'object') {
+      return c.json({ error: 'doc required' }, 400);
+    }
+    const { loadBrandColors } = await import('../../../services/brand-colors/load');
+    const { saveBrandColors, diffBrandColors } = await import('../../../services/brand-colors/save');
+    const prev = await loadBrandColors(c.env.DB, workspace.id);
+    const next = body.doc as import('../../../services/brand-colors/schema').BrandColorsDoc;
+    await saveBrandColors(c.env.DB, workspace.id, next);
+    const diff = diffBrandColors(prev, next);
+    return c.json({ ok: true, diff });
+  });
+
+  /** POST /_ensemble/core/brand/colors-doc/generate-dark — synthesize
+   *  Dark theme from Light + palettes. Does NOT save; returns the
+   *  generated theme so the client can stage it as a draft. */
+  app.post('/_ensemble/core/brand/colors-doc/generate-dark', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    const { loadBrandColors } = await import('../../../services/brand-colors/load');
+    const { generateDarkTheme } = await import('../../../services/brand-colors/generate-dark');
+    const doc = await loadBrandColors(c.env.DB, workspace.id);
+    const result = generateDarkTheme(doc);
+    return c.json(result);
+  });
+
+  /** GET /_ensemble/core/brand/colors-doc/resolved — convenience
+   *  endpoint that returns the doc PLUS the fully resolved palettes
+   *  and themes (every rung → hex, every binding → hex). Used by
+   *  the BrandCard so the client doesn't have to import the
+   *  resolver + culori. */
+  app.get('/_ensemble/core/brand/colors-doc/resolved', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    const { loadBrandColors } = await import('../../../services/brand-colors/load');
+    const { resolvePalettes, resolveTheme, resolveStopValue, onColorForeground }
+      = await import('../../../services/brand-colors/resolver');
+    const doc = await loadBrandColors(c.env.DB, workspace.id);
+    const palettes = resolvePalettes(doc);
+    const themeLight = resolveTheme(doc.themes.light.bindings, palettes);
+    const themeDark = doc.themes.dark
+      ? resolveTheme(doc.themes.dark.bindings, palettes)
+      : null;
+    // Resolve gradient stops too so the client can render previews
+    // without re-implementing the resolver.
+    const gradients = doc.gradients.map((g) => ({
+      ...g,
+      resolvedStops: g.stops.map((s) => ({ token: s, hex: resolveStopValue(s, palettes) })),
+    }));
+    // On-color foregrounds for each palette Main — used by the
+    // palette face text color.
+    const onColor = {
+      primary: onColorForeground('primary', palettes),
+      secondary: onColorForeground('secondary', palettes),
+      accent: onColorForeground('accent', palettes),
+      neutral: onColorForeground('neutral', palettes),
+    };
+    return c.json({ doc, palettes, themeLight, themeDark, gradients, onColor });
+  });
+
   // ── Google Fonts catalog (v0.1.17) ─────────────────────────────────
   //
   // Proxies fonts.google.com/metadata/fonts and caches the normalized

@@ -1,571 +1,930 @@
 /**
- * Colors Tab — Named color groups with visual swatch editor.
+ * Colors Tab — v0.1.55 rewrite.
  *
- * Each group (e.g., "Slate", "Gold", "Vermillion") has a name,
- * a base color, and auto-generated shades that can be manually overridden.
- * Semantic colors (success/error/warning/info) are a built-in group.
+ * The editor for the workspace's BrandColorsDoc. Renders the new
+ * unified <BrandCard mode="edit"> for the palette/neutral/gradients/
+ * semantic display, plus a separate Themes section underneath for
+ * the light/dark theme bindings (which aren't part of the BrandCard
+ * by spec — they're configuration that *affects* what the card
+ * shows, not part of the card itself).
+ *
+ * Architecture:
+ *   - Operator's edits go into local `draft` state
+ *   - "Save" PUT to /_ensemble/core/brand/colors-doc commits + emits
+ *     brand.tokens.changed with the diff payload
+ *   - Discard reverts draft to last-saved
+ *
+ * Server resolves palettes + themes + gradients via the resolver,
+ * but for live editing we need to re-resolve locally as the operator
+ * types. We call /resolved on load and then re-call on save.
  */
 
 import * as React from 'react';
-import { useState, useEffect } from 'react';
-import { Plus, Trash2, GripVertical } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Sun, Moon, Wand2, Plus, Trash2, Undo2 } from 'lucide-react';
 
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
   Button,
   Input,
   Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Popover,
   PopoverContent,
   PopoverTrigger,
-  Separator,
   SaveStatus,
+  BrandCard,
+  BrandTokenPicker,
   toast,
 } from '@ensemble-edge/ui';
+import type {
+  BrandCardData, BrandCardGradient,
+  ResolvedPalettes,
+} from '@ensemble-edge/ui';
 
-import { generatePalette, getRelativeLuminance, autoForeground } from './color-utils';
 import { authedFetch, emitWorkspaceEvent } from '../../../state';
 import { useFormStatus } from '../../../hooks/useFormStatus';
 
-interface ColorGroup {
-  slug: string;
-  label: string;
-  colors: Record<string, string>;
+/* ──────────────────────────────────────────────────────────────
+ * Local mirror of core's BrandColorsDoc types
+ *
+ * We could import from @ensemble-edge/core but shell ↔ core type
+ * imports historically cause workspace-build issues. Local
+ * declarations stay structurally compatible with the server.
+ * ──────────────────────────────────────────────────────────── */
+
+type RungName = 'dark' | 'main' | 'bright' | 'pastel' | 'faded';
+type PaletteRole = 'primary' | 'secondary' | 'accent' | 'neutral';
+type PaletteRungRef = `${PaletteRole}-${RungName}`;
+
+interface Palette {
+  name: string;
+  main: string;
+  overrides?: Partial<Record<Exclude<RungName, 'main'>, string>>;
 }
 
-interface SavedToken {
-  key: string;
-  value: string;
-  group_slug: string | null;
-  label: string | null;
+interface NeutralPalette extends Palette {
+  hueMode: 'branded' | 'warm' | 'cool' | 'true';
 }
+
+interface Gradient {
+  slug: string;
+  name: string;
+  stops: string[];
+  mode: 'linear' | 'radial';
+  angle: 0 | 45 | 90 | 135 | 180;
+}
+
+interface ThemeBindings {
+  canvas: string;
+  surface: string;
+  'text-primary': string;
+  'text-muted': string;
+  brand: string;
+  'brand-bg': string;
+  border: string;
+}
+
+interface Theme {
+  bindings: ThemeBindings;
+}
+
+interface SemanticPair { main: string; light: string; }
+interface SemanticColors {
+  success: SemanticPair;
+  info: SemanticPair;
+  warning: SemanticPair;
+  error: SemanticPair;
+}
+
+interface BrandColorsDoc {
+  version: 1;
+  palettes: {
+    primary: Palette;
+    secondary: Palette;
+    accent: Palette;
+    neutral: NeutralPalette;
+  };
+  gradients: Gradient[];
+  themes: { light: Theme; dark?: Theme };
+  semantic: SemanticColors;
+}
+
+interface ResolvedTheme {
+  canvas: string;
+  surface: string;
+  'text-primary': string;
+  'text-muted': string;
+  brand: string;
+  'brand-bg': string;
+  border: string;
+}
+
+interface ResolvedDocResponse {
+  doc: BrandColorsDoc;
+  palettes: ResolvedPalettes;
+  themeLight: ResolvedTheme;
+  themeDark: ResolvedTheme | null;
+  gradients: BrandCardGradient[];
+  onColor: Record<PaletteRole, { hex: string; usedFallback: boolean }>;
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Slug helper for new gradients
+ * ──────────────────────────────────────────────────────────── */
+
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || `gradient-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Theme binding labels (display names for the seven roles)
+ * ──────────────────────────────────────────────────────────── */
+
+const THEME_BINDING_LABELS: Array<{ key: keyof ThemeBindings; label: string; description: string; allowAuto: boolean }> = [
+  { key: 'canvas',       label: 'Canvas',       description: 'Page background',                              allowAuto: false },
+  { key: 'surface',      label: 'Surface',      description: 'Cards, modals, raised areas',                  allowAuto: false },
+  { key: 'text-primary', label: 'Text',         description: 'Default foreground text',                      allowAuto: true  },
+  { key: 'text-muted',   label: 'Text muted',   description: 'Secondary, helper text',                       allowAuto: true  },
+  { key: 'brand',        label: 'Brand',        description: 'Brand foreground (button fills, link color)',  allowAuto: false },
+  { key: 'brand-bg',     label: 'Brand bg',     description: 'Subtle brand-tinted surfaces',                 allowAuto: false },
+  { key: 'border',       label: 'Border',       description: 'Hairline borders, dividers',                   allowAuto: false },
+];
+
+/* ──────────────────────────────────────────────────────────────
+ * Main component
+ * ──────────────────────────────────────────────────────────── */
 
 export function ColorsTab() {
-  // Brand core colors (required — auto-generate palettes)
-  const [brandPrimary, setBrandPrimary] = useState('#3b82f6');
-  const [brandSecondary, setBrandSecondary] = useState('#1e293b');
-  const [brandAccent, setBrandAccent] = useState('#ef4444');
+  const [resolved, setResolved] = useState<ResolvedDocResponse | null>(null);
+  const [draft, setDraft] = useState<BrandColorsDoc | null>(null);
+  const [saved, setSaved] = useState<BrandColorsDoc | null>(null);
+  const status = useFormStatus({ value: draft, mode: 'manual' });
+  // One-shot undo for "Generate from light" — when set, the Undo
+  // button reverts dark theme to this snapshot.
+  const [undoDarkSnapshot, setUndoDarkSnapshot] = useState<Theme | null | undefined>(undefined);
 
-  // v0.1.32+: theme-readiness foundation. Required for the brand-asset
-  // generator to produce dark-mode logo variants and for the brand
-  // guide to render the approved finish × background matrix. Operator
-  // sets the canonical light + dark backgrounds; foregrounds auto-
-  // derive (black on light, white on dark) but operator can override.
-  const [brandBgLight, setBrandBgLight] = useState('#ffffff');
-  const [brandBgDark, setBrandBgDark] = useState('#0a0a0a');
-  const [brandFgLight, setBrandFgLight] = useState('');  // empty = auto-derive
-  const [brandFgDark, setBrandFgDark] = useState('');    // empty = auto-derive
-
-  const [groups, setGroups] = useState<ColorGroup[]>([]);
-  const [semanticColors, setSemanticColors] = useState({
-    success: '#5B8A72',
-    'success-light': '#E8F5EE',
-    info: '#6B8FAD',
-    'info-light': '#EBF2F7',
-    warning: '#CB9661',
-    'warning-light': '#FEF3E7',
-    error: '#C62828',
-    'error-light': '#FDEAEA',
-  });
-  const [loaded, setLoaded] = useState(false);
-  const status = useFormStatus({
-    value: {
-      brandPrimary, brandSecondary, brandAccent,
-      brandBgLight, brandBgDark, brandFgLight, brandFgDark,
-      groups, semanticColors,
-    },
-    mode: 'manual',
-  });
-  const saving = status.state === 'saving';
-
-  // Load saved color groups + tokens from DB
-  useEffect(() => {
-    Promise.all([
-      authedFetch('/_ensemble/core/brand/groups').then((r) => r.json() as Promise<{ data?: Array<{ slug: string; label: string; category: string }> }>),
-      authedFetch('/_ensemble/core/brand/tokens/colors').then((r) => r.json() as Promise<{ data?: SavedToken[] }>),
-    ]).then(([groupsRes, tokensRes]) => {
-      const savedGroups = (groupsRes.data || []).filter((g) => g.category === 'colors');
-      const savedTokens = tokensRes.data || [];
-
-      // Build color groups from saved tokens
-      const groupMap = new Map<string, ColorGroup>();
-      for (const g of savedGroups) {
-        groupMap.set(g.slug, { slug: g.slug, label: g.label, colors: {} });
-      }
-
-      for (const token of savedTokens) {
-        if (token.group_slug && groupMap.has(token.group_slug)) {
-          const shade = token.key.split('.').slice(1).join('.');
-          if (shade) {
-            groupMap.get(token.group_slug)!.colors[shade] = token.value;
-          }
-        } else if (token.key.startsWith('semantic.')) {
-          const semanticKey = token.key.replace('semantic.', '');
-          setSemanticColors((prev) => ({ ...prev, [semanticKey]: token.value }));
-        } else if (token.key === 'brand-primary') {
-          setBrandPrimary(token.value);
-        } else if (token.key === 'brand-secondary') {
-          setBrandSecondary(token.value);
-        } else if (token.key === 'brand-accent') {
-          setBrandAccent(token.value);
-        } else if (token.key === 'brand-background-light') {
-          setBrandBgLight(token.value);
-        } else if (token.key === 'brand-background-dark') {
-          setBrandBgDark(token.value);
-        } else if (token.key === 'brand-foreground-light') {
-          setBrandFgLight(token.value);
-        } else if (token.key === 'brand-foreground-dark') {
-          setBrandFgDark(token.value);
-        }
-      }
-
-      const loadedGroups = Array.from(groupMap.values());
-      setGroups(loadedGroups.length > 0 ? loadedGroups : getDefaultGroups());
-      setLoaded(true);
-    }).catch(() => {
-      setGroups(getDefaultGroups());
-      setLoaded(true);
-    });
+  /** Reload from server (initial mount + after save). */
+  const reload = useCallback(async () => {
+    try {
+      const r = await authedFetch('/_ensemble/core/brand/colors-doc/resolved');
+      const data = await r.json() as ResolvedDocResponse;
+      setResolved(data);
+      setDraft(data.doc);
+      setSaved(data.doc);
+      status.resetBaseline(data.doc);
+    } catch (err) {
+      toast.error('Failed to load brand colors', {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Snapshot the loaded values as the dirty-tracking baseline. Run in
-  // a separate effect keyed off `loaded` so it fires after React has
-  // re-rendered with the loaded state — avoiding the closure-staleness
-  // bug where a microtask reset reads the pre-load defaults.
-  useEffect(() => {
-    if (!loaded) return;
-    status.resetBaseline({
-      brandPrimary, brandSecondary, brandAccent,
-      brandBgLight, brandBgDark, brandFgLight, brandFgDark,
-      groups, semanticColors,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded]);
+  useEffect(() => { reload(); }, [reload]);
 
-  // Save a brand core color + auto-generate its palette as a color group
-  const updateBrandColor = async (key: string, value: string, setter: (v: string) => void) => {
-    setter(value);
-    try {
-      // Save the token
-      await authedFetch('/_ensemble/brand/tokens', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category: 'colors', tokens: { [key]: value } }),
-      });
-      // Auto-generate palette and save as color group
-      const palette = generatePalette(value);
-      const slug = key.replace('brand-', '');
-      const label = slug.charAt(0).toUpperCase() + slug.slice(1);
-      await authedFetch('/_ensemble/core/brand/colors', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ group: slug, label, colors: palette }),
-      });
-      // Update local groups state
-      setGroups((prev) => {
-        const existing = prev.findIndex((g) => g.slug === slug);
-        const newGroup: ColorGroup = { slug, label, colors: palette };
-        if (existing >= 0) {
-          const updated = [...prev];
-          updated[existing] = newGroup;
-          return updated;
-        }
-        return [newGroup, ...prev];
-      });
-
-      // If workspace theme is "brand", reload CSS so changes propagate
-      const newLink = document.createElement('link');
-      newLink.rel = 'stylesheet';
-      newLink.href = `/_ensemble/brand/css?t=${Date.now()}`;
-      newLink.onload = () => {
-        const old = document.querySelector('link[href*="/_ensemble/brand/css"]:not([href="' + newLink.href + '"])') as HTMLLinkElement | null;
-        if (old) old.remove();
-      };
-      document.head.appendChild(newLink);
-    } catch {
-      toast.error('Failed to save brand color');
-    }
-  };
-
-  const addGroup = () => {
-    const slug = `color-${Date.now()}`;
-    setGroups([...groups, { slug, label: 'New Color', colors: { '500': '#6366f1' } }]);
-  };
-
-  const removeGroup = (slug: string) => {
-    setGroups(groups.filter((g) => g.slug !== slug));
-  };
-
-  const updateGroupLabel = (slug: string, label: string) => {
-    setGroups(groups.map((g) => g.slug === slug ? { ...g, label } : g));
-  };
-
-  const updateGroupColor = (slug: string, shade: string, value: string) => {
-    setGroups(groups.map((g) =>
-      g.slug === slug ? { ...g, colors: { ...g.colors, [shade]: value } } : g
-    ));
-  };
-
-  const addShade = (slug: string) => {
-    const group = groups.find((g) => g.slug === slug);
-    if (!group) return;
-    const existingShades = Object.keys(group.colors).map(Number).filter((n) => !isNaN(n));
-    const nextShade = existingShades.length > 0 ? Math.max(...existingShades) + 100 : 100;
-    updateGroupColor(slug, String(nextShade), '#888888');
-  };
-
-  const removeShade = (slug: string, shade: string) => {
-    setGroups(groups.map((g) => {
-      if (g.slug !== slug) return g;
-      const { [shade]: _, ...rest } = g.colors;
-      return { ...g, colors: rest };
+  /* ──────────────────────────────────────────────────────────
+   * Live-resolve draft for the BrandCard preview
+   *
+   * The card needs `palettes`, `gradients` (with resolved stops),
+   * and `onColor`. We compute these locally from `draft` so the
+   * preview updates as the operator types, without a server round-
+   * trip per keystroke. The resolution math is duplicated client-
+   * side via tiny helpers — kept simple because Satori isn't in
+   * scope on the client; we just need approximate OkLCh rung math.
+   * ────────────────────────────────────────────────────────── */
+  const cardData: BrandCardData | null = useMemo(() => {
+    if (!draft || !resolved) return null;
+    // For each palette, build a Resolved object from draft.main +
+    // overrides + a local OkLCh derivation. We rely on the server's
+    // last-resolved palette as a fallback when overrides are absent
+    // and the operator hasn't changed Main since last load.
+    const localResolve = (role: PaletteRole): Record<RungName, string> => {
+      const p = draft.palettes[role];
+      const serverPalette = resolved.palettes[role];
+      // If the operator hasn't changed Main since last load, use the
+      // server-resolved rungs (which used the same OkLCh math we
+      // would here). Cheaper + identical for the no-change path.
+      if (p.main.toLowerCase() === resolved.doc.palettes[role].main.toLowerCase()
+          && JSON.stringify(p.overrides ?? {}) === JSON.stringify(resolved.doc.palettes[role].overrides ?? {})) {
+        return serverPalette;
+      }
+      // Otherwise derive client-side via the same OkLCh offsets.
+      return clientDeriveRungs(p.main, p.overrides);
+    };
+    const palettes: ResolvedPalettes = {
+      primary: localResolve('primary'),
+      secondary: localResolve('secondary'),
+      accent: localResolve('accent'),
+      neutral: localResolve('neutral'),
+    };
+    const gradients: BrandCardGradient[] = draft.gradients.map((g) => ({
+      slug: g.slug,
+      name: g.name,
+      mode: g.mode,
+      angle: g.angle,
+      resolvedStops: g.stops.map((s) => ({ token: s, hex: resolveStopLocal(s, palettes) })),
     }));
-  };
+    const onColor: BrandCardData['onColor'] = {
+      primary: onColorLocal(palettes.primary.main, palettes.primary.faded),
+      secondary: onColorLocal(palettes.secondary.main, palettes.secondary.faded),
+      accent: onColorLocal(palettes.accent.main, palettes.accent.faded),
+      neutral: onColorLocal(palettes.neutral.main, palettes.neutral.faded),
+    };
+    return {
+      palettes: draft.palettes,
+      resolvedPalettes: palettes,
+      onColor,
+      gradients,
+      semantic: draft.semantic,
+    };
+  }, [draft, resolved]);
 
-  const generateFromBase = (slug: string) => {
-    const group = groups.find((g) => g.slug === slug);
-    if (!group) return;
-    // Find the "500" shade or first shade as base
-    const base = group.colors['500'] || Object.values(group.colors)[0] || '#6366f1';
-    const palette = generatePalette(base);
-    const newColors: Record<string, string> = {};
-    for (const [shade, hex] of Object.entries(palette)) {
-      newColors[shade] = hex;
+  if (!draft || !resolved || !cardData) {
+    return <div className="p-8 text-center text-sm text-muted-foreground">Loading brand colors…</div>;
+  }
+
+  /* ──────────────────────────────────────────────────────────
+   * Edit handlers — wired into BrandCard's mode="edit" props
+   * ────────────────────────────────────────────────────────── */
+
+  function updatePaletteName(role: PaletteRole, name: string) {
+    setDraft((d) => d && ({ ...d, palettes: { ...d.palettes, [role]: { ...d.palettes[role], name } } }));
+  }
+  function updatePaletteMain(role: PaletteRole, hex: string) {
+    setDraft((d) => d && ({ ...d, palettes: { ...d.palettes, [role]: { ...d.palettes[role], main: hex } } }));
+  }
+  function updateRungOverride(role: PaletteRole, rung: Exclude<RungName, 'main'>, hex: string | null) {
+    setDraft((d) => {
+      if (!d) return d;
+      const p = d.palettes[role];
+      const overrides = { ...(p.overrides ?? {}) };
+      if (hex === null) delete overrides[rung];
+      else overrides[rung] = hex;
+      return { ...d, palettes: { ...d.palettes, [role]: { ...p, overrides } } };
+    });
+  }
+  function updateNeutralHueMode(mode: 'branded' | 'warm' | 'cool' | 'true') {
+    setDraft((d) => d && ({ ...d, palettes: { ...d.palettes, neutral: { ...d.palettes.neutral, hueMode: mode } } }));
+  }
+  function updateGradientName(slug: string, name: string) {
+    setDraft((d) => d && ({ ...d, gradients: d.gradients.map((g) => g.slug === slug ? { ...g, name } : g) }));
+  }
+  function updateSemantic(role: 'success' | 'info' | 'warning' | 'error', which: 'main' | 'light', hex: string) {
+    setDraft((d) => d && ({ ...d, semantic: { ...d.semantic, [role]: { ...d.semantic[role], [which]: hex } } }));
+  }
+
+  /* ──────────────────────────────────────────────────────────
+   * Gradient builder
+   * ────────────────────────────────────────────────────────── */
+
+  function addGradient() {
+    setDraft((d) => {
+      if (!d) return d;
+      if (d.gradients.length >= 5) {
+        toast.error('Maximum 5 gradients reached', {
+          description: 'Override a palette rung or compose from existing stops instead.',
+        });
+        return d;
+      }
+      const newG: Gradient = {
+        slug: slugify(`gradient ${d.gradients.length + 1}`),
+        name: `Gradient ${d.gradients.length + 1}`,
+        stops: ['primary-main', 'primary-pastel'],
+        mode: 'linear',
+        angle: 90,
+      };
+      return { ...d, gradients: [...d.gradients, newG] };
+    });
+  }
+  function removeGradient(slug: string) {
+    setDraft((d) => d && ({ ...d, gradients: d.gradients.filter((g) => g.slug !== slug) }));
+  }
+  function updateGradient(slug: string, patch: Partial<Gradient>) {
+    setDraft((d) => d && ({ ...d, gradients: d.gradients.map((g) => g.slug === slug ? { ...g, ...patch } : g) }));
+  }
+
+  /* ──────────────────────────────────────────────────────────
+   * Theme bindings
+   * ────────────────────────────────────────────────────────── */
+
+  function updateThemeBinding(theme: 'light' | 'dark', key: keyof ThemeBindings, value: string) {
+    setDraft((d) => {
+      if (!d) return d;
+      if (theme === 'dark' && !d.themes.dark) {
+        // Auto-create dark theme on first edit
+        return {
+          ...d,
+          themes: {
+            ...d.themes,
+            dark: { bindings: { ...d.themes.light.bindings, canvas: value === undefined ? d.themes.light.bindings.canvas : value, [key]: value } },
+          },
+        };
+      }
+      const t = theme === 'light' ? d.themes.light : d.themes.dark!;
+      return {
+        ...d,
+        themes: {
+          ...d.themes,
+          [theme]: { bindings: { ...t.bindings, [key]: value } },
+        },
+      };
+    });
+  }
+
+  async function generateDarkFromLight() {
+    try {
+      // Snapshot the current dark theme for undo before overwriting.
+      // Read the snapshot via functional state to avoid the narrowing
+      // issue at this point in the function (draft is non-null inside
+      // the component's render scope, but TS can't infer that across
+      // a callback boundary; setDraft's reader form sidesteps it).
+      let snapshot: Theme | undefined;
+      setDraft((d) => {
+        snapshot = d?.themes.dark;
+        return d;
+      });
+      setUndoDarkSnapshot(snapshot);
+      const res = await authedFetch('/_ensemble/core/brand/colors-doc/generate-dark', { method: 'POST' });
+      const body = await res.json() as { theme: Theme; warnings: unknown[] };
+      setDraft((d) => d && ({ ...d, themes: { ...d.themes, dark: body.theme } }));
+      const warningCount = Array.isArray(body.warnings) ? body.warnings.length : 0;
+      toast.success(`Generated 7 bindings from light theme${warningCount ? ` · ${warningCount} contrast warning${warningCount > 1 ? 's' : ''}` : ''}`, {
+        description: 'Click Undo to revert.',
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            setDraft((d) => d && ({ ...d, themes: { ...d.themes, dark: snapshot } }));
+            setUndoDarkSnapshot(undefined);
+          },
+        },
+      });
+    } catch (err) {
+      toast.error('Failed to generate dark theme', {
+        description: err instanceof Error ? err.message : String(err),
+      });
     }
-    setGroups(groups.map((g) => g.slug === slug ? { ...g, colors: newColors } : g));
-  };
+  }
 
-  const handleSave = async () => {
+  function removeDarkTheme() {
+    setDraft((d) => d && ({ ...d, themes: { ...d.themes, dark: undefined } }));
+  }
+
+  /* ──────────────────────────────────────────────────────────
+   * Save
+   * ────────────────────────────────────────────────────────── */
+
+  async function handleSave() {
     status.beginSave();
     try {
-      // Save each color group
-      for (const group of groups) {
-        const res = await authedFetch('/_ensemble/core/brand/colors', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            group: group.slug,
-            label: group.label,
-            colors: group.colors,
-          }),
-        });
-        if (!res.ok) throw new Error(`Failed to save ${group.label}`);
-      }
-
-      // Save semantic colors + theme-foundation pair in one PUT.
-      const semRes = await authedFetch('/_ensemble/brand/tokens', {
+      const res = await authedFetch('/_ensemble/core/brand/colors-doc', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          category: 'colors',
-          tokens: {
-            ...Object.fromEntries(
-              Object.entries(semanticColors).map(([k, v]) => [`semantic.${k}`, v])
-            ),
-            'brand-background-light': brandBgLight,
-            'brand-background-dark': brandBgDark,
-            // Empty values clear the override and re-enable auto-derive.
-            'brand-foreground-light': brandFgLight,
-            'brand-foreground-dark': brandFgDark,
-          },
-        }),
+        body: JSON.stringify({ doc: draft }),
       });
-      if (!semRes.ok) throw new Error('Failed to save semantic colors');
-
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.json() as { ok: boolean; diff?: unknown };
       status.commitSave();
-      emitWorkspaceEvent('brand.tokens.changed', { category: 'colors' });
-      toast.success('Colors saved', { description: 'All color groups have been updated.' });
+      emitWorkspaceEvent('brand.tokens.changed', { category: 'colors', diff: body.diff });
+      toast.success('Colors saved');
+      // Reload resolved data so the server's authoritative resolution
+      // (including any rung-deriving math we approximated locally) is
+      // what we hand to the BrandCard.
+      await reload();
     } catch (err) {
       status.failSave(err);
-      toast.error('Failed to save', {
-        description: err instanceof Error ? err.message : 'Unknown error',
+      toast.error('Failed to save colors', {
+        description: err instanceof Error ? err.message : String(err),
       });
     }
-  };
+  }
+
+  function handleDiscard() {
+    if (saved) {
+      setDraft(saved);
+      status.resetBaseline(saved);
+      toast.success('Reverted unsaved changes');
+    }
+  }
+
+  const saving = status.state === 'saving';
+
+  /* ──────────────────────────────────────────────────────────
+   * Render
+   * ────────────────────────────────────────────────────────── */
 
   return (
-    <div className="space-y-6">
-      {/* Brand Core Colors — required */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Brand Colors</CardTitle>
-          <CardDescription>Your brand's core identity — palettes are auto-generated from each pick</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-6 lg:grid-cols-3">
-            <BrandColorPicker label="Primary" description="Main brand color" value={brandPrimary}
-              onChange={(v) => updateBrandColor('brand-primary', v, setBrandPrimary)} />
-            <BrandColorPicker label="Secondary" description="Supporting color" value={brandSecondary}
-              onChange={(v) => updateBrandColor('brand-secondary', v, setBrandSecondary)} />
-            <BrandColorPicker label="Accent" description="Action / highlight" value={brandAccent}
-              onChange={(v) => updateBrandColor('brand-accent', v, setBrandAccent)} />
-          </div>
-        </CardContent>
-      </Card>
+    <div className="space-y-10">
+      {/* Section 0 — header */}
+      <div className="flex items-end justify-between border-b pb-5">
+        <div>
+          <h1 className="text-2xl font-normal tracking-tight">Brand colors</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Type the Main hex and a name. Dark, Bright, Pastel, and Faded derive automatically.
+            Palettes are referenced by role (<code>primary-bright</code>) so renaming doesn't break consumer code.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {status.dirty && (
+            <Button type="button" variant="ghost" size="sm" onClick={handleDiscard}>
+              Discard
+            </Button>
+          )}
+          {status.state !== 'clean' && <SaveStatus state={status.state} />}
+          <Button onClick={handleSave} disabled={!status.dirty || saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      </div>
 
-      {/* Theme foundation — required for dark-mode logo generation and
-          for the brand guide's approved finish × background matrix. */}
+      {/* Section 1 — Brand palettes + Neutral + Gradients + Semantic
+          rendered by BrandCard in edit mode */}
+      <BrandCard
+        data={cardData}
+        mode="edit"
+        onPaletteNameChange={updatePaletteName}
+        onPaletteMainChange={updatePaletteMain}
+        onRungOverride={updateRungOverride}
+        onGradientNameChange={updateGradientName}
+        onSemanticChange={updateSemantic}
+      />
+
+      {/* Section — Neutral hue mode (BrandCard doesn't expose this edit
+          surface; we put it just below the BrandCard to keep the visual
+          grouping). */}
       <Card>
-        <CardHeader>
-          <CardTitle>Theme foundation</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Neutral hue</CardTitle>
           <CardDescription>
-            Required light + dark background pair. Foreground colors auto-derive for
-            contrast unless overridden. These drive dark-mode logo generation and
-            the brand guide's finish × background matrix.
+            How neutral grey is tinted. Branded inherits hue from primary; the others use fixed presets.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="space-y-3">
-              <BrandColorPicker
-                label="Background — Light"
-                description="Light-mode canvas (typically near-white)"
-                value={brandBgLight}
-                onChange={setBrandBgLight}
-              />
-              <div className="space-y-1.5">
-                <Label className="text-xs">Foreground — Light (optional override)</Label>
-                <div className="flex gap-2 items-center">
-                  <Input
-                    type="text"
-                    value={brandFgLight}
-                    onChange={(e) => setBrandFgLight(e.target.value)}
-                    placeholder={`auto: ${autoForeground(brandBgLight)}`}
-                    className="font-mono text-xs h-8"
-                  />
-                  {brandFgLight && (
-                    <Button type="button" size="sm" variant="ghost" onClick={() => setBrandFgLight('')}>
-                      Clear
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <BrandColorPicker
-                label="Background — Dark"
-                description="Dark-mode canvas (typically near-black)"
-                value={brandBgDark}
-                onChange={setBrandBgDark}
-              />
-              <div className="space-y-1.5">
-                <Label className="text-xs">Foreground — Dark (optional override)</Label>
-                <div className="flex gap-2 items-center">
-                  <Input
-                    type="text"
-                    value={brandFgDark}
-                    onChange={(e) => setBrandFgDark(e.target.value)}
-                    placeholder={`auto: ${autoForeground(brandBgDark)}`}
-                    className="font-mono text-xs h-8"
-                  />
-                  {brandFgDark && (
-                    <Button type="button" size="sm" variant="ghost" onClick={() => setBrandFgDark('')}>
-                      Clear
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          <Select value={draft.palettes.neutral.hueMode} onValueChange={(v) => updateNeutralHueMode(v as 'branded' | 'warm' | 'cool' | 'true')}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="branded">Branded (from primary)</SelectItem>
+              <SelectItem value="warm">Warm (amber/sand)</SelectItem>
+              <SelectItem value="cool">Cool (blue-grey)</SelectItem>
+              <SelectItem value="true">True (pure grey)</SelectItem>
+            </SelectContent>
+          </Select>
         </CardContent>
       </Card>
 
-      {/* Color Groups (auto-generated + custom) */}
-      {groups.map((group) => (
-        <Card key={group.slug}>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3 flex-1">
-                <Input
-                  value={group.label}
-                  onChange={(e) => updateGroupLabel(group.slug, e.target.value)}
-                  className="text-lg font-semibold h-auto border-0 p-0 shadow-none focus-visible:ring-0 max-w-[200px]"
-                  placeholder="Color name"
-                />
-                <span className="text-sm text-muted-foreground">
-                  {Object.keys(group.colors).length} shades
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => generateFromBase(group.slug)}>
-                  Generate Palette
-                </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => removeGroup(group.slug)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {/* Swatch strip */}
-            <div className="flex gap-1 overflow-hidden rounded-lg mb-4">
-              {Object.entries(group.colors)
-                .sort(([a], [b]) => Number(a) - Number(b))
-                .map(([shade, hex]) => {
-                  const lum = getRelativeLuminance(hex);
-                  return (
-                    <div
-                      key={shade}
-                      className="flex flex-1 h-16 items-end justify-center pb-1 text-xs font-medium min-w-[40px] cursor-pointer relative group/swatch"
-                      style={{ backgroundColor: hex, color: lum < 0.5 ? '#fff' : '#000' }}
-                      title={`${shade}: ${hex}`}
-                    >
-                      {shade}
-                    </div>
-                  );
-                })}
-            </div>
+      {/* Gradients editor — adds advanced controls below the BrandCard's
+          display of gradients. The BrandCard's mode="edit" lets the
+          operator rename gradients inline; the controls here let them
+          add, remove, reorder stops, change angle. */}
+      <GradientsEditor
+        gradients={draft.gradients}
+        palettes={cardData.resolvedPalettes}
+        onAdd={addGradient}
+        onRemove={removeGradient}
+        onUpdate={updateGradient}
+      />
 
-            {/* Editable color rows */}
-            <div className="grid gap-2">
-              {Object.entries(group.colors)
-                .sort(([a], [b]) => Number(a) - Number(b))
-                .map(([shade, hex]) => (
-                  <div key={shade} className="flex items-center gap-3">
-                    <div className="w-16 text-sm text-muted-foreground font-mono">{shade}</div>
-                    <ColorInput value={hex} onChange={(v) => updateGroupColor(group.slug, shade, v)} />
-                    <span className="text-xs text-muted-foreground font-mono w-20">{hex}</span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100"
-                      onClick={() => removeShade(group.slug, shade)}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ))}
-            </div>
-
-            <Button variant="outline" size="sm" className="mt-3" onClick={() => addShade(group.slug)}>
-              <Plus className="mr-1 h-3 w-3" /> Add Shade
-            </Button>
-          </CardContent>
-        </Card>
-      ))}
-
-      {/* Semantic Colors */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Semantic Colors</CardTitle>
-          <CardDescription>Success, error, warning, and info states</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {(['success', 'info', 'warning', 'error'] as const).map((key) => (
-              <div key={key} className="space-y-2">
-                <Label className="capitalize">{key}</Label>
-                <div className="flex items-center gap-2">
-                  <ColorInput
-                    value={semanticColors[key]}
-                    onChange={(v) => setSemanticColors((p) => ({ ...p, [key]: v }))}
-                  />
-                  <span className="text-xs font-mono text-muted-foreground">{semanticColors[key]}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Label className="text-xs text-muted-foreground capitalize">{key} Light</Label>
-                  <ColorInput
-                    value={semanticColors[`${key}-light` as keyof typeof semanticColors] || '#ffffff'}
-                    onChange={(v) => setSemanticColors((p) => ({ ...p, [`${key}-light`]: v }))}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Actions */}
-      <div className="flex items-center gap-3">
-        <Button onClick={addGroup} variant="outline">
-          <Plus className="mr-2 h-4 w-4" /> Add Color Group
-        </Button>
-        <div className="flex-1" />
-        {status.state !== 'clean' && <SaveStatus state={status.state} />}
-        <Button onClick={handleSave} disabled={!status.dirty || saving}>
-          {saving ? 'Saving...' : 'Save All Colors'}
-        </Button>
-      </div>
+      {/* Themes — separate from BrandCard by spec (themes are
+          configuration, not part of the brand card itself) */}
+      <ThemesSection
+        light={draft.themes.light}
+        dark={draft.themes.dark}
+        palettes={cardData.resolvedPalettes}
+        onUpdateBinding={updateThemeBinding}
+        onGenerateDark={generateDarkFromLight}
+        onRemoveDark={removeDarkTheme}
+      />
     </div>
   );
 }
 
-/** Inline color picker — small swatch + popover */
-function ColorInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button className="h-8 w-8 rounded border border-border shrink-0" style={{ backgroundColor: value }} />
-      </PopoverTrigger>
-      <PopoverContent className="w-56">
-        <div className="space-y-2">
-          <input type="color" value={value} onChange={(e) => onChange(e.target.value)} className="h-24 w-full cursor-pointer rounded border-0" />
-          <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder="#000000" className="font-mono text-sm" />
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
+/* ──────────────────────────────────────────────────────────────
+ * GradientsEditor — angle / mode / stops controls
+ * ──────────────────────────────────────────────────────────── */
 
-function BrandColorPicker({ label, description, value, onChange }: {
-  label: string; description: string; value: string; onChange: (v: string) => void;
+function GradientsEditor({
+  gradients,
+  palettes,
+  onAdd,
+  onRemove,
+  onUpdate,
+}: {
+  gradients: Gradient[];
+  palettes: ResolvedPalettes;
+  onAdd: () => void;
+  onRemove: (slug: string) => void;
+  onUpdate: (slug: string, patch: Partial<Gradient>) => void;
 }) {
-  const palette = generatePalette(value);
-  const shades = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900] as const;
+  const atCap = gradients.length >= 5;
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-base">Gradient controls</CardTitle>
+            <CardDescription>
+              Stops, angle, and mode for each gradient. Stops are picked from existing
+              palette rungs plus the system tokens <code>white</code> and <code>black</code>.
+              Hex is not allowed in gradient stops — override a palette rung if you need a custom color.
+            </CardDescription>
+          </div>
+          {atCap ? (
+            <Button type="button" variant="outline" size="sm" disabled title="Maximum 5 gradients reached">
+              <Plus className="h-3.5 w-3.5 mr-1" /> Add gradient
+            </Button>
+          ) : (
+            <Button type="button" variant="outline" size="sm" onClick={onAdd}>
+              <Plus className="h-3.5 w-3.5 mr-1" /> Add gradient
+            </Button>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {gradients.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">
+            No gradients defined yet. Click <strong>Add gradient</strong> to compose one from your palette rungs.
+          </p>
+        ) : (
+          gradients.map((g) => (
+            <GradientRow key={g.slug} gradient={g} palettes={palettes} onUpdate={onUpdate} onRemove={onRemove} />
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function GradientRow({
+  gradient,
+  palettes,
+  onUpdate,
+  onRemove,
+}: {
+  gradient: Gradient;
+  palettes: ResolvedPalettes;
+  onUpdate: (slug: string, patch: Partial<Gradient>) => void;
+  onRemove: (slug: string) => void;
+}) {
+  const stops = gradient.stops;
+  const canAddStop = stops.length < 4;
+  const canRemoveStop = stops.length > 2;
+
+  function setStop(idx: number, value: string) {
+    const next = [...stops];
+    next[idx] = value;
+    onUpdate(gradient.slug, { stops: next });
+  }
+  function addStop() {
+    if (!canAddStop) return;
+    onUpdate(gradient.slug, { stops: [...stops, 'primary-faded'] });
+  }
+  function removeStop(idx: number) {
+    if (!canRemoveStop) return;
+    onUpdate(gradient.slug, { stops: stops.filter((_, i) => i !== idx) });
+  }
 
   return (
-    <div className="space-y-3">
-      <div>
-        <Label className="text-base font-semibold">{label}</Label>
-        <p className="text-xs text-muted-foreground">{description}</p>
+    <div className="rounded-md border p-3 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-mono text-xs text-muted-foreground">gradient-{gradient.slug}</span>
+        </div>
+        <Button type="button" variant="ghost" size="sm" onClick={() => onRemove(gradient.slug)} className="h-7 px-2 text-xs">
+          <Trash2 className="h-3.5 w-3.5 mr-1" /> Remove
+        </Button>
       </div>
-      <Popover>
-        <PopoverTrigger asChild>
-          <button className="flex h-10 w-full items-center gap-3 rounded-lg border border-input bg-card px-3 text-sm hover:bg-primary/10">
-            <div className="h-6 w-6 rounded ring-1 ring-inset ring-black/10" style={{ backgroundColor: value }} />
-            <span className="font-mono">{value}</span>
-          </button>
-        </PopoverTrigger>
-        <PopoverContent className="w-64">
-          <div className="space-y-3">
-            <input type="color" value={value} onChange={(e) => onChange(e.target.value)} className="h-32 w-full cursor-pointer rounded-md border-0" />
-            <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder="#000000" className="font-mono text-sm" />
+
+      <div className="space-y-2">
+        <Label className="text-xs">Stops</Label>
+        <div className="flex flex-wrap items-center gap-2">
+          {stops.map((stop, idx) => (
+            <React.Fragment key={idx}>
+              {idx > 0 && <span className="text-muted-foreground text-xs">→</span>}
+              <BrandTokenPicker
+                value={stop}
+                onChange={(v) => setStop(idx, v)}
+                palettes={palettes}
+                allowSystem
+              />
+              {canRemoveStop && (
+                <Button type="button" variant="ghost" size="sm" onClick={() => removeStop(idx)} className="h-7 px-2">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </React.Fragment>
+          ))}
+          {canAddStop && (
+            <Button type="button" variant="ghost" size="sm" onClick={addStop} className="h-7 px-2">
+              <Plus className="h-3.5 w-3.5 mr-1" /> Stop
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4">
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs">Mode</Label>
+          <Select value={gradient.mode} onValueChange={(v) => onUpdate(gradient.slug, { mode: v as 'linear' | 'radial' })}>
+            <SelectTrigger className="w-[120px] h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="linear">Linear</SelectItem>
+              <SelectItem value="radial">Radial</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {gradient.mode === 'linear' && (
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">Angle</Label>
+            <Select value={String(gradient.angle)} onValueChange={(v) => onUpdate(gradient.slug, { angle: Number(v) as Gradient['angle'] })}>
+              <SelectTrigger className="w-[120px] h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">0°</SelectItem>
+                <SelectItem value="45">45°</SelectItem>
+                <SelectItem value="90">90°</SelectItem>
+                <SelectItem value="135">135°</SelectItem>
+                <SelectItem value="180">180°</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-        </PopoverContent>
-      </Popover>
-      <div className="flex gap-0.5 overflow-hidden rounded-md">
-        {shades.map((shade) => {
-          const hex = palette[shade];
-          const lum = getRelativeLuminance(hex);
-          return (
-            <div key={shade} className="flex h-8 flex-1 items-end justify-center pb-0.5 text-[8px] font-medium"
-              style={{ backgroundColor: hex, color: lum < 0.5 ? '#fff' : '#000' }} title={`${shade}: ${hex}`}>
-              {shade}
-            </div>
-          );
-        })}
+        )}
       </div>
     </div>
   );
 }
 
-function getDefaultGroups(): ColorGroup[] {
+/* ──────────────────────────────────────────────────────────────
+ * Themes section — light + dark theme binding editors
+ * ──────────────────────────────────────────────────────────── */
+
+function ThemesSection({
+  light,
+  dark,
+  palettes,
+  onUpdateBinding,
+  onGenerateDark,
+  onRemoveDark,
+}: {
+  light: Theme;
+  dark: Theme | undefined;
+  palettes: ResolvedPalettes;
+  onUpdateBinding: (theme: 'light' | 'dark', key: keyof ThemeBindings, value: string) => void;
+  onGenerateDark: () => void;
+  onRemoveDark: () => void;
+}) {
+  return (
+    <section>
+      <header className="mb-3.5">
+        <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+          Themes
+        </h2>
+        <p className="text-xs text-muted-foreground mt-1">
+          Light and Dark canvases bind seven role tokens to palette rungs (or literal hex).
+          Logo lockups on dark backgrounds require a Dark theme — without one, only light-bg lockups render.
+        </p>
+      </header>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <ThemeCard
+          mode="light"
+          theme={light}
+          palettes={palettes}
+          onUpdate={(key, val) => onUpdateBinding('light', key, val)}
+        />
+        <ThemeCard
+          mode="dark"
+          theme={dark}
+          palettes={palettes}
+          onUpdate={(key, val) => onUpdateBinding('dark', key, val)}
+          onGenerate={onGenerateDark}
+          onRemove={onRemoveDark}
+        />
+      </div>
+    </section>
+  );
+}
+
+function ThemeCard({
+  mode,
+  theme,
+  palettes,
+  onUpdate,
+  onGenerate,
+  onRemove,
+}: {
+  mode: 'light' | 'dark';
+  theme: Theme | undefined;
+  palettes: ResolvedPalettes;
+  onUpdate: (key: keyof ThemeBindings, value: string) => void;
+  onGenerate?: () => void;
+  onRemove?: () => void;
+}) {
+  const Icon = mode === 'light' ? Sun : Moon;
+  const isConfigured = !!theme;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Icon className="h-4 w-4" /> {mode === 'light' ? 'Light theme' : 'Dark theme'}
+          </CardTitle>
+          {mode === 'dark' && onGenerate && (
+            <div className="flex items-center gap-1">
+              {isConfigured && onRemove && (
+                <Button type="button" variant="ghost" size="sm" onClick={onRemove} className="h-7 px-2 text-xs">
+                  Remove
+                </Button>
+              )}
+              <Button type="button" variant="outline" size="sm" onClick={onGenerate} className="h-7 px-2 text-xs">
+                <Wand2 className="h-3.5 w-3.5 mr-1" />
+                {isConfigured ? 'Regenerate' : 'Generate from light'}
+              </Button>
+            </div>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {!isConfigured && mode === 'dark' ? (
+          <p className="text-sm text-muted-foreground italic">
+            No dark theme configured. Click <strong>Generate from light</strong> to synthesize one,
+            or any binding below to start filling it in manually.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {THEME_BINDING_LABELS.map(({ key, label, description, allowAuto }) => {
+              const value = theme?.bindings[key] ?? (mode === 'dark' && key === 'canvas' ? '#0a0a0a' : '#ffffff');
+              return (
+                <div key={key} className="grid grid-cols-[100px_1fr] items-center gap-3 py-1.5 border-t first:border-t-0">
+                  <div>
+                    <Label className="text-xs">{label}</Label>
+                    <p className="text-[10px] text-muted-foreground">{description}</p>
+                  </div>
+                  <BrandTokenPicker
+                    value={value}
+                    onChange={(v) => onUpdate(key, v)}
+                    palettes={palettes}
+                    allowAuto={allowAuto}
+                    allowHex
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Client-side OkLCh derivation (mirrors core/derive.ts)
+ *
+ * We approximate the server's rung math here so the editor preview
+ * updates as the operator types Main without a server round-trip.
+ * On save, the server re-resolves authoritatively and we reload.
+ *
+ * For sites using the workspace's typography correctly the small
+ * numeric difference between client-derived and server-derived
+ * rungs is invisible. The display label uses the client-derived
+ * hex until save commits.
+ * ──────────────────────────────────────────────────────────── */
+
+const RUNG_OFFSETS: Record<Exclude<RungName, 'main'>, { dL: number; cMul: number }> = {
+  dark:   { dL: -0.18, cMul: 0.85 },
+  bright: { dL:  0.10, cMul: 1.08 },
+  pastel: { dL:  0.28, cMul: 0.50 },
+  faded:  { dL:  0.40, cMul: 0.22 },
+};
+
+/** sRGB hex → linear sRGB tuple [r, g, b] ∈ [0, 1]. */
+function srgbToLinear(hex: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return [0, 0, 0];
+  const r = parseInt(m[1].slice(0, 2), 16) / 255;
+  const g = parseInt(m[1].slice(2, 4), 16) / 255;
+  const b = parseInt(m[1].slice(4, 6), 16) / 255;
+  const lin = (v: number) => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  return [lin(r), lin(g), lin(b)];
+}
+
+/** Linear sRGB → sRGB hex. */
+function linearToSrgbHex([r, g, b]: [number, number, number]): string {
+  const gamma = (v: number) => v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+  const clamp = (v: number) => Math.min(1, Math.max(0, v));
+  const toHex = (v: number) => Math.round(clamp(gamma(clamp(v))) * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+/** Linear sRGB → OkLab (M1·M2). */
+function linearToOklab([r, g, b]: [number, number, number]): [number, number, number] {
+  const l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
+  const m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
+  const s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
+  const l_ = Math.cbrt(l);
+  const m_ = Math.cbrt(m);
+  const s_ = Math.cbrt(s);
   return [
-    {
-      slug: 'primary',
-      label: 'Primary',
-      colors: { '100': '#dbeafe', '200': '#bfdbfe', '300': '#93c5fd', '400': '#60a5fa', '500': '#3b82f6', '600': '#2563eb', '700': '#1d4ed8', '800': '#1e40af', '900': '#1e3a8a' },
-    },
-    {
-      slug: 'neutral',
-      label: 'Neutral',
-      colors: { '100': '#f5f5f5', '200': '#e5e5e5', '300': '#d4d4d4', '400': '#a3a3a3', '500': '#737373', '600': '#525252', '700': '#404040', '800': '#262626', '900': '#171717' },
-    },
+    0.2104542553 * l_ + 0.793617785 * m_ - 0.0040720468 * s_,
+    1.9779984951 * l_ - 2.428592205 * m_ + 0.4505937099 * s_,
+    0.0259040371 * l_ + 0.7827717662 * m_ - 0.808675766 * s_,
   ];
+}
+
+/** OkLab → linear sRGB. */
+function oklabToLinear([L, a, b]: [number, number, number]): [number, number, number] {
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+  const l = l_ ** 3;
+  const m = m_ ** 3;
+  const s = s_ ** 3;
+  return [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+}
+
+/** OkLab → OkLCh. */
+function oklabToOklch([L, a, b]: [number, number, number]): { L: number; C: number; h: number } {
+  const C = Math.sqrt(a * a + b * b);
+  const h = Math.atan2(b, a) * 180 / Math.PI;
+  return { L, C, h: h < 0 ? h + 360 : h };
+}
+
+/** OkLCh → OkLab. */
+function oklchToOklab({ L, C, h }: { L: number; C: number; h: number }): [number, number, number] {
+  const rad = h * Math.PI / 180;
+  return [L, C * Math.cos(rad), C * Math.sin(rad)];
+}
+
+function clientDeriveRung(mainHex: string, rung: Exclude<RungName, 'main'>): string {
+  const lab = linearToOklab(srgbToLinear(mainHex));
+  const lch = oklabToOklch(lab);
+  const offset = RUNG_OFFSETS[rung];
+  const nextL = Math.min(0.97, Math.max(0.05, lch.L + offset.dL));
+  const nextC = Math.max(0, lch.C * offset.cMul);
+  const nextLab = oklchToOklab({ L: nextL, C: nextC, h: lch.h });
+  return linearToSrgbHex(oklabToLinear(nextLab));
+}
+
+function clientDeriveRungs(mainHex: string, overrides: Palette['overrides']): Record<RungName, string> {
+  return {
+    dark:   overrides?.dark   ?? clientDeriveRung(mainHex, 'dark'),
+    main:   mainHex,
+    bright: overrides?.bright ?? clientDeriveRung(mainHex, 'bright'),
+    pastel: overrides?.pastel ?? clientDeriveRung(mainHex, 'pastel'),
+    faded:  overrides?.faded  ?? clientDeriveRung(mainHex, 'faded'),
+  };
+}
+
+function resolveStopLocal(stop: string, palettes: ResolvedPalettes): string {
+  if (stop === 'white') return '#ffffff';
+  if (stop === 'black') return '#000000';
+  const m = /^(primary|secondary|accent|neutral)-(dark|main|bright|pastel|faded)$/.exec(stop);
+  if (m) return palettes[m[1] as PaletteRole][m[2] as RungName];
+  return '#000000';
+}
+
+/** Client mirror of the server's on-color foreground rule:
+ *  Faded rung when its contrast against Main is ≥ ~3.5; else
+ *  high-contrast white or black. Uses WCAG 2.x ratio (simpler
+ *  than APCA, and adequate for the "is the Faded rung readable
+ *  on Main" check). */
+function onColorLocal(mainHex: string, fadedHex: string): { hex: string; usedFallback: boolean } {
+  const ratio = wcagRatio(fadedHex, mainHex);
+  if (ratio >= 3.5) return { hex: fadedHex, usedFallback: false };
+  const whiteRatio = wcagRatio('#FAFAFA', mainHex);
+  const blackRatio = wcagRatio('#0A0A0A', mainHex);
+  return { hex: whiteRatio >= blackRatio ? '#FAFAFA' : '#0A0A0A', usedFallback: true };
+}
+
+function wcagRatio(fg: string, bg: string): number {
+  const luminance = (hex: string) => {
+    const [r, g, b] = srgbToLinear(hex);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const a = luminance(fg);
+  const b = luminance(bg);
+  const lighter = Math.max(a, b);
+  const darker = Math.min(a, b);
+  return (lighter + 0.05) / (darker + 0.05);
 }

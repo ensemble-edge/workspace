@@ -84,7 +84,7 @@ export async function renderBrandAssetV2(req: RenderRequest): Promise<RenderResu
   // ── 1. Policy + tokens + colors ──
   let policy = await loadPolicy(req.env.DB, req.workspaceId);
   const tokens = await loadIdentityTokens(req.env, req.workspaceId);
-  const brandColors = readBrandColors(tokens);
+  const brandColors = await readBrandColors(req.env, req.workspaceId);
 
   // Apply editorial overrides on top of the stored policy.
   if (req.overrides) {
@@ -119,9 +119,14 @@ export async function renderBrandAssetV2(req: RenderRequest): Promise<RenderResu
 
   // ── 3. Cache key ──
   // Everything that influences the output goes into the hash.
+  // v0.1.55: the resolved brand colors (primary, bgLight, bgDark)
+  // replace the old per-token snapshot for colors. The doc itself
+  // is structurally part of every render — any palette/theme edit
+  // changes the resolved hexes and therefore the cache key.
   const cacheKeySnapshot = {
     policy,
     tokens: pickRenderRelevantTokens(tokens),
+    brandColors,
     req: {
       composition: req.composition,
       finish: req.finish,
@@ -287,12 +292,32 @@ async function loadIdentityTokens(env: Env, workspaceId: string): Promise<Record
   return out;
 }
 
-function readBrandColors(tokens: Record<string, string>): { bgLight: string; bgDark: string; primary: string } {
-  return {
-    bgLight: tokens['brand-background-light'] || '#ffffff',
-    bgDark: tokens['brand-background-dark'] || '#0a0a0a',
-    primary: tokens['brand-primary'] || '#3b82f6',
-  };
+/**
+ * Resolve the three brand colors the render pipeline cares about
+ * (primary, light canvas, dark canvas) from the v0.1.55 brand colors
+ * doc.
+ *
+ *   primary  → light theme `brand` binding, resolved through palettes
+ *   bgLight  → light theme `canvas` binding
+ *   bgDark   → dark theme `canvas` binding (when configured)
+ *
+ * Per Q3: if dark theme is unconfigured, fall back to black so
+ * existing dark-bg variants still render with reasonable defaults.
+ */
+async function readBrandColors(
+  env: Env,
+  workspaceId: string,
+): Promise<{ bgLight: string; bgDark: string; primary: string }> {
+  const { loadBrandColors } = await import('../brand-colors/load');
+  const { resolvePalettes, resolveBindingValue } = await import('../brand-colors/resolver');
+  const doc = await loadBrandColors(env.DB, workspaceId);
+  const palettes = resolvePalettes(doc);
+  const bgLight = resolveBindingValue(doc.themes.light.bindings.canvas, palettes);
+  const bgDark = doc.themes.dark
+    ? resolveBindingValue(doc.themes.dark.bindings.canvas, palettes)
+    : '#0a0a0a';
+  const primary = resolveBindingValue(doc.themes.light.bindings.brand, palettes);
+  return { bgLight, bgDark, primary };
 }
 
 function pickRenderRelevantTokens(tokens: Record<string, string>): Record<string, string> {

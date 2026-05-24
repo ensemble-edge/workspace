@@ -114,6 +114,64 @@ async function generateShellCss(
     // Use defaults
   }
 
+  // v0.1.55: bridge from the new BrandColorsDoc to the legacy
+  // brand-primary/brand-secondary/brand-accent + semantic.* token
+  // names this CSS generator uses. The doc is the source of truth;
+  // we synthesize the old token names from its resolved palettes +
+  // semantic colors so the shadcn-preset shell-CSS machinery
+  // doesn't need to know about palette rungs.
+  try {
+    const { loadBrandColors } = await import('../../../services/brand-colors/load');
+    const { resolvePalettes, resolveBindingValue } = await import('../../../services/brand-colors/resolver');
+    const doc = await loadBrandColors(db, workspaceId);
+    const palettes = resolvePalettes(doc);
+    // "brand-primary" → the light theme's `brand` binding resolved
+    // through palettes. "brand-secondary"/"brand-accent" → the
+    // Main rung of the secondary/accent palettes (operator picks
+    // them directly there).
+    brandTokens['brand-primary']    = resolveBindingValue(doc.themes.light.bindings.brand, palettes);
+    brandTokens['brand-secondary']  = palettes.secondary.main;
+    brandTokens['brand-accent']     = palettes.accent.main;
+    brandTokens['brand-background-light'] = resolveBindingValue(doc.themes.light.bindings.canvas, palettes);
+    brandTokens['brand-background-dark']  = doc.themes.dark
+      ? resolveBindingValue(doc.themes.dark.bindings.canvas, palettes)
+      : '#0a0a0a';
+    // Per-rung CSS variables — operators consume these directly in
+    // app code as e.g. `var(--primary-bright)`.
+    const roles = ['primary', 'secondary', 'accent', 'neutral'] as const;
+    for (const role of roles) {
+      const p = palettes[role];
+      brandTokens[`${role}-dark`]   = p.dark;
+      brandTokens[`${role}-main`]   = p.main;
+      brandTokens[`${role}-bright`] = p.bright;
+      brandTokens[`${role}-pastel`] = p.pastel;
+      brandTokens[`${role}-faded`]  = p.faded;
+    }
+    // Semantic — emit as semantic.<role> keys for the existing
+    // shadcn-preset machinery below; emit pairs in a separate
+    // namespace for the brand-css consumers (--semantic-success-main, etc).
+    brandTokens['semantic.success'] = doc.semantic.success.main;
+    brandTokens['semantic.info']    = doc.semantic.info.main;
+    brandTokens['semantic.warning'] = doc.semantic.warning.main;
+    brandTokens['semantic.error']   = doc.semantic.error.main;
+    brandTokens['semantic.success-light'] = doc.semantic.success.light;
+    brandTokens['semantic.info-light']    = doc.semantic.info.light;
+    brandTokens['semantic.warning-light'] = doc.semantic.warning.light;
+    brandTokens['semantic.error-light']   = doc.semantic.error.light;
+    // Gradients — emit as --gradient-<slug> CSS variables.
+    const { resolveStopValue } = await import('../../../services/brand-colors/resolver');
+    for (const g of doc.gradients) {
+      const stops = g.stops
+        .map((s) => resolveStopValue(s, palettes))
+        .join(', ');
+      const direction = g.mode === 'radial' ? 'radial-gradient(circle' : `linear-gradient(${g.angle}deg`;
+      brandTokens[`gradient-${g.slug}`] = `${direction}, ${stops})`;
+    }
+  } catch {
+    // If the new doc loader fails, leave the legacy brandTokens map
+    // untouched so the rest of this function still produces output.
+  }
+
   const radius = customTokens.radius || '0.5';
   const headingFont = customTokens.headingFont || 'dm-sans';
   const bodyFont = customTokens.bodyFont || 'dm-sans';

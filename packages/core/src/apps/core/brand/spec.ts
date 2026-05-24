@@ -216,6 +216,51 @@ export async function assembleBrandSpec(
     });
   }
 
+  // v0.1.55: synthesize palette groups + gradients + semantic from
+  // the new BrandColorsDoc. This produces --primary-main, --gradient-
+  // sunrise, and the like as CSS variables alongside any legacy
+  // color-group output. The doc is the canonical source going forward.
+  try {
+    const { loadBrandColors } = await import('../../../services/brand-colors/load');
+    const { resolvePalettes, resolveStopValue } = await import('../../../services/brand-colors/resolver');
+    const doc = await loadBrandColors(db, workspaceId);
+    const palettes = resolvePalettes(doc);
+    // Emit each palette as a group whose "shades" are the rung
+    // names. The CSS gen reads {slug}-{shade} so this lands as
+    // --brand-primary-main, --brand-primary-bright, etc. We also
+    // emit the un-prefixed form (--primary-main) by adding an
+    // additional group at slug '' below.
+    const roles = ['primary', 'secondary', 'accent', 'neutral'] as const;
+    for (const role of roles) {
+      const p = palettes[role];
+      colorGroups.push({
+        slug: role,
+        label: doc.palettes[role].name,
+        shades: { dark: p.dark, main: p.main, bright: p.bright, pastel: p.pastel, faded: p.faded },
+      });
+    }
+    // Semantic — override any legacy semantic tokens.
+    semanticColors.success = doc.semantic.success.main;
+    semanticColors['success-light'] = doc.semantic.success.light;
+    semanticColors.info = doc.semantic.info.main;
+    semanticColors['info-light'] = doc.semantic.info.light;
+    semanticColors.warning = doc.semantic.warning.main;
+    semanticColors['warning-light'] = doc.semantic.warning.light;
+    semanticColors.error = doc.semantic.error.main;
+    semanticColors['error-light'] = doc.semantic.error.light;
+    // Gradients — emit as named entries in spec.gradients (which
+    // the CSS gen writes as --brand-gradient-<name>: <value>).
+    if (doc.gradients.length > 0) {
+      for (const g of doc.gradients) {
+        const stops = g.stops.map((s) => resolveStopValue(s, palettes)).join(', ');
+        const direction = g.mode === 'radial' ? 'radial-gradient(circle' : `linear-gradient(${g.angle}deg`;
+        (semanticColors as Record<string, string>)[`__gradient_${g.slug}`] = `${direction}, ${stops})`;
+      }
+    }
+  } catch {
+    // If the new doc loader fails we degrade to legacy-only output.
+  }
+
   // ── Typography ──
   const typoTokens = byCategory.get('typography') || [];
   const typoMap = Object.fromEntries(typoTokens.map((t) => [t.key, t.value]));

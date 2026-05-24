@@ -394,6 +394,9 @@ importers:
       better-sqlite3:
         specifier: ^12.8.0
         version: 12.8.0
+      culori:
+        specifier: ^4.0.1
+        version: 4.0.2
       hono:
         specifier: ^4.0.0
         version: 4.12.10
@@ -3224,6 +3227,10 @@ packages:
 
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
+
+  culori@4.0.2:
+    resolution: {integrity: sha512-1+BhOB8ahCn4O0cep0Sh2l9KCOfOdY+BXJnKMHFFzDEouSr/el18QwXEMRlOj9UY5nCeA8UN3a/82rUWRBeyBw==}
+    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
 
   data-uri-to-buffer@2.0.2:
     resolution: {integrity: sha512-ND9qDTLc6diwj+Xe5cdAgVTbLVdXbtxTJRXRhli8Mowuaan+0EJOtdqJ0QCHNSSPyoXGx9HX2/VMnKeC34AChA==}
@@ -6314,6 +6321,8 @@ snapshots:
       postcss-value-parser: 4.2.0
 
   csstype@3.2.3: {}
+
+  culori@4.0.2: {}
 
   data-uri-to-buffer@2.0.2: {}
 

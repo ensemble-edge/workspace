@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brand card — component reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* placeholders for the workspace's configured typography tokens
+       — production should swap these for Ensemble typography variables */
+    --font-display: 'Geist', system-ui, sans-serif;
+    --font-body:    'Geist', system-ui, sans-serif;
+    --font-eyebrow: 'Geist', system-ui, sans-serif;
+    --font-label:   'Geist', system-ui, sans-serif;
+    --font-mono:    'Geist Mono', 'SF Mono', Menlo, monospace;
+
+    --bg: #FAFAF7;
+    --surface: #FFFFFF;
+    --text-primary: #18181B;
+    --text-secondary: #71717A;
+    --text-tertiary: #A1A1AA;
+    --border: rgba(0, 0, 0, 0.07);
+    --radius-md: 10px;
+    --radius-lg: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 900px; margin: 0 auto; padding: 48px 32px 64px; }
+
+  .page-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 36px;
+    padding-bottom: 20px;
+    border-bottom: 0.5px solid var(--border);
+  }
+  .page-head h1 {
+    font-family: var(--font-display);
+    font-size: 32px;
+    font-weight: 400;
+    margin: 0;
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+  }
+  .page-head .sub {
+    font-family: var(--font-body);
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 4px 0 0;
+  }
+  .page-head .hint {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-tertiary);
+  }
+
+  .section { margin-bottom: 40px; }
+  .section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 14px;
+  }
+  .section-head h2 {
+    font-family: var(--font-eyebrow);
+    font-size: 11px;
+    font-weight: 500;
+    margin: 0;
+    color: var(--text-secondary);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .section-head .meta {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+
+  /* ── BRAND PALETTE CARDS ─────────────────────────────── */
+  .brand-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .brand-card {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+  }
+  .brand-card .main {
+    aspect-ratio: 16 / 11;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    cursor: pointer;
+    transition: filter 0.12s;
+  }
+  .brand-card .main:hover { filter: brightness(0.97); }
+  .brand-card .main:focus-visible { outline: 2px solid var(--text-primary); outline-offset: -3px; }
+  .brand-card .name {
+    font-family: var(--font-display);
+    font-size: 26px;
+    font-weight: 400;
+    line-height: 1.05;
+    letter-spacing: -0.005em;
+  }
+  .brand-card .role {
+    font-family: var(--font-eyebrow);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: lowercase;
+    margin-top: 6px;
+    opacity: 0.7;
+  }
+  .brand-card .ids {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    opacity: 0.85;
+  }
+  .brand-card .rungs { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--surface); }
+  .brand-card .rung {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 4px 12px;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .brand-card .rung:hover { background: rgba(0, 0, 0, 0.025); }
+  .brand-card .rung:focus-visible { outline: 2px solid var(--text-primary); outline-offset: -2px; }
+  .brand-card .rung .chip {
+    width: 100%; height: 24px;
+    border-radius: 5px;
+    border: 0.5px solid rgba(0, 0, 0, 0.06);
+    margin-bottom: 7px;
+    transition: transform 0.12s;
+  }
+  .brand-card .rung:hover .chip { transform: translateY(-1px); }
+  .brand-card .rung .lab {
+    font-family: var(--font-label);
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    letter-spacing: 0.04em;
+  }
+  .brand-card .rung .hx {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+  }
+
+  /* ── NEUTRAL STRIP ─────────────────────────────────── */
+  .neutral-card {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 16px;
+    align-items: center;
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 16px 20px;
+  }
+  .neutral-card .nm {
+    font-family: var(--font-display);
+    font-size: 22px;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .neutral-card .nm-sub {
+    font-family: var(--font-body);
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: block;
+    margin-top: 4px;
+  }
+  .neutral-card .meta-line {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-tertiary);
+    letter-spacing: 0.02em;
+    margin-top: 4px;
+  }
+  .neutral-rungs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .neutral-rungs .rung { display: flex; flex-direction: column; gap: 5px; cursor: pointer; }
+  .neutral-rungs .rung .chip {
+    height: 36px;
+    border-radius: 5px;
+    border: 0.5px solid rgba(0, 0, 0, 0.06);
+    transition: transform 0.12s;
+  }
+  .neutral-rungs .rung:hover .chip { transform: translateY(-1px); }
+  .neutral-rungs .rung.main .chip { box-shadow: 0 0 0 1.5px var(--text-primary); }
+  .neutral-rungs .rung .lab {
+    font-family: var(--font-label);
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    letter-spacing: 0.04em;
+  }
+  .neutral-rungs .rung .hx {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-tertiary);
+  }
+
+  /* ── GRADIENTS ─────────────────────────────────────── */
+  .gradients { display: flex; flex-direction: column; gap: 12px; }
+  .grad-card {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+  }
+  .grad-banner {
+    height: 90px;
+    padding: 18px 22px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    transition: filter 0.12s;
+  }
+  .grad-banner:hover { filter: brightness(0.97); }
+  .grad-banner .nm {
+    font-family: var(--font-display);
+    font-size: 32px;
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: -0.005em;
+  }
+  .grad-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 22px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-tertiary);
+    border-top: 0.5px solid var(--border);
+  }
+  .grad-foot .stops { display: flex; align-items: center; gap: 6px; }
+  .grad-foot .dot { width: 10px; height: 10px; border-radius: 2px; border: 0.5px solid rgba(0, 0, 0, 0.1); }
+
+  /* ── SEMANTIC ──────────────────────────────────────── */
+  .semantic { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .sem-card {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+  }
+  .sem-card .pair {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 4px;
+    height: 30px;
+    margin-bottom: 8px;
+  }
+  .sem-card .sw {
+    border-radius: 5px;
+    cursor: pointer;
+    transition: transform 0.12s;
+    border: 0.5px solid rgba(0, 0, 0, 0.06);
+  }
+  .sem-card .sw:hover { transform: translateY(-1px); }
+  .sem-card .nm { font-family: var(--font-body); font-size: 12px; font-weight: 500; }
+  .sem-card .hx {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+  }
+
+  /* ── TOAST (placeholder — replace with Ensemble UI Toast) ─── */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #18181B;
+    color: #FAFAFA;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    opacity: 0;
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="page-head">
+    <div>
+      <h1>Brand</h1>
+      <p class="sub">Ownly — visual identity</p>
+    </div>
+    <span class="hint">click any swatch to copy hex</span>
+  </div>
+
+  <!-- ── BRAND PALETTES ──────────────────────────────── -->
+  <div class="section">
+    <div class="section-head">
+      <h2>Brand palettes</h2>
+      <span class="meta">three named families · five tiers each</span>
+    </div>
+    <div class="brand-grid">
+
+      <div class="brand-card" data-palette="primary">
+        <div class="main" style="background:#E97659; color:#FFF1EB;" data-hex="#E97659" tabindex="0" role="button" aria-label="Copy hex #E97659">
+          <div>
+            <div class="name">Ownly Coral</div>
+            <div class="role">primary</div>
+          </div>
+          <div class="ids">
+            <span>primary-main</span>
+            <span>#E97659</span>
+          </div>
+        </div>
+        <div class="rungs">
+          <div class="rung" data-hex="#B14A2E" tabindex="0" role="button" aria-label="Copy hex #B14A2E"><div class="chip" style="background:#B14A2E"></div><div class="lab">Dark</div><div class="hx">#B14A2E</div></div>
+          <div class="rung" data-hex="#FF9776" tabindex="0" role="button" aria-label="Copy hex #FF9776"><div class="chip" style="background:#FF9776"></div><div class="lab">Bright</div><div class="hx">#FF9776</div></div>
+          <div class="rung" data-hex="#FFD4C5" tabindex="0" role="button" aria-label="Copy hex #FFD4C5"><div class="chip" style="background:#FFD4C5"></div><div class="lab">Pastel</div><div class="hx">#FFD4C5</div></div>
+          <div class="rung" data-hex="#FFF1EB" tabindex="0" role="button" aria-label="Copy hex #FFF1EB"><div class="chip" style="background:#FFF1EB"></div><div class="lab">Faded</div><div class="hx">#FFF1EB</div></div>
+        </div>
+      </div>
+
+      <div class="brand-card" data-palette="secondary">
+        <div class="main" style="background:#2D3F2E; color:#EEF3EE;" data-hex="#2D3F2E" tabindex="0" role="button" aria-label="Copy hex #2D3F2E">
+          <div>
+            <div class="name">Forest</div>
+            <div class="role">secondary</div>
+          </div>
+          <div class="ids">
+            <span>secondary-main</span>
+            <span>#2D3F2E</span>
+          </div>
+        </div>
+        <div class="rungs">
+          <div class="rung" data-hex="#1A2519" tabindex="0" role="button" aria-label="Copy hex #1A2519"><div class="chip" style="background:#1A2519"></div><div class="lab">Dark</div><div class="hx">#1A2519</div></div>
+          <div class="rung" data-hex="#4F6B51" tabindex="0" role="button" aria-label="Copy hex #4F6B51"><div class="chip" style="background:#4F6B51"></div><div class="lab">Bright</div><div class="hx">#4F6B51</div></div>
+          <div class="rung" data-hex="#B8C9BA" tabindex="0" role="button" aria-label="Copy hex #B8C9BA"><div class="chip" style="background:#B8C9BA"></div><div class="lab">Pastel</div><div class="hx">#B8C9BA</div></div>
+          <div class="rung" data-hex="#EEF3EE" tabindex="0" role="button" aria-label="Copy hex #EEF3EE"><div class="chip" style="background:#EEF3EE"></div><div class="lab">Faded</div><div class="hx">#EEF3EE</div></div>
+        </div>
+      </div>
+
+      <div class="brand-card" data-palette="accent">
+        <div class="main" style="background:#0D6D72; color:#EBF7F8;" data-hex="#0D6D72" tabindex="0" role="button" aria-label="Copy hex #0D6D72">
+          <div>
+            <div class="name">Lagoon</div>
+            <div class="role">accent</div>
+          </div>
+          <div class="ids">
+            <span>accent-main</span>
+            <span>#0D6D72</span>
+          </div>
+        </div>
+        <div class="rungs">
+          <div class="rung" data-hex="#074247" tabindex="0" role="button" aria-label="Copy hex #074247"><div class="chip" style="background:#074247"></div><div class="lab">Dark</div><div class="hx">#074247</div></div>
+          <div class="rung" data-hex="#16A2AB" tabindex="0" role="button" aria-label="Copy hex #16A2AB"><div class="chip" style="background:#16A2AB"></div><div class="lab">Bright</div><div class="hx">#16A2AB</div></div>
+          <div class="rung" data-hex="#A8E0E5" tabindex="0" role="button" aria-label="Copy hex #A8E0E5"><div class="chip" style="background:#A8E0E5"></div><div class="lab">Pastel</div><div class="hx">#A8E0E5</div></div>
+          <div class="rung" data-hex="#EBF7F8" tabindex="0" role="button" aria-label="Copy hex #EBF7F8"><div class="chip" style="background:#EBF7F8"></div><div class="lab">Faded</div><div class="hx">#EBF7F8</div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── NEUTRAL ─────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-head">
+      <h2>Neutral</h2>
+      <span class="meta">surfaces · borders · muted text</span>
+    </div>
+    <div class="neutral-card">
+      <div>
+        <div class="nm">Sandstone</div>
+        <span class="nm-sub">branded warm gray</span>
+        <div class="meta-line">neutral · derived from primary</div>
+      </div>
+      <div class="neutral-rungs">
+        <div class="rung" data-hex="#1F1A18" tabindex="0" role="button" aria-label="Copy hex #1F1A18"><div class="chip" style="background:#1F1A18"></div><div class="lab">Dark</div><div class="hx">#1F1A18</div></div>
+        <div class="rung main" data-hex="#6B5F5A" tabindex="0" role="button" aria-label="Copy hex #6B5F5A"><div class="chip" style="background:#6B5F5A"></div><div class="lab">Main</div><div class="hx">#6B5F5A</div></div>
+        <div class="rung" data-hex="#948A85" tabindex="0" role="button" aria-label="Copy hex #948A85"><div class="chip" style="background:#948A85"></div><div class="lab">Bright</div><div class="hx">#948A85</div></div>
+        <div class="rung" data-hex="#D6CFCB" tabindex="0" role="button" aria-label="Copy hex #D6CFCB"><div class="chip" style="background:#D6CFCB"></div><div class="lab">Pastel</div><div class="hx">#D6CFCB</div></div>
+        <div class="rung" data-hex="#F5F2F0" tabindex="0" role="button" aria-label="Copy hex #F5F2F0"><div class="chip" style="background:#F5F2F0"></div><div class="lab">Faded</div><div class="hx">#F5F2F0</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GRADIENTS ───────────────────────────────────── -->
+  <div class="section">
+    <div class="section-head">
+      <h2>Gradients</h2>
+      <span class="meta">composed from palette tokens</span>
+    </div>
+    <div class="gradients">
+
+      <div class="grad-card">
+        <div class="grad-banner" style="background: linear-gradient(90deg, #FFD4C5 0%, #FF9776 100%); color: #4A1B0C;"
+             data-gradient="linear-gradient(90deg, #FFD4C5 0%, #FF9776 100%)" data-name="gradient-sunrise"
+             tabindex="0" role="button" aria-label="Copy gradient Sunrise">
+          <div class="nm">Sunrise</div>
+        </div>
+        <div class="grad-foot">
+          <span>gradient-sunrise</span>
+          <div class="stops">
+            <span class="dot" style="background:#FFD4C5"></span><span>primary-pastel</span>
+            <span>→</span>
+            <span class="dot" style="background:#FF9776"></span><span>primary-bright</span>
+            <span style="margin-left:8px">linear · 90°</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="grad-card">
+        <div class="grad-banner" style="background: linear-gradient(135deg, #E97659 0%, #0D6D72 100%); color: #FFF1EB;"
+             data-gradient="linear-gradient(135deg, #E97659 0%, #0D6D72 100%)" data-name="gradient-horizon"
+             tabindex="0" role="button" aria-label="Copy gradient Horizon">
+          <div class="nm">Horizon</div>
+        </div>
+        <div class="grad-foot">
+          <span>gradient-horizon</span>
+          <div class="stops">
+            <span class="dot" style="background:#E97659"></span><span>primary-main</span>
+            <span>→</span>
+            <span class="dot" style="background:#0D6D72"></span><span>accent-main</span>
+            <span style="margin-left:8px">linear · 135°</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── SEMANTIC ────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-head">
+      <h2>Semantic</h2>
+      <span class="meta">state indicators · main + light pair</span>
+    </div>
+    <div class="semantic">
+      <div class="sem-card">
+        <div class="pair">
+          <div class="sw" style="background:#5B8A72" data-hex="#5B8A72" tabindex="0" role="button" aria-label="Copy hex #5B8A72"></div>
+          <div class="sw" style="background:#E5F0EA" data-hex="#E5F0EA" tabindex="0" role="button" aria-label="Copy hex #E5F0EA"></div>
+        </div>
+        <div class="nm">Success</div>
+        <div class="hx">#5B8A72 · #E5F0EA</div>
+      </div>
+      <div class="sem-card">
+        <div class="pair">
+          <div class="sw" style="background:#6B8FAD" data-hex="#6B8FAD" tabindex="0" role="button" aria-label="Copy hex #6B8FAD"></div>
+          <div class="sw" style="background:#E8EFF5" data-hex="#E8EFF5" tabindex="0" role="button" aria-label="Copy hex #E8EFF5"></div>
+        </div>
+        <div class="nm">Info</div>
+        <div class="hx">#6B8FAD · #E8EFF5</div>
+      </div>
+      <div class="sem-card">
+        <div class="pair">
+          <div class="sw" style="background:#CB9661" data-hex="#CB9661" tabindex="0" role="button" aria-label="Copy hex #CB9661"></div>
+          <div class="sw" style="background:#F7EBD9" data-hex="#F7EBD9" tabindex="0" role="button" aria-label="Copy hex #F7EBD9"></div>
+        </div>
+        <div class="nm">Warning</div>
+        <div class="hx">#CB9661 · #F7EBD9</div>
+      </div>
+      <div class="sem-card">
+        <div class="pair">
+          <div class="sw" style="background:#C62828" data-hex="#C62828" tabindex="0" role="button" aria-label="Copy hex #C62828"></div>
+          <div class="sw" style="background:#FBE5E5" data-hex="#FBE5E5" tabindex="0" role="button" aria-label="Copy hex #FBE5E5"></div>
+        </div>
+        <div class="nm">Error</div>
+        <div class="hx">#C62828 · #FBE5E5</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- placeholder toast — production should call the Ensemble UI Toast API instead -->
+<div class="toast" id="toast"></div>
+
+<script>
+  /* placeholder click-to-copy + toast — production should call
+     toast.success('Copied ' + hex) or the equivalent Ensemble UI Toast API */
+  const toast = document.getElementById('toast');
+  let toastTimer;
+  const showToast = (msg) => {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 1400);
+  };
+
+  // single-hex copy targets
+  document.querySelectorAll('[data-hex]').forEach(el => {
+    const copy = async (e) => {
+      e.stopPropagation();
+      const hex = el.dataset.hex;
+      try { await navigator.clipboard.writeText(hex); } catch (err) {}
+      showToast('copied ' + hex);
+    };
+    el.addEventListener('click', copy);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); copy(e); }
+    });
+  });
+
+  // gradient banners copy the resolved CSS gradient string
+  document.querySelectorAll('[data-gradient]').forEach(el => {
+    const copy = async (e) => {
+      e.stopPropagation();
+      const css = el.dataset.gradient;
+      const name = el.dataset.name;
+      try { await navigator.clipboard.writeText(css); } catch (err) {}
+      showToast('copied ' + name);
+    };
+    el.addEventListener('click', copy);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); copy(e); }
+    });
+  });
+</script>
+
+</body>
+</html>

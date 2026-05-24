@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brand colors — redesign mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #FAFAF7;
+    --surface: #FFFFFF;
+    --text-primary: #18181B;
+    --text-secondary: #71717A;
+    --text-tertiary: #A1A1AA;
+    --border-tertiary: rgba(0, 0, 0, 0.08);
+    --border-secondary: rgba(0, 0, 0, 0.14);
+    --border-strong: rgba(0, 0, 0, 0.22);
+    --accent: #E97659;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'Geist Mono', 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  .page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 48px 32px 64px;
+  }
+  .page-head {
+    margin-bottom: 32px;
+  }
+  .page-head h1 {
+    font-size: 28px;
+    font-weight: 500;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .page-head .sub {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+  .tabs {
+    display: flex;
+    gap: 24px;
+    border-bottom: 0.5px solid var(--border-secondary);
+    margin-bottom: 32px;
+    padding-top: 8px;
+  }
+  .tabs a {
+    padding: 8px 0 12px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .tabs a.active {
+    color: var(--text-primary);
+    border-bottom-color: var(--accent);
+    font-weight: 500;
+  }
+  .section { margin-bottom: 40px; }
+  .section h2 {
+    font-size: 17px;
+    font-weight: 500;
+    margin: 0 0 4px;
+    letter-spacing: -0.005em;
+  }
+  .section .cap {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0 0 16px;
+    line-height: 1.55;
+    max-width: 680px;
+  }
+  .section .cap code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: rgba(0, 0, 0, 0.04);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 20px;
+    padding: 16px 0;
+    border-top: 0.5px solid var(--border-tertiary);
+    align-items: center;
+  }
+  .row.last { border-bottom: 0.5px solid var(--border-tertiary); }
+  .meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .meta .role {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    letter-spacing: 0.02em;
+  }
+  .meta .hex {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+  .meta .tok {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+  }
+  .name-input {
+    border: 0;
+    background: transparent;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 2px 5px;
+    margin-left: -5px;
+    width: calc(100% + 5px);
+    color: var(--text-primary);
+    border-radius: 4px;
+    font-family: inherit;
+    letter-spacing: -0.005em;
+  }
+  .name-input:hover { background: rgba(0, 0, 0, 0.03); }
+  .name-input:focus {
+    outline: 1.5px solid var(--text-primary);
+    outline-offset: -1px;
+    background: var(--surface);
+  }
+  .tiers { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .tier { display: flex; flex-direction: column; gap: 5px; }
+  .tier .chip {
+    height: 38px;
+    border-radius: 6px;
+    border: 0.5px solid rgba(0, 0, 0, 0.06);
+  }
+  .tier .lab {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .tier .hx {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-tertiary);
+  }
+  .tier.main .lab { color: var(--text-primary); }
+  .tier.main .chip { box-shadow: 0 0 0 1.5px var(--text-primary); }
+  .add-row { margin-top: 12px; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    background: var(--surface);
+    color: var(--text-primary);
+    border: 0.5px solid var(--border-secondary);
+    border-radius: var(--radius-md);
+    padding: 7px 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .btn:hover { background: rgba(0, 0, 0, 0.03); }
+  .btn .plus { font-size: 14px; line-height: 1; }
+  .btn-sm { font-size: 12px; padding: 4px 10px; }
+  .grad-preview {
+    height: 52px;
+    border-radius: 8px;
+    border: 0.5px solid rgba(0, 0, 0, 0.06);
+  }
+  .grad-stops {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+  }
+  .grad-stops .dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    border: 0.5px solid rgba(0, 0, 0, 0.08);
+    flex-shrink: 0;
+  }
+  .grad-stops .tok {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  .grad-stops .arrow { color: var(--text-tertiary); }
+  .grad-stops .angle {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-tertiary);
+    padding: 3px 8px;
+    background: rgba(0, 0, 0, 0.04);
+    border-radius: 4px;
+  }
+  .themes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .theme-card {
+    background: var(--surface);
+    border: 0.5px solid var(--border-tertiary);
+    border-radius: var(--radius-lg);
+    padding: 16px 18px;
+  }
+  .theme-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .theme-head h3 {
+    font-size: 14px;
+    font-weight: 500;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .theme-head .icon { font-size: 14px; }
+  .bind {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    gap: 10px;
+    align-items: center;
+    padding: 7px 0;
+    border-top: 0.5px solid var(--border-tertiary);
+  }
+  .bind.first { border-top: 0; }
+  .bind .k { font-size: 12px; color: var(--text-secondary); }
+  .bind .v {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-primary);
+  }
+  .bind .sw {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 0.5px solid rgba(0, 0, 0, 0.08);
+    flex-shrink: 0;
+  }
+  .bind .tok { color: var(--text-tertiary); }
+  .semantic { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .sem .pair {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 4px;
+    height: 40px;
+  }
+  .sem .sw {
+    border-radius: 7px;
+    border: 0.5px solid rgba(0, 0, 0, 0.06);
+  }
+  .sem .nm {
+    font-size: 13px;
+    font-weight: 500;
+    margin-top: 6px;
+  }
+  .sem .hx {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-tertiary);
+    margin-top: 2px;
+  }
+  .neutral-ctrl {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+  }
+  .neutral-ctrl select {
+    font-family: inherit;
+    font-size: 11px;
+    padding: 3px 6px;
+    height: 24px;
+    border: 0.5px solid var(--border-secondary);
+    background: var(--surface);
+    border-radius: 4px;
+    color: var(--text-primary);
+  }
+  .icon-sun, .icon-moon, .icon-wand, .icon-plus {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    fill: none;
+    vertical-align: -3px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="page-head">
+    <h1>Brand</h1>
+    <p class="sub">Your company's visual identity — define once, use everywhere</p>
+  </div>
+
+  <nav class="tabs">
+    <a href="#">Overview</a>
+    <a href="#" class="active">Colors</a>
+    <a href="#">Typography</a>
+    <a href="#">Logos</a>
+    <a href="#">Social / sharing</a>
+    <a href="#">Languages</a>
+    <a href="#">Messaging</a>
+    <a href="#">Identity</a>
+  </nav>
+
+  <!-- ── BRAND COLORS ──────────────────────────────────────── -->
+  <div class="section">
+    <h2>Brand colors</h2>
+    <p class="cap">Type the Main hex and a name. Dark, Bright, Pastel, and Faded derive automatically. Palettes are referenced by role (<code>primary-bright</code>), so renaming doesn't break consumer code.</p>
+
+    <div class="row">
+      <div class="meta">
+        <span class="role">Primary</span>
+        <input class="name-input" value="Ownly Coral">
+        <span class="hex">#E97659</span>
+      </div>
+      <div class="tiers">
+        <div class="tier"><div class="chip" style="background:#B14A2E"></div><div class="lab">Dark</div><div class="hx">#B14A2E</div></div>
+        <div class="tier main"><div class="chip" style="background:#E97659"></div><div class="lab">Main</div><div class="hx">#E97659</div></div>
+        <div class="tier"><div class="chip" style="background:#FF9776"></div><div class="lab">Bright</div><div class="hx">#FF9776</div></div>
+        <div class="tier"><div class="chip" style="background:#FFD4C5"></div><div class="lab">Pastel</div><div class="hx">#FFD4C5</div></div>
+        <div class="tier"><div class="chip" style="background:#FFF1EB"></div><div class="lab">Faded</div><div class="hx">#FFF1EB</div></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="meta">
+        <span class="role">Secondary</span>
+        <input class="name-input" value="Forest">
+        <span class="hex">#2D3F2E</span>
+      </div>
+      <div class="tiers">
+        <div class="tier"><div class="chip" style="background:#1A2519"></div><div class="lab">Dark</div><div class="hx">#1A2519</div></div>
+        <div class="tier main"><div class="chip" style="background:#2D3F2E"></div><div class="lab">Main</div><div class="hx">#2D3F2E</div></div>
+        <div class="tier"><div class="chip" style="background:#4F6B51"></div><div class="lab">Bright</div><div class="hx">#4F6B51</div></div>
+        <div class="tier"><div class="chip" style="background:#B8C9BA"></div><div class="lab">Pastel</div><div class="hx">#B8C9BA</div></div>
+        <div class="tier"><div class="chip" style="background:#EEF3EE"></div><div class="lab">Faded</div><div class="hx">#EEF3EE</div></div>
+      </div>
+    </div>
+
+    <div class="row last">
+      <div class="meta">
+        <span class="role">Accent</span>
+        <input class="name-input" value="Lagoon">
+        <span class="hex">#0D6D72</span>
+      </div>
+      <div class="tiers">
+        <div class="tier"><div class="chip" style="background:#074247"></div><div class="lab">Dark</div><div class="hx">#074247</div></div>
+        <div class="tier main"><div class="chip" style="background:#0D6D72"></div><div class="lab">Main</div><div class="hx">#0D6D72</div></div>
+        <div class="tier"><div class="chip" style="background:#16A2AB"></div><div class="lab">Bright</div><div class="hx">#16A2AB</div></div>
+        <div class="tier"><div class="chip" style="background:#A8E0E5"></div><div class="lab">Pastel</div><div class="hx">#A8E0E5</div></div>
+        <div class="tier"><div class="chip" style="background:#EBF7F8"></div><div class="lab">Faded</div><div class="hx">#EBF7F8</div></div>
+      </div>
+    </div>
+
+    <div class="add-row">
+      <button class="btn"><span class="plus">+</span> Add palette</button>
+    </div>
+  </div>
+
+  <!-- ── NEUTRAL ──────────────────────────────────────── -->
+  <div class="section">
+    <h2>Neutral</h2>
+    <p class="cap">Surfaces, borders, and muted text. Derived from Primary by default — swap the hue for a different feel.</p>
+
+    <div class="row last" style="border-top: 0.5px solid var(--border-tertiary);">
+      <div class="meta">
+        <span class="role">Neutral</span>
+        <input class="name-input" value="Sandstone">
+        <div class="neutral-ctrl">
+          <span>Hue:</span>
+          <select>
+            <option>Branded</option>
+            <option>Warm</option>
+            <option>Cool</option>
+            <option>True</option>
+          </select>
+        </div>
+      </div>
+      <div class="tiers">
+        <div class="tier"><div class="chip" style="background:#1F1A18"></div><div class="lab">Dark</div><div class="hx">#1F1A18</div></div>
+        <div class="tier main"><div class="chip" style="background:#6B5F5A"></div><div class="lab">Main</div><div class="hx">#6B5F5A</div></div>
+        <div class="tier"><div class="chip" style="background:#948A85"></div><div class="lab">Bright</div><div class="hx">#948A85</div></div>
+        <div class="tier"><div class="chip" style="background:#D6CFCB"></div><div class="lab">Pastel</div><div class="hx">#D6CFCB</div></div>
+        <div class="tier"><div class="chip" style="background:#F5F2F0"></div><div class="lab">Faded</div><div class="hx">#F5F2F0</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GRADIENTS ──────────────────────────────────────── -->
+  <div class="section">
+    <h2>Gradients</h2>
+    <p class="cap">Named gradients composed from your palette rungs plus the system tokens <code>white</code> and <code>black</code> — never raw hex. Reference as <code>gradient-sunrise</code> in consumer code. Renaming or shifting a palette rung cascades automatically.</p>
+
+    <div class="row">
+      <div class="meta">
+        <span class="role">Gradient</span>
+        <input class="name-input" value="Sunrise">
+        <span class="tok">gradient-sunrise</span>
+      </div>
+      <div>
+        <div class="grad-preview" style="background: linear-gradient(90deg, #FFD4C5 0%, #FF9776 100%);"></div>
+        <div class="grad-stops">
+          <span class="dot" style="background:#FFD4C5"></span><span class="tok">primary-pastel</span>
+          <span class="arrow">→</span>
+          <span class="dot" style="background:#FF9776"></span><span class="tok">primary-bright</span>
+          <span class="angle">linear · 90°</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="row last">
+      <div class="meta">
+        <span class="role">Gradient</span>
+        <input class="name-input" value="Horizon">
+        <span class="tok">gradient-horizon</span>
+      </div>
+      <div>
+        <div class="grad-preview" style="background: linear-gradient(135deg, #E97659 0%, #0D6D72 100%);"></div>
+        <div class="grad-stops">
+          <span class="dot" style="background:#E97659"></span><span class="tok">primary-main</span>
+          <span class="arrow">→</span>
+          <span class="dot" style="background:#0D6D72"></span><span class="tok">accent-main</span>
+          <span class="angle">linear · 135°</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="add-row">
+      <button class="btn"><span class="plus">+</span> Add gradient</button>
+    </div>
+  </div>
+
+  <!-- ── THEMES ──────────────────────────────────────── -->
+  <div class="section">
+    <h2>Themes</h2>
+    <p class="cap">Light and Dark canvases bind tokens to palette rungs. Logo lockups for dark backgrounds require a Dark theme — without one, only light-bg lockups render.</p>
+
+    <div class="themes">
+      <div class="theme-card">
+        <div class="theme-head">
+          <h3>
+            <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+            Light theme
+          </h3>
+        </div>
+        <div class="bind first"><span class="k">Canvas</span><span class="v"><span class="sw" style="background:#FAF8F4"></span>#FAF8F4 <span class="tok">· neutral-faded</span></span></div>
+        <div class="bind"><span class="k">Surface</span><span class="v"><span class="sw" style="background:#FFFFFF;border-color:rgba(0,0,0,0.15)"></span>#FFFFFF</span></div>
+        <div class="bind"><span class="k">Text</span><span class="v"><span class="sw" style="background:#0A0A0A"></span>#0A0A0A <span class="tok">· auto</span></span></div>
+        <div class="bind"><span class="k">Brand</span><span class="v"><span class="sw" style="background:#E97659"></span><span class="tok">primary-main</span></span></div>
+        <div class="bind"><span class="k">Brand bg</span><span class="v"><span class="sw" style="background:#FFF1EB"></span><span class="tok">primary-faded</span></span></div>
+      </div>
+
+      <div class="theme-card">
+        <div class="theme-head">
+          <h3>
+            <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            Dark theme
+          </h3>
+          <button class="btn btn-sm">
+            <svg class="icon-wand" viewBox="0 0 24 24" style="width:12px;height:12px"><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M15 9h0M17.8 6.2L19 5M3 21l9-9M12.2 6.2L11 5"/></svg>
+            Generate from light
+          </button>
+        </div>
+        <div class="bind first"><span class="k">Canvas</span><span class="v"><span class="sw" style="background:#1F1A18"></span>#1F1A18 <span class="tok">· neutral-dark</span></span></div>
+        <div class="bind"><span class="k">Surface</span><span class="v"><span class="sw" style="background:#2A2422"></span>#2A2422</span></div>
+        <div class="bind"><span class="k">Text</span><span class="v"><span class="sw" style="background:#FAFAFA;border-color:rgba(0,0,0,0.15)"></span>#FAFAFA <span class="tok">· auto</span></span></div>
+        <div class="bind"><span class="k">Brand</span><span class="v"><span class="sw" style="background:#FF9776"></span><span class="tok">primary-bright ↑</span></span></div>
+        <div class="bind"><span class="k">Brand bg</span><span class="v"><span class="sw" style="background:#B14A2E"></span><span class="tok">primary-dark</span></span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SEMANTIC ──────────────────────────────────────── -->
+  <div class="section">
+    <h2>Semantic colors</h2>
+    <p class="cap">State indicators — independent of brand palettes. Main fill plus a Light wash for tinted backgrounds.</p>
+
+    <div class="semantic">
+      <div class="sem">
+        <div class="pair"><div class="sw" style="background:#5B8A72"></div><div class="sw" style="background:#E5F0EA"></div></div>
+        <div class="nm">Success</div>
+        <div class="hx">#5B8A72 · #E5F0EA</div>
+      </div>
+      <div class="sem">
+        <div class="pair"><div class="sw" style="background:#6B8FAD"></div><div class="sw" style="background:#E8EFF5"></div></div>
+        <div class="nm">Info</div>
+        <div class="hx">#6B8FAD · #E8EFF5</div>
+      </div>
+      <div class="sem">
+        <div class="pair"><div class="sw" style="background:#CB9661"></div><div class="sw" style="background:#F7EBD9"></div></div>
+        <div class="nm">Warning</div>
+        <div class="hx">#CB9661 · #F7EBD9</div>
+      </div>
+      <div class="sem">
+        <div class="pair"><div class="sw" style="background:#C62828"></div><div class="sw" style="background:#FBE5E5"></div></div>
+        <div class="nm">Error</div>
+        <div class="hx">#C62828 · #FBE5E5</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

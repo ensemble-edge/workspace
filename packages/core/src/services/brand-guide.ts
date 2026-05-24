@@ -105,6 +105,21 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
     .filter(([k, v]) => isHex(v) && !k.startsWith('logo_'))
     .map(([k, v]) => ({ name: prettifyTokenKey(k), value: v }));
 
+  // v0.1.55: brand-colors HTML emitter — same visual model as the
+  // BrandCard display mode used on the Brand Overview tab. Falls
+  // back to the legacy swatch grid when the new doc isn't present
+  // (which on a single-workspace install should never happen, but
+  // the legacy path stays as a safety net for graceful degradation).
+  let brandColorsHtml = '';
+  try {
+    const { loadBrandColors } = await import('./brand-colors/load');
+    const { renderBrandColorsHtml } = await import('./brand-colors/render-html');
+    const doc = await loadBrandColors(env.DB, workspaceId);
+    brandColorsHtml = renderBrandColorsHtml(doc);
+  } catch {
+    /* fall through to legacy */
+  }
+
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -264,14 +279,19 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
       ` : ''}
 
       ${
-        colorEntries.length > 0
+        brandColorsHtml
           ? `<section>
-              <h2>Colors</h2>
-              <div class="grid">
-                ${colorEntries.map((c) => swatch(c.name, c.value)).join('')}
-              </div>
+              <h2>Brand colors</h2>
+              ${brandColorsHtml}
             </section>`
-          : ''
+          : colorEntries.length > 0
+            ? `<section>
+                <h2>Colors</h2>
+                <div class="grid">
+                  ${colorEntries.map((c) => swatch(c.name, c.value)).join('')}
+                </div>
+              </section>`
+            : ''
       }
 
       <section>
