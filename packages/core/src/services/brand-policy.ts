@@ -200,6 +200,21 @@ export function defaultPolicy(): LogoPolicy {
 }
 
 /**
+ * Forward-migrate a stored backgrounds array. Preserves operator
+ * customizations on existing IDs; appends any built-in IDs that are
+ * missing (e.g. true-white/true-black on policies stored before v0.1.60).
+ */
+function mergeBackgrounds(
+  stored: BackgroundOption[] | undefined,
+  defaults: BackgroundOption[],
+): BackgroundOption[] {
+  if (!stored) return defaults;
+  const storedIds = new Set(stored.map((b) => b.id));
+  const missing = defaults.filter((b) => !storedIds.has(b.id));
+  return [...stored, ...missing];
+}
+
+/**
  * Load the policy. Returns the default when no policy is set.
  */
 export async function loadPolicy(
@@ -226,7 +241,13 @@ export async function loadPolicy(
         'horizontal':    { ...def.compositions['horizontal'],    ...parsed.compositions?.['horizontal'] },
       },
       finishes: parsed.finishes ?? def.finishes,
-      backgrounds: parsed.backgrounds ?? def.backgrounds,
+      // v0.1.61: forward-migrate stored backgrounds arrays that pre-date
+      // the five-variant axis. Workspaces with a saved logo_policy from
+      // v0.1.32–v0.1.59 only have ['transparent','light','dark']; append
+      // any missing built-in backgrounds (true-white, true-black) so the
+      // variants matrix and public /brand guide automatically expand.
+      // Operator customizations on existing entries are preserved.
+      backgrounds: mergeBackgrounds(parsed.backgrounds, def.backgrounds),
       bannedPairs: parsed.bannedPairs ?? def.bannedPairs,
       backgrounded: { ...def.backgrounded!, ...parsed.backgrounded },
     };

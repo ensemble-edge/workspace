@@ -307,6 +307,19 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
         border-radius: 4px;
       }
       footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid #e5e7eb; font-size: 13px; color: #6b7280; }
+      /* v0.1.61: mobile breakpoints. Phones (<=640px) collapse the
+         typography metadata sidebar above the specimen, and tighten
+         the section padding. The brand-colors HTML emitter handles
+         its own responsive collapse via auto-fit + minmax inline. */
+      @media (max-width: 640px) {
+        .container { padding: 32px 16px; }
+        .typo-row {
+          grid-template-columns: 1fr;
+          gap: 12px;
+          padding: 20px 16px;
+        }
+        .typo-meta .stack, .typo-meta .vitals { font-size: 11px; }
+      }
     </style>
   </head>
   <body>

@@ -647,7 +647,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.60-token-pickers-everywhere-five-bg-variants',
+      buildFingerprint: 'v0.1.61-bg-forward-migration-mobile-brand-guide',
       timestamp: new Date().toISOString(),
     });
   });

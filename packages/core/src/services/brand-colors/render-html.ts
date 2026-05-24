@@ -52,12 +52,12 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
             <span>${r.main.toUpperCase()}</span>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px;background:#fff;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:8px;padding:12px;background:#fff;">
           ${(['dark', 'bright', 'pastel', 'faded'] as const).map((rung) => `
-            <div style="display:flex;flex-direction:column;gap:4px;">
+            <div style="display:flex;flex-direction:column;gap:4px;min-width:0;">
               <div data-hex="${r[rung]}" title="Click to copy ${r[rung].toUpperCase()}" style="height:24px;border-radius:6px;background:${r[rung]};border:0.5px solid rgba(0,0,0,0.08);"></div>
               <div style="font-size:11px;font-weight:500;color:#18181b;text-transform:capitalize;">${rung}</div>
-              <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9.5px;color:#71717a;">${r[rung].toUpperCase()}</div>
+              <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9.5px;color:#71717a;overflow-wrap:anywhere;">${r[rung].toUpperCase()}</div>
             </div>
           `).join('')}
         </div>
@@ -69,25 +69,23 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
     const p = doc.palettes.neutral;
     const r = palettes.neutral;
     return `
-      <div style="border-radius:14px;border:0.5px solid rgba(0,0,0,0.07);background:#fff;padding:20px;">
-        <div style="display:grid;grid-template-columns:180px 1fr;gap:24px;align-items:center;">
-          <div>
-            <div style="font-size:20px;font-weight:400;letter-spacing:-0.005em;">${escapeHtml(p.name)}</div>
-            <div style="font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:0.08em;color:#71717a;margin-top:2px;">neutral</div>
-            <div style="font-size:12px;color:#71717a;margin-top:6px;">Surfaces · borders · muted text.</div>
-          </div>
-          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;">
-            ${(['dark', 'main', 'bright', 'pastel', 'faded'] as const).map((rung) => {
-              const isMain = rung === 'main';
-              return `
-                <div style="display:flex;flex-direction:column;gap:4px;">
-                  <div data-hex="${r[rung]}" title="Click to copy ${r[rung].toUpperCase()}" style="height:32px;border-radius:6px;background:${r[rung]};border:0.5px solid rgba(0,0,0,0.08);${isMain ? 'box-shadow:0 0 0 1.5px #18181b;' : ''}"></div>
-                  <div style="font-size:11px;font-weight:500;color:#18181b;text-transform:capitalize;">${rung}</div>
-                  <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9.5px;color:#71717a;">${r[rung].toUpperCase()}</div>
-                </div>
-              `;
-            }).join('')}
-          </div>
+      <div style="border-radius:14px;border:0.5px solid rgba(0,0,0,0.07);background:#fff;padding:20px;display:flex;flex-direction:column;gap:18px;">
+        <div style="min-width:0;">
+          <div style="font-size:20px;font-weight:400;letter-spacing:-0.005em;">${escapeHtml(p.name)}</div>
+          <div style="font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:0.08em;color:#71717a;margin-top:2px;">neutral</div>
+          <div style="font-size:12px;color:#71717a;margin-top:6px;">Surfaces · borders · muted text.</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:8px;">
+          ${(['dark', 'main', 'bright', 'pastel', 'faded'] as const).map((rung) => {
+            const isMain = rung === 'main';
+            return `
+              <div style="display:flex;flex-direction:column;gap:4px;min-width:0;">
+                <div data-hex="${r[rung]}" title="Click to copy ${r[rung].toUpperCase()}" style="height:32px;border-radius:6px;background:${r[rung]};border:0.5px solid rgba(0,0,0,0.08);${isMain ? 'box-shadow:0 0 0 1.5px #18181b;' : ''}"></div>
+                <div style="font-size:11px;font-weight:500;color:#18181b;text-transform:capitalize;">${rung}</div>
+                <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9.5px;color:#71717a;overflow-wrap:anywhere;">${r[rung].toUpperCase()}</div>
+              </div>
+            `;
+          }).join('')}
         </div>
       </div>
     `;
@@ -109,18 +107,18 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
         <div style="height:90px;display:flex;align-items:center;padding:0 20px;background:${css};color:${fg};">
           <div style="font-size:28px;font-weight:400;letter-spacing:-0.005em;">${escapeHtml(g.name)}</div>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;font-size:11px;flex-wrap:wrap;gap:8px;">
-          <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#71717a;">gradient-${escapeHtml(g.slug)}</span>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;font-size:11px;flex-wrap:wrap;gap:8px;min-width:0;">
+          <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#71717a;overflow-wrap:anywhere;min-width:0;">gradient-${escapeHtml(g.slug)}</span>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;">
             ${stops.map((s, i) => `
               ${i > 0 ? '<span style="color:#a1a1aa;">→</span>' : ''}
-              <span style="display:inline-flex;align-items:center;gap:6px;">
-                <span style="width:14px;height:14px;border-radius:4px;border:0.5px solid rgba(0,0,0,0.08);background:${s.hex};"></span>
-                <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#71717a;">${escapeHtml(s.token)}</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;min-width:0;">
+                <span style="width:14px;height:14px;border-radius:4px;border:0.5px solid rgba(0,0,0,0.08);background:${s.hex};flex-shrink:0;"></span>
+                <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#71717a;overflow-wrap:anywhere;">${escapeHtml(s.token)}</span>
               </span>
             `).join('')}
           </div>
-          <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#71717a;background:rgba(0,0,0,0.05);padding:2px 8px;border-radius:4px;">${g.mode === 'radial' ? 'radial' : `linear · ${g.angle}°`}</span>
+          <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#71717a;background:rgba(0,0,0,0.05);padding:2px 8px;border-radius:4px;flex-shrink:0;">${g.mode === 'radial' ? 'radial' : `linear · ${g.angle}°`}</span>
         </div>
       </div>
     `;
@@ -130,13 +128,13 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
     const pair = doc.semantic[role];
     const label = role.charAt(0).toUpperCase() + role.slice(1);
     return `
-      <div style="display:flex;flex-direction:column;gap:6px;">
+      <div style="display:flex;flex-direction:column;gap:6px;min-width:0;">
         <div style="display:grid;grid-template-columns:2fr 1fr;gap:4px;height:40px;">
           <div data-hex="${pair.main}" title="Click to copy ${pair.main.toUpperCase()}" style="border-radius:6px;background:${pair.main};border:0.5px solid rgba(0,0,0,0.08);"></div>
           <div data-hex="${pair.light}" title="Click to copy ${pair.light.toUpperCase()}" style="border-radius:6px;background:${pair.light};border:0.5px solid rgba(0,0,0,0.08);"></div>
         </div>
         <div style="font-size:13px;font-weight:500;">${label}</div>
-        <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#71717a;">${pair.main.toUpperCase()} · ${pair.light.toUpperCase()}</div>
+        <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#71717a;overflow-wrap:anywhere;">${pair.main.toUpperCase()} · ${pair.light.toUpperCase()}</div>
       </div>
     `;
   };
@@ -152,7 +150,7 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
     <div style="display:flex;flex-direction:column;gap:40px;">
       <section>
         ${sectionHead('Brand palettes', 'primary · secondary · accent')}
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;">
           ${palette('primary')}
           ${palette('secondary')}
           ${palette('accent')}
@@ -175,7 +173,7 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
 
       <section>
         ${sectionHead('Semantic', 'state · main + light')}
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;">
           ${semanticCell('success')}
           ${semanticCell('info')}
           ${semanticCell('warning')}
