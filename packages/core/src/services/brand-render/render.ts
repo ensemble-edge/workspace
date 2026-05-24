@@ -25,7 +25,7 @@
  */
 import type { Env } from '../../types';
 import {
-  loadPolicy, isPairAllowed,
+  loadEffectivePolicy, isPairAllowed,
   type CompositionId, type FinishId, type LogoPolicy,
 } from '../brand-policy';
 import {
@@ -70,6 +70,9 @@ export interface RenderRequest {
     iconPosition: 'top' | 'bottom';
     crossAlign: number;
     backgroundedPadding: number;
+    /** v0.1.63: live-preview tile color overrides. */
+    lightTile: string;
+    darkTile: string;
   }>;
 }
 
@@ -82,7 +85,7 @@ export interface RenderResult {
 
 export async function renderBrandAssetV2(req: RenderRequest): Promise<RenderResult | null> {
   // ── 1. Policy + tokens + colors ──
-  let policy = await loadPolicy(req.env.DB, req.workspaceId);
+  let policy = await loadEffectivePolicy(req.env.DB, req.workspaceId);
   const tokens = await loadIdentityTokens(req.env, req.workspaceId);
   const brandColors = await readBrandColors(req.env, req.workspaceId);
 
@@ -226,6 +229,14 @@ async function produceAsset(inputs: ProduceInputs): Promise<CachedAsset> {
   //
   // req.backgrounded is kept as a back-compat input but no longer
   // gates anything — the background axis itself decides.
+  // v0.1.63: compute canvas dimensions BEFORE wrapping the tile so
+  // wrapInBackground can stretch to fill them with explicit pixels
+  // (avoids percentage-resolution drift in Satori — see
+  // wrapInBackground for the failure mode this avoids).
+  const { width, height } = req.faviconSize
+    ? { width: req.faviconSize, height: req.faviconSize }
+    : canvasSize(req.composition);
+
   const bg = policy.backgrounds.find((b) => b.id === req.backgroundId);
   if (bg && bg.id !== 'transparent') {
     // v0.1.60: five background variants.
@@ -263,17 +274,10 @@ async function produceAsset(inputs: ProduceInputs): Promise<CachedAsset> {
       inner: tree,
       tileColor,
       paddingEm,
+      canvasWidth: width,
+      canvasHeight: height,
     });
   }
-
-  // Canvas dimensions for Satori.
-  // v0.1.53: favicon suite passes faviconSize to force a square
-  // canvas at the exact pixel size needed (32/180/192/512). When
-  // unset, the default canvasSize() picks a generous canvas based
-  // on composition.
-  const { width, height } = req.faviconSize
-    ? { width: req.faviconSize, height: req.faviconSize }
-    : canvasSize(req.composition);
 
   // Load fonts (text-mode wordmark only — image-mode doesn't need fonts).
   const fontRequests = collectFontRequests(wordmarkInputs);
@@ -459,6 +463,13 @@ function applyOverridesToPolicy(
       allowed: true,
       padding: overrides!.backgroundedPadding,
     };
+  }
+  // v0.1.63: live tile-color overrides for the editor preview.
+  if (overrides!.lightTile != null && next.backgrounded) {
+    next.backgrounded = { ...next.backgrounded, lightTile: overrides!.lightTile };
+  }
+  if (overrides!.darkTile != null && next.backgrounded) {
+    next.backgrounded = { ...next.backgrounded, darkTile: overrides!.darkTile };
   }
   return next;
 }

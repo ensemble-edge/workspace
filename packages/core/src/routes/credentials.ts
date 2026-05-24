@@ -215,8 +215,8 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/core/brand/logo-policy', async (c) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
-    const { loadPolicy, effectiveBannedPairs } = await import('../services/brand-policy');
-    const policy = await loadPolicy(c.env.DB, workspace.id);
+    const { loadEffectivePolicy, effectiveBannedPairs } = await import('../services/brand-policy');
+    const policy = await loadEffectivePolicy(c.env.DB, workspace.id);
 
     // Fetch brand colors needed for contrast-based ban computation.
     const rows = await c.env.DB.prepare(
@@ -404,6 +404,8 @@ export function createCredentialsRoutes(): App {
         iconPosition?: 'top' | 'bottom';
         crossAlign?: number;
         backgroundedPadding?: number;
+        lightTile?: string;
+        darkTile?: string;
       };
     },
   ): Promise<Response> {
@@ -490,6 +492,8 @@ export function createCredentialsRoutes(): App {
       iconPosition: c.req.query('iconPosition') as 'top' | 'bottom' | undefined,
       crossAlign: numQ('crossAlign'),
       backgroundedPadding: numQ('backgroundedPadding'),
+      lightTile: c.req.query('lightTile') || undefined,
+      darkTile:  c.req.query('darkTile')  || undefined,
     };
     const hasOverride = Object.values(overrides).some((v) => v !== undefined);
     return handleBrandRender(c, composition, finish, backgroundId, {
@@ -589,6 +593,8 @@ export function createCredentialsRoutes(): App {
       iconPosition: c.req.query('iconPosition') as 'top' | 'bottom' | undefined,
       crossAlign: numQ('crossAlign'),
       backgroundedPadding: numQ('backgroundedPadding'),
+      lightTile: c.req.query('lightTile') || undefined,
+      darkTile:  c.req.query('darkTile')  || undefined,
     };
     const hasOverride = Object.values(overrides).some((v) => v !== undefined);
     // v0.1.54: the `-bg-` path prefix is now a no-op alias. Earlier
@@ -647,7 +653,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.62-tile-fill-canvas-click-to-copy-mobile-typography',
+      buildFingerprint: 'v0.1.63-uniform-padding-white-black-toggles-live-tile-preview',
       timestamp: new Date().toISOString(),
     });
   });

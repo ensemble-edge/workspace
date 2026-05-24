@@ -79,6 +79,16 @@ export interface BackgroundedConfig {
   /** Backgrounded-on-dark variant approved. */
   darkAllowed: boolean;
   /**
+   * v0.1.63: true-white (universal #FFFFFF) variant approved.
+   * Defaults true on existing policies via mergeBackgrounded.
+   */
+  whiteAllowed?: boolean;
+  /**
+   * v0.1.63: true-black (universal #0A0A0A) variant approved.
+   * Defaults true on existing policies via mergeBackgrounded.
+   */
+  blackAllowed?: boolean;
+  /**
    * Outer padding between the logo and the background-tile edge, in
    * em (relative to the wordmark/icon height inside the tile).
    * Default: 0.5em.
@@ -194,6 +204,8 @@ export function defaultPolicy(): LogoPolicy {
       allowed: false,
       lightAllowed: true,
       darkAllowed: true,
+      whiteAllowed: true,
+      blackAllowed: true,
       padding: 0.5,
     },
   };
@@ -212,6 +224,37 @@ function mergeBackgrounds(
   const storedIds = new Set(stored.map((b) => b.id));
   const missing = defaults.filter((b) => !storedIds.has(b.id));
   return [...stored, ...missing];
+}
+
+/**
+ * v0.1.63: reconcile the backgrounded allowed flags into the
+ * backgrounds[i].allowed source of truth that the variants matrix
+ * and isPairAllowed read.
+ *
+ * Before v0.1.63 the BackgroundedConfig fields (lightAllowed,
+ * darkAllowed) were stored but no rendering code read them — the
+ * matrix filtered on backgrounds[i].allowed only. That meant the
+ * Brand → Logos light/dark toggles were silently dead.
+ *
+ * This function projects all four allowed flags into the backgrounds
+ * array on every load so the two state stores stay synchronized. The
+ * BackgroundedConfig flags remain the operator-facing UI state; the
+ * backgrounds array is the read source of truth.
+ *
+ * Transparent stays always-allowed (it's not gated by any toggle).
+ */
+function reconcileBackgroundsAllowed(
+  backgrounds: BackgroundOption[],
+  cfg: BackgroundedConfig,
+): BackgroundOption[] {
+  return backgrounds.map((bg) => {
+    if (bg.id === 'transparent') return bg;
+    if (bg.id === 'light')       return { ...bg, allowed: cfg.lightAllowed };
+    if (bg.id === 'dark')        return { ...bg, allowed: cfg.darkAllowed };
+    if (bg.id === 'true-white')  return { ...bg, allowed: cfg.whiteAllowed !== false };
+    if (bg.id === 'true-black')  return { ...bg, allowed: cfg.blackAllowed !== false };
+    return bg;
+  });
 }
 
 /**
@@ -254,6 +297,26 @@ export async function loadPolicy(
   } catch {
     return defaultPolicy();
   }
+}
+
+/**
+ * Load + reconcile. Public entry point: same as loadPolicy() but
+ * projects the backgrounded allowed flags into backgrounds[i].allowed
+ * so the variants matrix and isPairAllowed see consistent state.
+ *
+ * All read paths (matrix render, /brand guide, isPairAllowed) go
+ * through this. Save paths still use savePolicy() which persists
+ * the BackgroundedConfig flags as operator-facing UI state.
+ */
+export async function loadEffectivePolicy(
+  db: D1Database,
+  workspaceId: string,
+): Promise<LogoPolicy> {
+  const p = await loadPolicy(db, workspaceId);
+  return {
+    ...p,
+    backgrounds: reconcileBackgroundsAllowed(p.backgrounds, p.backgrounded!),
+  };
 }
 
 /**

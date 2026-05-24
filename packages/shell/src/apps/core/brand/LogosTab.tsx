@@ -859,6 +859,9 @@ type LogoPolicyShape = {
     allowed: boolean;
     lightAllowed: boolean;
     darkAllowed: boolean;
+    /** v0.1.63: universal high-contrast variant toggles. */
+    whiteAllowed?: boolean;
+    blackAllowed?: boolean;
     padding: number;
     /** v0.1.60: tile color refs. */
     lightTile?: string;
@@ -967,7 +970,7 @@ function CompositionPolicyEditors({
         key={`s-${reloadKey}`}
       />
       <BackgroundSettingsCard
-        savedConfig={savedPolicy.backgrounded ?? { allowed: true, lightAllowed: true, darkAllowed: true, padding: 0.5 }}
+        savedConfig={savedPolicy.backgrounded ?? { allowed: true, lightAllowed: true, darkAllowed: true, whiteAllowed: true, blackAllowed: true, padding: 0.5 }}
         workspaceSlug={workspaceSlug}
         aliasPath={aliasPath}
         onSave={(c) => saveSlice({ backgrounded: c })}
@@ -1184,6 +1187,9 @@ interface BackgroundedConfig {
   allowed: boolean;
   lightAllowed: boolean;
   darkAllowed: boolean;
+  /** v0.1.63: universal high-contrast variant toggles. */
+  whiteAllowed?: boolean;
+  blackAllowed?: boolean;
   padding: number;
   /** v0.1.60: tile color refs (token, gradient ref, or hex). */
   lightTile?: string;
@@ -1254,8 +1260,12 @@ function BackgroundSettingsCard({
     : `/_ensemble/brand/render/${tail}`;
   // Live-preview override: bypasses cache so slider drags update
   // immediately without waiting on the content-hashed render path.
+  // v0.1.63: also include lightTile/darkTile in the URL so changing
+  // the tile-color picker also re-renders the preview live.
   const params = new URLSearchParams();
   params.set('backgroundedPadding', String(draft.padding));
+  if (draft.lightTile) params.set('lightTile', draft.lightTile);
+  if (draft.darkTile)  params.set('darkTile',  draft.darkTile);
   const previewUrl = `${base}?${params.toString()}`;
 
   return (
@@ -1353,6 +1363,34 @@ function BackgroundSettingsCard({
                 className="w-full"
               />
             )}
+          </div>
+        </div>
+
+        {/* v0.1.63: universal high-contrast variants. No token picker
+            — these are fixed #FFFFFF / #0A0A0A by spec. Operators can
+            still gate whether the variants exist via the toggle, so
+            a brand that forbids pure-white/pure-black backgrounds
+            (some print-only brands do) can disable them entirely. */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-md border p-3 flex items-center justify-between">
+            <div className="space-y-0.5">
+              <p className="text-xs font-medium">White background</p>
+              <p className="text-[10px] text-muted-foreground font-mono">#FFFFFF · universal</p>
+            </div>
+            <Switch
+              checked={draft.whiteAllowed !== false}
+              onCheckedChange={(v) => setDraft({ ...draft, whiteAllowed: v })}
+            />
+          </div>
+          <div className="rounded-md border p-3 flex items-center justify-between">
+            <div className="space-y-0.5">
+              <p className="text-xs font-medium">Black background</p>
+              <p className="text-[10px] text-muted-foreground font-mono">#0A0A0A · universal</p>
+            </div>
+            <Switch
+              checked={draft.blackAllowed !== false}
+              onCheckedChange={(v) => setDraft({ ...draft, blackAllowed: v })}
+            />
           </div>
         </div>
 

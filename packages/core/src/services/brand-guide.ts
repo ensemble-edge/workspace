@@ -81,8 +81,8 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
   // v0.1.32+: policy-driven approved + banned variants. The variants
   // gallery pulls live from the generator endpoint; the banned-uses
   // gallery renders the same logo with red Xs and a reason caption.
-  const { loadPolicy, effectiveBannedPairs } = await import('./brand-policy');
-  const policy = await loadPolicy(env.DB, workspaceId);
+  const { loadEffectivePolicy, effectiveBannedPairs } = await import('./brand-policy');
+  const policy = await loadEffectivePolicy(env.DB, workspaceId);
   const brandColors = {
     bgLight: brand.tokens['brand-background-light'] || '#ffffff',
     bgDark: brand.tokens['brand-background-dark'] || '#0a0a0a',

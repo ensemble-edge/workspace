@@ -343,6 +343,11 @@ export interface BackgroundedInputs {
   tileColor: string;
   /** Outer padding as a fraction of wordmark size (em). */
   paddingEm: number;
+  /** v0.1.63: explicit canvas dimensions in pixels — used to stretch
+   *  the tile to fill the full canvas with guaranteed-uniform layout
+   *  across variants. */
+  canvasWidth: number;
+  canvasHeight: number;
 }
 
 /**
@@ -357,19 +362,20 @@ export interface BackgroundedInputs {
 export function wrapInBackground(inputs: BackgroundedInputs): SatoriElement {
   const paddingPx = WORDMARK_SIZE_PX * inputs.paddingEm;
   const isGradient = /^(linear|radial)-gradient\(/.test(inputs.tileColor);
-  // v0.1.62: stretch the tile to fill the full canvas so the
-  // background color is visually obvious as a solid surface and the
-  // padding slider visibly controls the inner whitespace between the
-  // logo and tile edge. Previously the tile shrunk to fit the lockup,
-  // leaving transparent borders that made true-white/true-black look
-  // like the logo had no background at all when viewed on the
-  // #808080 preview chrome.
+  // v0.1.63: explicit pixel dimensions from caller. v0.1.62 used
+  // width:'100%' / height:'100%' to stretch the tile to fill the
+  // canvas, but Satori's percentage resolution was inconsistent
+  // across flex contexts — yielding tile sizes that varied across
+  // variants of the same composition and made the padding slider
+  // appear inert in the live preview. Explicit pixel dims (passed by
+  // produceAsset, sourced from canvasSize()) remove ambiguity and
+  // guarantee identical layout across every background variant.
   const style: Record<string, unknown> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: '100%',
-    height: '100%',
+    width: inputs.canvasWidth,
+    height: inputs.canvasHeight,
     padding: paddingPx,
   };
   if (isGradient) style.background = inputs.tileColor;
