@@ -72,10 +72,11 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
   // means changing the alias path never breaks the stored data.
   const { applyAssetAlias, getSetting } = await import('./workspace-settings');
   const aliasPath = (await getSetting(env as { DB: D1Database }, workspaceId, 'asset_public_alias_path')).trim();
+  // v0.1.62: only the light-mode resolved URLs are rendered at the top
+  // of /brand now — the full light/dark/white/black variant matrix is
+  // the "Approved uses" section below.
   const wordmarkLight = applyAssetAlias(resolveBrandImage(brand.tokens, 'wordmark', { mode: 'light' }), aliasPath);
   const iconLight = applyAssetAlias(resolveBrandImage(brand.tokens, 'icon_mark', { mode: 'light' }), aliasPath);
-  const wordmarkDark = applyAssetAlias(resolveBrandImage(brand.tokens, 'wordmark', { mode: 'dark' }), aliasPath);
-  const iconDark = applyAssetAlias(resolveBrandImage(brand.tokens, 'icon_mark', { mode: 'dark' }), aliasPath);
 
   // v0.1.32+: policy-driven approved + banned variants. The variants
   // gallery pulls live from the generator endpoint; the banned-uses
@@ -171,7 +172,10 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
         align-items: center;
         justify-content: center;
         min-height: 120px;
+        cursor: pointer;
+        transition: transform 0.1s, box-shadow 0.1s;
       }
+      .logo-tile:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
       .logo-tile img { max-width: 100%; max-height: 80px; }
       .logo-meta { display: flex; flex-direction: column; }
       .logo-downloads { display: flex; gap: 6px; }
@@ -319,6 +323,12 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
           padding: 20px 16px;
         }
         .typo-meta .stack, .typo-meta .vitals { font-size: 11px; }
+        /* v0.1.62: hide numerals + glyph rows on phones. They take up
+           significant vertical space, break to multiple lines on
+           narrow viewports, and don't add value on mobile where the
+           operator is glancing — full glyph coverage belongs on the
+           desktop view used for actual design handoffs. */
+        .typo-numerals, .typo-glyphs { display: none; }
       }
     </style>
   </head>
@@ -331,18 +341,22 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
       </header>
 
       ${
-        wordmarkLight || iconLight || wordmarkDark || iconDark
+        wordmarkLight || iconLight
           ? `<section>
               <h2>Logo marks</h2>
               <div class="logo-grid">
                 ${wordmarkLight ? logoTile('Wordmark', wordmarkLight, false) : ''}
-                ${wordmarkDark ? logoTile('Wordmark · dark', wordmarkDark, true) : ''}
                 ${iconLight ? logoTile('Icon', iconLight, false) : ''}
-                ${iconDark ? logoTile('Icon · dark', iconDark, true) : ''}
               </div>
             </section>`
           : ''
       }
+      <!-- v0.1.62: dropped "Wordmark · dark" and "Icon · dark" tiles.
+           Every preview tile uses the same #808080 mid-grey chrome
+           (v0.1.57+), so light and dark variants of the same SVG
+           rendered identically — pure visual noise at the top of the
+           guide. The full light/dark/white/black variant matrix lives
+           in the "Approved uses" section below. -->
 
       <section>
         <h2>Approved uses</h2>
@@ -373,8 +387,11 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
                 // mid-grey chrome. v0.1.59: add download links for
                 // SVG + PNG so external consumers can grab assets
                 // without round-tripping through an admin tool.
+                // v0.1.62: click the tile to copy the SVG asset URL.
+                // Download links stay for explicit Save-As; click is
+                // the fast path for pasting into design tools.
                 return `<div>
-                  <div class="logo-tile">
+                  <div class="logo-tile" data-copy="${escapeAttr(svgUrl)}" title="Click to copy SVG URL">
                     <img src="${escapeAttr(svgUrl)}" alt="${escapeHtml(`${finish.label} on ${bg.label}`)}">
                   </div>
                   <div class="logo-meta">
@@ -497,20 +514,51 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
       </footer>
     </div>
     <script>
-      // Click a swatch to copy its hex.
-      for (const el of document.querySelectorAll('.swatch')) {
-        el.addEventListener('click', () => {
-          const hex = el.getAttribute('data-hex');
-          if (!hex) return;
-          navigator.clipboard?.writeText(hex);
-          const meta = el.querySelector('.meta code');
-          if (meta) {
-            const orig = meta.textContent;
-            meta.textContent = 'Copied!';
-            setTimeout(() => { meta.textContent = orig; }, 1200);
-          }
+      // v0.1.62: unified copy-on-click for the whole guide.
+      //   • [data-hex]   → copy hex value
+      //   • [data-copy]  → copy arbitrary string (logo asset URLs)
+      //
+      // The legacy .swatch handler is gone — every clickable swatch
+      // (including BrandCard-style swatches from render-html.ts that
+      // emit data-hex but not .swatch) goes through one handler.
+      function flashToast(msg) {
+        let t = document.getElementById('__copy_toast__');
+        if (!t) {
+          t = document.createElement('div');
+          t.id = '__copy_toast__';
+          t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:#0a0a0a;color:#fafafa;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:500;opacity:0;transition:opacity 0.18s,transform 0.18s;z-index:9999;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,0.2);';
+          document.body.appendChild(t);
+        }
+        t.textContent = msg;
+        requestAnimationFrame(() => {
+          t.style.opacity = '1';
+          t.style.transform = 'translateX(-50%) translateY(0)';
         });
+        clearTimeout(t.__hideTimer);
+        t.__hideTimer = setTimeout(() => {
+          t.style.opacity = '0';
+          t.style.transform = 'translateX(-50%) translateY(20px)';
+        }, 1100);
       }
+      document.addEventListener('click', (ev) => {
+        const target = ev.target instanceof Element ? ev.target.closest('[data-hex],[data-copy]') : null;
+        if (!target) return;
+        const hex = target.getAttribute('data-hex');
+        const copy = target.getAttribute('data-copy');
+        const value = hex || copy;
+        if (!value) return;
+        navigator.clipboard?.writeText(value);
+        // Legacy .swatch tiles flip their hex label inline for
+        // continuity with the v0.1.59 UX.
+        const meta = target.classList.contains('swatch') ? target.querySelector('.meta code') : null;
+        if (meta) {
+          const orig = meta.textContent;
+          meta.textContent = 'Copied!';
+          setTimeout(() => { meta.textContent = orig; }, 1200);
+        } else {
+          flashToast(hex ? 'Copied ' + hex.toUpperCase() : 'Copied URL');
+        }
+      });
     </script>
   </body>
 </html>`;
@@ -531,8 +579,9 @@ function renderWordmark(brand: BrandData): string {
 function logoTile(label: string, src: string, _dark: boolean): string {
   // v0.1.57: dark parameter retained for signature compat but
   // ignored — every logo tile uses the same #808080 chrome now.
+  // v0.1.62: click the tile to copy the asset URL.
   return `<div>
-    <div class="logo-tile">
+    <div class="logo-tile" data-copy="${escapeAttr(src)}" title="Click to copy URL">
       <img src="${escapeAttr(src)}" alt="${escapeHtml(label)}">
     </div>
     <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">${escapeHtml(label)}</p>

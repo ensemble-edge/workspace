@@ -357,10 +357,19 @@ export interface BackgroundedInputs {
 export function wrapInBackground(inputs: BackgroundedInputs): SatoriElement {
   const paddingPx = WORDMARK_SIZE_PX * inputs.paddingEm;
   const isGradient = /^(linear|radial)-gradient\(/.test(inputs.tileColor);
+  // v0.1.62: stretch the tile to fill the full canvas so the
+  // background color is visually obvious as a solid surface and the
+  // padding slider visibly controls the inner whitespace between the
+  // logo and tile edge. Previously the tile shrunk to fit the lockup,
+  // leaving transparent borders that made true-white/true-black look
+  // like the logo had no background at all when viewed on the
+  // #808080 preview chrome.
   const style: Record<string, unknown> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    width: '100%',
+    height: '100%',
     padding: paddingPx,
   };
   if (isGradient) style.background = inputs.tileColor;

@@ -1217,7 +1217,10 @@ function BackgroundSettingsCard({
     darkTile: savedConfig.darkTile ?? 'neutral-dark',
   });
   const [saving, setSaving] = useState(false);
-  const [previewMode, setPreviewMode] = useState<'light' | 'dark'>(
+  // v0.1.62: four-way preview switch. Light/dark are configurable
+  // brand-tile colors; true-white/true-black are universal high-
+  // contrast variants with no configuration, just preview.
+  const [previewMode, setPreviewMode] = useState<'light' | 'dark' | 'true-white' | 'true-black'>(
     savedConfig.lightAllowed ? 'light' : 'dark',
   );
 
@@ -1269,6 +1272,31 @@ function BackgroundSettingsCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* v0.1.62: unified preview-mode chip row. Click any chip to
+            see the same composition rendered on that background. The
+            four-way switch lets operators verify contrast at a glance
+            without exporting individual variants. */}
+        <div className="flex flex-wrap gap-1.5">
+          {([
+            { id: 'light',      label: 'Brand light' },
+            { id: 'dark',       label: 'Brand dark' },
+            { id: 'true-white', label: 'White' },
+            { id: 'true-black', label: 'Black' },
+          ] as const).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setPreviewMode(opt.id)}
+              className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                previewMode === opt.id
+                  ? 'bg-foreground text-background border-foreground'
+                  : 'bg-background hover:bg-muted border-border'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
         {/* Live preview — stacked composition on the active background. */}
         <div className="flex items-center justify-center h-32 rounded-md border bg-muted/30 overflow-hidden">
           <img
@@ -1304,15 +1332,6 @@ function BackgroundSettingsCard({
                 className="w-full"
               />
             )}
-            <Button
-              type="button"
-              variant={previewMode === 'light' ? 'default' : 'outline'}
-              size="sm"
-              className="w-full h-7 text-xs"
-              onClick={() => setPreviewMode('light')}
-            >
-              Preview
-            </Button>
           </div>
           <div className="rounded-md border p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -1334,15 +1353,6 @@ function BackgroundSettingsCard({
                 className="w-full"
               />
             )}
-            <Button
-              type="button"
-              variant={previewMode === 'dark' ? 'default' : 'outline'}
-              size="sm"
-              className="w-full h-7 text-xs"
-              onClick={() => setPreviewMode('dark')}
-            >
-              Preview
-            </Button>
           </div>
         </div>
 
