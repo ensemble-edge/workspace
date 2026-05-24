@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ensemble-edge/workspace": "github:ensemble-edge/workspace#v0.1.9",
+    "@ensemble-edge/workspace": "github:ensemble-edge/workspace#v0.1.62",
     "hono": "^4.6.0"
   },
   "devDependencies": {
