@@ -9,7 +9,7 @@
  * funnels through here so the resolution logic lives in exactly
  * one place.
  */
-import { deriveRung, deriveRungs, neutralMainFromHueMode, hueBiasedForeground, pickHigherContrast, contrastRatio } from './derive';
+import { deriveRung, deriveRungs, neutralMainFromHueMode, hueBiasedForeground, pickHigherContrast, contrastRatio, apcaContrast } from './derive';
 import {
   isPaletteRungRef, isHex, parseRungRef,
   type BrandColorsDoc, type Palette, type NeutralPalette,
@@ -246,13 +246,16 @@ export function onColorForeground(
 ): { hex: string; usedFallback: boolean } {
   const main = palettes[paletteRole].main;
   const faded = palettes[paletteRole].faded;
-  const fadedRatio = contrastRatio(faded, main);
-  // Threshold tuned to roughly correspond to APCA Lc 60 — WCAG 2.x
-  // contrast around 3.5:1 is close enough for our purposes.
-  if (fadedRatio >= 3.5) return { hex: faded, usedFallback: false };
-  // Fallback: pick whichever of pure-white or near-black has more
-  // contrast against the Main color.
-  const fallback = pickHigherContrast(main, '#FAFAFA', '#0A0A0A');
+  // APCA Lc 60 — the spec's on-color foreground threshold. |Lc|
+  // because the sign indicates direction (light-on-dark vs dark-on-
+  // light) and we just need adequate magnitude.
+  const fadedLc = Math.abs(apcaContrast(faded, main));
+  if (fadedLc >= 60) return { hex: faded, usedFallback: false };
+  // Fallback: pick whichever of near-white or near-black has higher
+  // APCA contrast against the Main color.
+  const whiteLc = Math.abs(apcaContrast('#FAFAFA', main));
+  const blackLc = Math.abs(apcaContrast('#0A0A0A', main));
+  const fallback = whiteLc >= blackLc ? '#FAFAFA' : '#0A0A0A';
   return { hex: fallback, usedFallback: true };
 }
 

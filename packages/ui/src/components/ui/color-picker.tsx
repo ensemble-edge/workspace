@@ -152,12 +152,22 @@ const ColorPicker = React.forwardRef<HTMLButtonElement, ColorPickerProps>(
             </PopoverContent>
           </Popover>
 
-          {/* Reset button */}
+          {/* Reset button. Renders only when both onReset is wired
+              AND the current value differs from the default (or
+              when defaultValue is unset and we have a value — that
+              covers the "override exists, clear it" rung case). */}
           {onReset && value && value !== defaultValue && (
             <button
               type="button"
               onClick={onReset}
-              className="text-xs text-muted-foreground hover:text-foreground ml-auto"
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border border-input bg-background px-2 py-1",
+                "text-[11px] text-muted-foreground transition-colors",
+                "hover:bg-muted hover:text-foreground hover:border-foreground/30",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30",
+                "ml-auto",
+              )}
+              title="Revert to default"
             >
               Reset
             </button>

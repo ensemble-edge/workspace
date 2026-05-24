@@ -272,8 +272,12 @@ export function ColorsTab() {
       if (!d) return d;
       const p = d.palettes[role];
       const overrides = { ...(p.overrides ?? {}) };
-      if (hex === null) delete overrides[rung];
-      else overrides[rung] = hex;
+      if (hex === null) {
+        delete overrides[rung];
+        toast.success(`${role}-${rung} reverted to derived value`);
+      } else {
+        overrides[rung] = hex;
+      }
       return { ...d, palettes: { ...d.palettes, [role]: { ...p, overrides } } };
     });
   }
@@ -768,30 +772,134 @@ function ThemeCard({
             or any binding below to start filling it in manually.
           </p>
         ) : (
-          <div className="space-y-2">
-            {THEME_BINDING_LABELS.map(({ key, label, description, allowAuto }) => {
-              const value = theme?.bindings[key] ?? (mode === 'dark' && key === 'canvas' ? '#0a0a0a' : '#ffffff');
-              return (
-                <div key={key} className="grid grid-cols-[100px_1fr] items-center gap-3 py-1.5 border-t first:border-t-0">
-                  <div>
-                    <Label className="text-xs">{label}</Label>
-                    <p className="text-[10px] text-muted-foreground">{description}</p>
+          <div className="space-y-3">
+            {theme && <ThemePreview theme={theme} palettes={palettes} />}
+            <div className="space-y-2">
+              {THEME_BINDING_LABELS.map(({ key, label, description, allowAuto }) => {
+                const value = theme?.bindings[key] ?? (mode === 'dark' && key === 'canvas' ? '#0a0a0a' : '#ffffff');
+                return (
+                  <div key={key} className="grid grid-cols-[100px_1fr] items-center gap-3 py-1.5 border-t first:border-t-0">
+                    <div>
+                      <Label className="text-xs">{label}</Label>
+                      <p className="text-[10px] text-muted-foreground">{description}</p>
+                    </div>
+                    <BrandTokenPicker
+                      value={value}
+                      onChange={(v) => onUpdate(key, v)}
+                      palettes={palettes}
+                      allowAuto={allowAuto}
+                      allowHex
+                    />
                   </div>
-                  <BrandTokenPicker
-                    value={value}
-                    onChange={(v) => onUpdate(key, v)}
-                    palettes={palettes}
-                    allowAuto={allowAuto}
-                    allowHex
-                  />
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         )}
       </CardContent>
     </Card>
   );
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * ThemePreview — mini panel showing the theme rendered live
+ *
+ * Renders a small visual approximation of "what a page in this
+ * theme looks like" so the operator can validate their bindings at
+ * a glance. ~120px tall; canvas → surface → brand button + text
+ * primary + text muted line. Updates instantly as bindings change
+ * because every value is resolved from current draft.
+ * ──────────────────────────────────────────────────────────── */
+
+function ThemePreview({ theme, palettes }: { theme: Theme; palettes: ResolvedPalettes }) {
+  const canvas = resolveBindingLocal(theme.bindings.canvas, palettes);
+  const surface = resolveBindingLocal(theme.bindings.surface, palettes);
+  const brand = resolveBindingLocal(theme.bindings.brand, palettes);
+  const brandBg = resolveBindingLocal(theme.bindings['brand-bg'], palettes);
+  const border = resolveBindingLocal(theme.bindings.border, palettes);
+  const textPrimary = theme.bindings['text-primary'] === 'auto'
+    ? autoForegroundLocal(canvas)
+    : resolveBindingLocal(theme.bindings['text-primary'], palettes);
+  const textMuted = theme.bindings['text-muted'] === 'auto'
+    ? autoForegroundLocal(canvas, 0.65)
+    : resolveBindingLocal(theme.bindings['text-muted'], palettes);
+  // On-color for the brand button: pick higher APCA between brand
+  // canvas-equivalent and a near-white. Simplification: use the
+  // canvas's opposite-luminance.
+  const brandFg = autoForegroundLocal(brand);
+
+  return (
+    <div
+      className="rounded-md overflow-hidden"
+      style={{
+        backgroundColor: canvas,
+        border: `1px solid ${border}`,
+      }}
+    >
+      <div className="p-3 flex items-center gap-3">
+        <div
+          className="rounded-sm flex-1 p-3 flex items-center justify-between"
+          style={{
+            backgroundColor: surface,
+            border: `1px solid ${border}`,
+          }}
+        >
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium" style={{ color: textPrimary }}>Heading</span>
+            <span className="text-[10px]" style={{ color: textMuted }}>Muted helper copy</span>
+          </div>
+          <button
+            type="button"
+            disabled
+            className="text-[11px] font-medium px-2.5 py-1 rounded-md cursor-default"
+            style={{ backgroundColor: brand, color: brandFg }}
+          >
+            Action
+          </button>
+        </div>
+        <div
+          className="rounded-sm px-2 py-1.5"
+          style={{ backgroundColor: brandBg, border: `1px solid ${border}` }}
+        >
+          <span className="text-[10px] font-medium" style={{ color: textPrimary }}>brand-bg</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Resolve a ThemeBindingValue to a hex. Mirrors the server resolver
+ *  for the live preview path. "auto" is handled by the caller. */
+function resolveBindingLocal(value: string, palettes: ResolvedPalettes): string {
+  if (value === 'auto') return '#000000';
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value)) return value;
+  const m = /^(primary|secondary|accent|neutral)-(dark|main|bright|pastel|faded)$/.exec(value);
+  if (m) return palettes[m[1] as PaletteRole][m[2] as RungName];
+  return '#000000';
+}
+
+/** Pick a near-white or near-black foreground for a canvas with
+ *  optional opacity-equivalent damping for muted text. */
+function autoForegroundLocal(canvasHex: string, mutedness = 1): string {
+  const lum = relLum(canvasHex);
+  if (lum >= 0.5) {
+    // light canvas → dark text
+    const factor = 1 - mutedness * 0.45; // 1.0 → 0.55, 0.65 → 0.71
+    return `rgba(10, 10, 10, ${factor})`;
+  } else {
+    const factor = 1 - mutedness * 0.4; // 1.0 → 0.6, 0.65 → 0.74
+    return `rgba(250, 250, 250, ${factor})`;
+  }
+}
+
+function relLum(hex: string): number {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return 0;
+  const r = parseInt(m[1].slice(0, 2), 16) / 255;
+  const g = parseInt(m[1].slice(2, 4), 16) / 255;
+  const b = parseInt(m[1].slice(4, 6), 16) / 255;
+  const lin = (v: number) => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 }
 
 /* ──────────────────────────────────────────────────────────────

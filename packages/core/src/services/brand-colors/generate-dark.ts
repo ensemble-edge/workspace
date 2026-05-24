@@ -29,8 +29,8 @@
  */
 import { oklch, formatHex } from 'culori';
 import {
-  contrastRatio, pickRungByTargetContrast, pickHigherContrast,
-  hueBiasedForeground,
+  pickRungByTargetContrast, pickHigherContrast,
+  hueBiasedForeground, apcaContrast,
 } from './derive';
 import {
   resolvePalettes, resolveBindingValue,
@@ -69,11 +69,13 @@ const CANVAS_CHROMA_DAMP = 0.70;
  */
 export interface BindingWarning {
   binding: keyof ThemeBindings;
-  /** APCA-equivalent contrast against the light canvas. */
+  /** APCA Lc against the light canvas — signed (positive when text
+   *  darker than canvas, negative when lighter). */
   lightRatio: number;
-  /** Best contrast we could achieve against the dark canvas. */
+  /** APCA Lc against the dark canvas — best the algorithm achieved
+   *  for this palette/role. */
   darkRatio: number;
-  /** How far off we were (absolute ratio gap). */
+  /** Absolute Lc gap (|actual − target| in APCA units). */
   gap: number;
 }
 
@@ -206,20 +208,24 @@ function preserveContrast(
   const ref = parseRungRef(lightValue)!;
   const palette = palettes[ref.role];
 
-  // Light-canvas contrast of the original binding.
+  // APCA Lc against the light canvas — what the original binding
+  // achieved in the light theme. We want the dark-theme rung whose
+  // |Lc| against the dark canvas is closest to this.
   const originalHex = palette[ref.rung];
-  const lightRatio = contrastRatio(originalHex, lightCanvasHex);
+  const lightLc = apcaContrast(originalHex, lightCanvasHex);
 
-  // Find the rung in the same palette whose dark-canvas contrast
-  // best matches lightRatio.
-  const pick = pickRungByTargetContrast(palette, darkCanvasHex, lightRatio);
+  // Find the rung in the same palette whose dark-canvas APCA |Lc|
+  // best matches |lightLc|.
+  const pick = pickRungByTargetContrast(palette, darkCanvasHex, lightLc);
 
-  // Compute gap as fraction of target — "within 10%" means
-  // |actual - target| / target ≤ 0.10.
-  const gapFraction = lightRatio > 0 ? pick.gap / lightRatio : pick.gap;
+  // Gap as fraction of target Lc — "within 10%" means
+  // |actual - target| / target ≤ 0.10. Avoid division by zero on
+  // ultra-low light contrast (where any pick is acceptable).
+  const absLight = Math.abs(lightLc);
+  const gapFraction = absLight > 1 ? pick.gap / absLight : pick.gap / 100;
   const warning = gapFraction > CONTRAST_GAP_THRESHOLD ? {
-    lightRatio,
-    darkRatio: pick.ratio,
+    lightRatio: lightLc,
+    darkRatio: pick.lc,
     gap: pick.gap,
   } : undefined;
 

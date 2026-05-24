@@ -118,23 +118,101 @@ export function neutralMainFromHueMode(
 }
 
 /* ──────────────────────────────────────────────────────────────
- * APCA contrast (via culori) + WCAG 2.x fallback
+ * APCA-W3 contrast (direct implementation)
+ *
+ * culori 4.x does not ship apcaContrast — we implement APCA-W3
+ * directly. The algorithm is the SAPC-APCA "0.0.98G-4g-base"
+ * variant per https://github.com/Myndex/apca-w3
+ *
+ * Returns APCA Lc — range roughly -108..+106, absolute value
+ * indicates contrast strength. Spec calls out Lc 60 as the
+ * on-color foreground threshold (our pickHigherContrast / Faded
+ * fallback consult this).
+ *
+ * `wcagContrast` from culori is also exposed for the few legacy
+ * call sites that haven't been migrated yet.
  * ──────────────────────────────────────────────────────────── */
 
+/** APCA-W3 constants (0.0.98G-4g-base) */
+const APCA_SA98G = {
+  mainTRC: 2.4,
+  Rco: 0.2126729,
+  Gco: 0.7151522,
+  Bco: 0.0721750,
+  normBG: 0.56,
+  normTXT: 0.57,
+  revTXT: 0.62,
+  revBG: 0.65,
+  blkThrs: 0.022,
+  blkClmp: 1.414,
+  loClip: 0.1,
+  deltaYmin: 0.0005,
+  scaleBoW: 1.14,
+  scaleWoB: 1.14,
+  loBoWoffset: 0.027,
+  loWoBoffset: 0.027,
+};
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  let h = m[1];
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  return {
+    r: parseInt(h.slice(0, 2), 16) / 255,
+    g: parseInt(h.slice(2, 4), 16) / 255,
+    b: parseInt(h.slice(4, 6), 16) / 255,
+  };
+}
+
+/** Screen luminance per APCA-W3 (NOT the WCAG 2.x formula). */
+function apcaY(hex: string): number {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return 0;
+  const { r, g, b } = rgb;
+  const Y =
+    APCA_SA98G.Rco * Math.pow(r, APCA_SA98G.mainTRC) +
+    APCA_SA98G.Gco * Math.pow(g, APCA_SA98G.mainTRC) +
+    APCA_SA98G.Bco * Math.pow(b, APCA_SA98G.mainTRC);
+  return Y < APCA_SA98G.blkThrs
+    ? Y + Math.pow(APCA_SA98G.blkThrs - Y, APCA_SA98G.blkClmp)
+    : Y;
+}
+
 /**
- * APCA Lc — the modern contrast metric. Range roughly -108..+106;
- * absolute value matters. Typical thresholds:
- *   Lc 90+ → max contrast (display text)
- *   Lc 75  → body text minimum
- *   Lc 60  → on-color foreground minimum (our spec uses this)
- *   Lc 45  → large text minimum
- *   Lc 30  → non-text UI minimum
+ * APCA-W3 Lc — perceptual contrast in the range roughly [-108, 106].
+ * Positive when text is darker than background, negative when
+ * lighter; absolute value indicates strength.
  *
- * We use the wcagContrast helper from culori for the ratio number;
- * APCA proper would use the apcaContrast() function but it's not
- * always exported in all culori versions. The semantic intent is
- * identical for our purposes (relative comparison between
- * candidates), and the threshold tuning compensates.
+ *   |Lc| ≥ 90 → max contrast (display text)
+ *   |Lc| ≥ 75 → body text minimum
+ *   |Lc| ≥ 60 → on-color foreground / accessible UI minimum
+ *   |Lc| ≥ 45 → large text minimum
+ *   |Lc| ≥ 30 → non-text UI minimum
+ */
+export function apcaContrast(textHex: string, bgHex: string): number {
+  const Ytxt = apcaY(textHex);
+  const Ybg = apcaY(bgHex);
+  if (Math.abs(Ytxt - Ybg) < APCA_SA98G.deltaYmin) return 0;
+  let SAPC = 0;
+  let outputContrast = 0;
+  if (Ybg > Ytxt) {
+    // Normal (dark text on light bg)
+    SAPC = (Math.pow(Ybg, APCA_SA98G.normBG) - Math.pow(Ytxt, APCA_SA98G.normTXT)) * APCA_SA98G.scaleBoW;
+    outputContrast = SAPC < APCA_SA98G.loClip ? 0 : SAPC - APCA_SA98G.loBoWoffset;
+  } else {
+    // Reverse (light text on dark bg)
+    SAPC = (Math.pow(Ybg, APCA_SA98G.revBG) - Math.pow(Ytxt, APCA_SA98G.revTXT)) * APCA_SA98G.scaleWoB;
+    outputContrast = SAPC > -APCA_SA98G.loClip ? 0 : SAPC + APCA_SA98G.loWoBoffset;
+  }
+  return outputContrast * 100;
+}
+
+/**
+ * Backwards-compatible name. Returns WCAG 2.x ratio (1..21) using
+ * culori. Kept for code that still wants WCAG for legacy reasons.
+ * New code should prefer apcaContrast() which is what the v0.1.55
+ * spec asked for.
  */
 export function contrastRatio(fg: string, bg: string): number {
   try {
@@ -146,35 +224,37 @@ export function contrastRatio(fg: string, bg: string): number {
 }
 
 /**
- * Pick the rung from a palette whose contrast against the target
- * background is closest to the desired target ratio. Used by the
- * dark-theme generator to preserve relative contrast across themes:
- * if primary-main hits 4.8:1 on the light canvas, picking the rung
- * that also hits ~4.8:1 on the dark canvas keeps the brand feeling
- * the "same level of prominent" in both modes.
+ * Pick the rung from a palette whose APCA contrast against the
+ * target background is closest to the desired target Lc. Used by
+ * the dark-theme generator to preserve relative contrast across
+ * themes: if primary-main hits Lc 75 on light canvas, picking the
+ * rung that also hits ~Lc 75 on dark canvas keeps the brand
+ * feeling the "same level of prominent" in both modes.
  *
- * Returns the rung name + its actual contrast. Caller decides
- * whether the gap is within the warning threshold.
+ * Compares ABSOLUTE Lc — direction (positive vs negative) flips
+ * naturally between light and dark canvases, so abs-comparison
+ * keeps the intent ("75 contrast in either direction") stable.
  */
 export function pickRungByTargetContrast(
   rungHexes: Record<RungName, string>,
   bgHex: string,
-  targetRatio: number,
-): { rung: RungName; ratio: number; gap: number } {
+  targetLc: number,
+): { rung: RungName; lc: number; gap: number } {
   const rungs = Object.keys(rungHexes) as RungName[];
   let bestRung: RungName = 'main';
   let bestGap = Infinity;
-  let bestRatio = 1;
+  let bestLc = 0;
+  const target = Math.abs(targetLc);
   for (const r of rungs) {
-    const ratio = contrastRatio(rungHexes[r], bgHex);
-    const gap = Math.abs(ratio - targetRatio);
+    const lc = apcaContrast(rungHexes[r], bgHex);
+    const gap = Math.abs(Math.abs(lc) - target);
     if (gap < bestGap) {
       bestGap = gap;
       bestRung = r;
-      bestRatio = ratio;
+      bestLc = lc;
     }
   }
-  return { rung: bestRung, ratio: bestRatio, gap: bestGap };
+  return { rung: bestRung, lc: bestLc, gap: bestGap };
 }
 
 /**

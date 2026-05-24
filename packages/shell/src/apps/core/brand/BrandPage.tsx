@@ -16,6 +16,7 @@ import {
 import { useHashTab } from '../../../hooks/useHashTab';
 import { OverviewTab } from './OverviewTab';
 import { ColorsTab } from './ColorsTab';
+import { CssTab } from './CssTab';
 import { TypographyTab } from './TypographyTab';
 import { LogosTab } from './LogosTab';
 import { SocialSharingTab } from './SocialSharingTab';
@@ -23,7 +24,7 @@ import { LanguagesTab } from './LanguagesTab';
 import { MessagingTab } from './MessagingTab';
 import { IdentityTab } from './IdentityTab';
 
-const TABS = ['overview', 'colors', 'typography', 'logos', 'social', 'languages', 'messaging', 'identity'] as const;
+const TABS = ['overview', 'colors', 'css', 'typography', 'logos', 'social', 'languages', 'messaging', 'identity'] as const;
 
 export function BrandPage() {
   const [tab, setTab] = useHashTab('overview', TABS);
@@ -41,6 +42,7 @@ export function BrandPage() {
         <TabsList variant="line" className="mb-6">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="colors">Colors</TabsTrigger>
+          <TabsTrigger value="css">CSS</TabsTrigger>
           <TabsTrigger value="typography">Typography</TabsTrigger>
           <TabsTrigger value="logos">Logos</TabsTrigger>
           <TabsTrigger value="social">Social / Sharing</TabsTrigger>
@@ -51,6 +53,7 @@ export function BrandPage() {
 
         <TabsContent value="overview"><OverviewTab /></TabsContent>
         <TabsContent value="colors"><ColorsTab /></TabsContent>
+        <TabsContent value="css"><CssTab /></TabsContent>
         <TabsContent value="typography"><TypographyTab /></TabsContent>
         <TabsContent value="logos"><LogosTab /></TabsContent>
         <TabsContent value="social"><SocialSharingTab /></TabsContent>

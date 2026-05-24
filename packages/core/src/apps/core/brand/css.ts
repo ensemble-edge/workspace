@@ -77,10 +77,30 @@ export async function generateBrandCss(
     console.warn('[brand-css] font role resolution failed:', err);
   }
 
+  // v0.1.56: operator-typed custom CSS overrides. Stored in
+  // brand_tokens at category='custom', key='operator_css_overrides'.
+  // Appended LAST so operator declarations win cascade order — the
+  // entire point of the CSS tab is "let me override anything above."
+  let customCss = '';
+  try {
+    const row = await db.prepare(
+      `SELECT value FROM brand_tokens
+       WHERE workspace_id = ? AND category = 'custom' AND key = 'operator_css_overrides' AND locale = ''`,
+    ).bind(workspaceId).first<{ value: string }>();
+    if (row?.value) {
+      // Wrap in a clearly-labelled comment block so operators
+      // inspecting /brand.css see exactly what was operator-added.
+      customCss = `\n\n/* ── Operator-defined overrides ─────────────────────────\n   Edit at /brand → CSS\n   ─────────────────────────────────────────────────────── */\n${row.value}\n`;
+    }
+  } catch {
+    /* leave customCss empty on read failure */
+  }
+
   // Font CSS must come FIRST so the @import lands at the top of the
   // stylesheet (CSS @import rules are only valid before any other
-  // declarations).
-  return `${fontCss}\n\n${brandCss}\n\n${shellCss}`;
+  // declarations). Custom operator CSS comes LAST so it can override
+  // anything emitted above.
+  return `${fontCss}\n\n${brandCss}\n\n${shellCss}${customCss}`;
 }
 
 /**

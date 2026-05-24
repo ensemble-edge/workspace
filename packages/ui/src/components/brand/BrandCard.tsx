@@ -282,14 +282,33 @@ function PaletteFaceContent({
           onChange={(e) => onNameChange(e.currentTarget.value)}
           onClick={(e) => e.stopPropagation()}
           className="bg-transparent border-0 px-0 h-auto text-[26px] font-normal leading-[1.05] tracking-tight focus-visible:ring-0 hover:bg-black/5"
-          style={{ color: fg }}
+          style={{
+            color: fg,
+            fontFamily: 'var(--brand-font-display, var(--brand-font-heading, inherit))',
+          }}
         />
       ) : (
-        <p className="text-[26px] font-normal leading-[1.05] tracking-tight" style={{ color: fg }}>
+        <p
+          className="text-[26px] font-normal leading-[1.05] tracking-tight"
+          style={{
+            color: fg,
+            fontFamily: 'var(--brand-font-display, var(--brand-font-heading, inherit))',
+          }}
+        >
           {palette.name}
         </p>
       )}
-      <p className="text-[10px] font-medium uppercase tracking-[0.08em] opacity-80" style={{ color: fg }}>
+      <p
+        className="text-[10px] font-medium tracking-[0.12em] opacity-70"
+        style={{
+          color: fg,
+          // Mockup spec: role label is lowercase, not uppercase.
+          // Matches the editorial feel — the palette name is the
+          // shouted thing, the role is the quiet identifier.
+          textTransform: 'lowercase',
+          fontFamily: 'var(--brand-font-eyebrow, var(--brand-font-body, inherit))',
+        }}
+      >
         {role}
       </p>
     </div>
@@ -298,7 +317,13 @@ function PaletteFaceContent({
 
 function PaletteFaceFooter({ role, hex, fg }: { role: PaletteRole; hex: string; fg: string }) {
   return (
-    <div className="flex items-end justify-between font-mono text-[11px]" style={{ color: fg }}>
+    <div
+      className="flex items-end justify-between text-[11px]"
+      style={{
+        color: fg,
+        fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)',
+      }}
+    >
       <span className="opacity-90">{role}-main</span>
       <span className="opacity-90">{hex.toUpperCase()}</span>
     </div>
@@ -317,11 +342,14 @@ interface RungChipProps {
   mode: BrandCardMode;
   onOverride?: (rung: Exclude<RungName, 'main'>, hex: string | null) => void;
   /** When false, suppress the bottom-of-card meta line (rung label + hex)
-   *  for use inside the dense NeutralStrip. */
+   *  — used inside NeutralStrip where the parent renders its own meta. */
   showMeta?: boolean;
+  /** Chip height. Mockup: 24px on brand-palette cards, 36px on neutral. */
+  chipHeight?: number;
 }
 
-function RungChip({ role, rung, hex, label, mode, onOverride, showMeta = true }: RungChipProps) {
+function RungChip({ role, rung, hex, label, mode, onOverride, showMeta = true, chipHeight = 24 }: RungChipProps) {
+  const chipStyle: React.CSSProperties = { backgroundColor: hex, height: chipHeight };
   if (mode === 'edit' && onOverride) {
     return (
       <Popover>
@@ -332,13 +360,23 @@ function RungChip({ role, rung, hex, label, mode, onOverride, showMeta = true }:
             className="flex flex-col gap-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-foreground/30 rounded"
           >
             <span
-              className="h-[24px] rounded-md border-[0.5px] border-black/10 cursor-pointer hover:-translate-y-px transition-transform"
-              style={{ backgroundColor: hex }}
+              className="rounded-md border-[0.5px] border-black/10 cursor-pointer hover:-translate-y-px transition-transform"
+              style={chipStyle}
             />
             {showMeta && (
               <span className="flex flex-col gap-0">
-                <span className="text-[11px] font-medium text-foreground">{label}</span>
-                <span className="font-mono text-[9.5px] text-muted-foreground">{hex.toUpperCase()}</span>
+                <span
+                  className="text-[10px] font-medium text-foreground tracking-[0.04em]"
+                  style={{ fontFamily: 'var(--brand-font-label, var(--brand-font-body, inherit))' }}
+                >
+                  {label}
+                </span>
+                <span
+                  className="text-[9.5px] text-muted-foreground"
+                  style={{ fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)' }}
+                >
+                  {hex.toUpperCase()}
+                </span>
               </span>
             )}
           </button>
@@ -346,7 +384,7 @@ function RungChip({ role, rung, hex, label, mode, onOverride, showMeta = true }:
         <PopoverContent className="p-3 w-[280px]" align="start">
           <ColorPicker
             label={`${role}-${rung} override`}
-            description="Leave as-is to use the OkLCh-derived value."
+            description="Reset returns to the OkLCh-derived value."
             value={hex}
             onChange={(next) => onOverride(rung, next)}
             onReset={() => onOverride(rung, null)}
@@ -360,12 +398,23 @@ function RungChip({ role, rung, hex, label, mode, onOverride, showMeta = true }:
       <Swatch
         color={hex}
         label={hex.toUpperCase()}
-        className="h-[24px] rounded-md"
+        className="rounded-md"
+        style={{ height: chipHeight }}
       />
       {showMeta && (
         <>
-          <span className="text-[11px] font-medium text-foreground">{label}</span>
-          <span className="font-mono text-[9.5px] text-muted-foreground">{hex.toUpperCase()}</span>
+          <span
+            className="text-[10px] font-medium text-foreground tracking-[0.04em]"
+            style={{ fontFamily: 'var(--brand-font-label, var(--brand-font-body, inherit))' }}
+          >
+            {label}
+          </span>
+          <span
+            className="text-[9.5px] text-muted-foreground"
+            style={{ fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)' }}
+          >
+            {hex.toUpperCase()}
+          </span>
         </>
       )}
     </div>
@@ -395,12 +444,26 @@ function NeutralStrip({ palette, resolved, mode, onNameChange, onRungOverride }:
             <Input
               value={palette.name}
               onChange={(e) => onNameChange(e.currentTarget.value)}
-              className="bg-transparent border-0 px-0 h-auto text-[20px] font-normal tracking-tight focus-visible:ring-0 hover:bg-black/5"
+              className="bg-transparent border-0 px-0 h-auto text-[22px] font-normal tracking-tight focus-visible:ring-0 hover:bg-black/5"
+              style={{ fontFamily: 'var(--brand-font-display, var(--brand-font-heading, inherit))' }}
             />
           ) : (
-            <p className="text-[20px] font-normal tracking-tight">{palette.name}</p>
+            <p
+              className="text-[22px] font-normal tracking-tight leading-none"
+              style={{ fontFamily: 'var(--brand-font-display, var(--brand-font-heading, inherit))' }}
+            >
+              {palette.name}
+            </p>
           )}
-          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">neutral</p>
+          <p
+            className="text-[11px] font-medium tracking-[0.12em] text-muted-foreground mt-1.5"
+            style={{
+              textTransform: 'lowercase',
+              fontFamily: 'var(--brand-font-eyebrow, var(--brand-font-body, inherit))',
+            }}
+          >
+            neutral
+          </p>
           <p className="text-xs text-muted-foreground">
             Surfaces · borders · muted text. Derived from primary by default.
           </p>
@@ -412,7 +475,7 @@ function NeutralStrip({ palette, resolved, mode, onNameChange, onRungOverride }:
                 <Swatch
                   color={resolved.main}
                   label={resolved.main.toUpperCase()}
-                  className="h-[32px] rounded-md"
+                  className="h-[36px] rounded-md"
                   style={{ boxShadow: '0 0 0 1.5px var(--foreground, #18181B)' }}
                 />
               ) : (
@@ -424,6 +487,7 @@ function NeutralStrip({ palette, resolved, mode, onNameChange, onRungOverride }:
                   mode={mode}
                   onOverride={onRungOverride}
                   showMeta={false}
+                  chipHeight={36}
                 />
               )}
               <span className="text-[11px] font-medium text-foreground capitalize">{rung}</span>
@@ -471,32 +535,44 @@ function GradientBanner({ gradient, onColor, mode, onNameChange }: GradientBanne
             value={gradient.name}
             onChange={(e) => onNameChange(e.currentTarget.value)}
             onClick={(e) => e.stopPropagation()}
-            className="bg-transparent border-0 px-0 h-auto text-[28px] font-normal tracking-tight focus-visible:ring-0 hover:bg-black/5"
-            style={{ color: onColor.hex }}
+            className="bg-transparent border-0 px-0 h-auto text-[32px] font-normal tracking-tight focus-visible:ring-0 hover:bg-black/5"
+            style={{
+              color: onColor.hex,
+              fontFamily: 'var(--brand-font-display, var(--brand-font-heading, inherit))',
+            }}
           />
         ) : (
-          <p className="text-[28px] font-normal tracking-tight" style={{ color: onColor.hex }}>
+          <p
+            className="text-[32px] font-normal tracking-tight leading-none"
+            style={{
+              color: onColor.hex,
+              fontFamily: 'var(--brand-font-display, var(--brand-font-heading, inherit))',
+            }}
+          >
             {gradient.name}
           </p>
         )}
       </div>
-      <div className="flex items-center justify-between px-4 py-2.5 text-[11px]">
-        <span className="font-mono text-muted-foreground">gradient-{gradient.slug}</span>
+      <div
+        className="flex items-center justify-between px-4 py-2.5 text-[11px] border-t border-black/[0.07]"
+        style={{ fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)' }}
+      >
+        <span className="text-muted-foreground">gradient-{gradient.slug}</span>
         <div className="flex items-center gap-2 flex-wrap">
           {gradient.resolvedStops.map((s, i) => (
             <React.Fragment key={i}>
               {i > 0 && <span className="text-muted-foreground">→</span>}
               <span className="inline-flex items-center gap-1.5">
                 <span
-                  className="w-[14px] h-[14px] rounded border-[0.5px] border-black/10"
+                  className="w-[10px] h-[10px] rounded-sm border-[0.5px] border-black/10"
                   style={{ backgroundColor: s.hex }}
                 />
-                <span className="font-mono text-muted-foreground">{colorLabel(s.token, s.hex).primary}</span>
+                <span className="text-muted-foreground">{colorLabel(s.token, s.hex).primary}</span>
               </span>
             </React.Fragment>
           ))}
         </div>
-        <span className="font-mono text-muted-foreground bg-black/5 px-2 py-0.5 rounded">
+        <span className="text-muted-foreground bg-black/5 px-2 py-0.5 rounded">
           {gradient.mode === 'radial' ? 'radial' : `linear · ${gradient.angle}°`}
         </span>
       </div>
@@ -564,7 +640,10 @@ function SemanticCell({ role, pair, mode, onChange }: SemanticCellProps) {
         )}
       </div>
       <p className="text-[13px] font-medium">{SEM_LABEL[role]}</p>
-      <p className="font-mono text-[11px] text-muted-foreground">
+      <p
+        className="text-[11px] text-muted-foreground"
+        style={{ fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)' }}
+      >
         {pair.main.toUpperCase()} · {pair.light.toUpperCase()}
       </p>
     </div>
@@ -599,10 +678,10 @@ export function BrandCard({
       {/* Section 1 — Brand palettes */}
       <section>
         <header className="flex items-baseline justify-between mb-3.5">
-          <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+          <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground" style={{ fontFamily: 'var(--brand-font-eyebrow, var(--brand-font-body, inherit))' }}>
             Brand palettes
           </h2>
-          <span className="font-mono text-[11px] text-muted-foreground">
+          <span className="text-[11px] text-muted-foreground" style={{ fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)' }}>
             primary · secondary · accent
           </span>
         </header>
@@ -629,10 +708,10 @@ export function BrandCard({
       {/* Section 2 — Neutral */}
       <section>
         <header className="flex items-baseline justify-between mb-3.5">
-          <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+          <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground" style={{ fontFamily: 'var(--brand-font-eyebrow, var(--brand-font-body, inherit))' }}>
             Neutral
           </h2>
-          <span className="font-mono text-[11px] text-muted-foreground">
+          <span className="text-[11px] text-muted-foreground" style={{ fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)' }}>
             {data.palettes.neutral.hueMode ? `hue · ${data.palettes.neutral.hueMode}` : ''}
           </span>
         </header>
@@ -649,10 +728,10 @@ export function BrandCard({
       {hasGradients && (
         <section>
           <header className="flex items-baseline justify-between mb-3.5">
-            <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+            <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground" style={{ fontFamily: 'var(--brand-font-eyebrow, var(--brand-font-body, inherit))' }}>
               Gradients
             </h2>
-            <span className="font-mono text-[11px] text-muted-foreground">
+            <span className="text-[11px] text-muted-foreground" style={{ fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)' }}>
               {data.gradients.length} of 5
             </span>
           </header>
@@ -699,10 +778,10 @@ export function BrandCard({
       {/* Section 4 — Semantic */}
       <section>
         <header className="flex items-baseline justify-between mb-3.5">
-          <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+          <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground" style={{ fontFamily: 'var(--brand-font-eyebrow, var(--brand-font-body, inherit))' }}>
             Semantic
           </h2>
-          <span className="font-mono text-[11px] text-muted-foreground">state · main + light</span>
+          <span className="text-[11px] text-muted-foreground" style={{ fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)' }}>state · main + light</span>
         </header>
         <div className={cn(
           'grid gap-3',

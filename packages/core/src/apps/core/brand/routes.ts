@@ -343,6 +343,60 @@ export function registerBrandRoutes(
     return c.json({ doc, palettes, themeLight, themeDark, gradients, onColor });
   });
 
+  /* ──────────────────────────────────────────────────────────────
+   * v0.1.56 — Operator-defined custom CSS
+   *
+   * The CSS tab on /brand lets operators append raw CSS to the
+   * published /brand.css. Stored at brand_tokens.category='custom',
+   * key='operator_css_overrides', value=<raw CSS string>.
+   *
+   * Read: GET /_ensemble/core/brand/custom-css
+   * Write: PUT /_ensemble/core/brand/custom-css { css: string }
+   *
+   * The CSS string is appended verbatim to the brand.css output by
+   * generateBrandCss() (see css.ts).
+   * ──────────────────────────────────────────────────────────── */
+
+  app.get('/_ensemble/core/brand/custom-css', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    try {
+      const row = await c.env.DB.prepare(
+        `SELECT value FROM brand_tokens
+         WHERE workspace_id = ? AND category = 'custom' AND key = 'operator_css_overrides' AND locale = ''`,
+      ).bind(workspace.id).first<{ value: string }>();
+      return c.json({ css: row?.value ?? '' });
+    } catch (error) {
+      return c.json({ error: 'Failed to load custom CSS', detail: String(error) }, 500);
+    }
+  });
+
+  app.put('/_ensemble/core/brand/custom-css', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    const body = await c.req.json().catch(() => ({})) as { css?: string };
+    const css = typeof body.css === 'string' ? body.css : '';
+    try {
+      if (css === '') {
+        // Empty value → delete the row so the published CSS doesn't
+        // emit a trailing operator-block comment with no content.
+        await c.env.DB.prepare(
+          `DELETE FROM brand_tokens WHERE workspace_id = ? AND category = 'custom' AND key = 'operator_css_overrides' AND locale = ''`,
+        ).bind(workspace.id).run();
+      } else {
+        await c.env.DB.prepare(
+          `INSERT INTO brand_tokens (workspace_id, category, key, value, type, locale, updated_at)
+           VALUES (?, 'custom', 'operator_css_overrides', ?, 'text', '', datetime('now'))
+           ON CONFLICT (workspace_id, category, key, locale)
+           DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+        ).bind(workspace.id, css).run();
+      }
+      return c.json({ ok: true });
+    } catch (error) {
+      return c.json({ error: 'Failed to save custom CSS', detail: String(error) }, 500);
+    }
+  });
+
   // ── Google Fonts catalog (v0.1.17) ─────────────────────────────────
   //
   // Proxies fonts.google.com/metadata/fonts and caches the normalized
