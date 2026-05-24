@@ -448,14 +448,21 @@ export function createCredentialsRoutes(): App {
     // ─────────────
     // Editorial renders (live preview with overrides): no-store. The
     // operator is actively dragging sliders.
-    // Saved-policy renders: public, max-age=2592000 (30d). The cache
-    // key includes a snapshot hash of inputs, so saved-policy edits
-    // produce a new path; the OLD path's response will still be
-    // served from CDN if anyone has it bookmarked, but no operator
-    // workflow ever hits a stale render of CURRENT settings.
+    // Saved-policy renders: public, max-age=300, must-revalidate.
+    //
+    // v0.1.65: dropped the `max-age=2592000, immutable` 30-day pin.
+    // The public URL grammar (slug-comp-finish-bg.ext) doesn't carry
+    // a policy snapshot hash — so when operators save a padding /
+    // tile-color / finish change, the URL stays the same and the
+    // pinned response stayed cached for 30 days. CF edge would
+    // serve old SVGs until TTL expired or someone manually purged.
+    //
+    // 5-minute revalidation gives saved-policy changes near-immediate
+    // propagation in CF edge (and downstream consumers) while still
+    // letting external consumers cache the asset for short bursts.
     const cacheControl = result.editorial
       ? 'no-store, max-age=0, must-revalidate'
-      : 'public, max-age=2592000, immutable';
+      : 'public, max-age=300, must-revalidate';
 
     const headers = new Headers({
       'Content-Type': result.contentType,
@@ -653,7 +660,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.64-tile-flex-shrink-zero-border-box',
+      buildFingerprint: 'v0.1.65-tile-fits-content-cache-5min',
       timestamp: new Date().toISOString(),
     });
   });

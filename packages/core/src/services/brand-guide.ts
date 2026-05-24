@@ -311,6 +311,77 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
         border-radius: 4px;
       }
       footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid #e5e7eb; font-size: 13px; color: #6b7280; }
+      /* v0.1.65: approved-uses background section heading + filters. */
+      .approved-bg-heading {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #6b7280;
+        margin: 24px 0 8px;
+        padding-top: 16px;
+        border-top: 1px solid #f3f4f6;
+      }
+      .approved-bg-heading:first-of-type { border-top: 0; padding-top: 0; margin-top: 16px; }
+      .filters {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        margin-bottom: 20px;
+      }
+      .filter-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+      .filter-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #6b7280;
+        margin-right: 8px;
+        min-width: 88px;
+      }
+      .filter-chip {
+        appearance: none;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 500;
+        padding: 4px 10px;
+        border-radius: 9999px;
+        border: 1px solid #d4d4d8;
+        background: #fff;
+        color: #52525b;
+        cursor: pointer;
+        transition: background 0.1s, color 0.1s, border-color 0.1s;
+      }
+      .filter-chip:hover { border-color: #71717a; }
+      .filter-chip.active {
+        background: #0a0a0a;
+        color: #fafafa;
+        border-color: #0a0a0a;
+      }
+      /* The hide-by-attribute pattern: when the filter root has class
+         filter-bg-X, only tiles with data-bg="X" stay visible. The
+         section heading is hidden when no tiles below it are visible
+         via the heading:empty-of-visible-followers pattern. */
+      [data-filter-root].filter-bg-true-white .logo-card:not([data-bg="true-white"]),
+      [data-filter-root].filter-bg-true-black .logo-card:not([data-bg="true-black"]),
+      [data-filter-root].filter-bg-light .logo-card:not([data-bg="light"]),
+      [data-filter-root].filter-bg-dark .logo-card:not([data-bg="dark"]),
+      [data-filter-root].filter-bg-transparent .logo-card:not([data-bg="transparent"]) { display: none; }
+      [data-filter-root].filter-comp-icon-only .logo-card:not([data-comp="icon-only"]),
+      [data-filter-root].filter-comp-wordmark-only .logo-card:not([data-comp="wordmark-only"]),
+      [data-filter-root].filter-comp-horizontal .logo-card:not([data-comp="horizontal"]),
+      [data-filter-root].filter-comp-stacked .logo-card:not([data-comp="stacked"]) { display: none; }
+      [data-filter-root].filter-finish-full-color .logo-card:not([data-finish="full-color"]),
+      [data-filter-root].filter-finish-mono-black .logo-card:not([data-finish="mono-black"]),
+      [data-filter-root].filter-finish-mono-white .logo-card:not([data-finish="mono-white"]),
+      [data-filter-root].filter-finish-mono-brand .logo-card:not([data-finish="mono-brand"]) { display: none; }
       /* v0.1.61: mobile breakpoints. Phones (<=640px) collapse the
          typography metadata sidebar above the specimen, and tighten
          the section padding. The brand-colors HTML emitter handles
@@ -364,48 +435,108 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
           Every composition × finish × background combination approved by this brand.
           Use these freely.
         </p>
-        ${approvedComps.map((composition) => `
-          <p style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;margin:16px 0 8px;">
-            ${escapeHtml(composition.replace('-', ' '))}
-          </p>
-          <div class="logo-grid">
-            ${approvedFinishes.flatMap((finish) =>
-              approvedBgs.map((bg) => {
-                if (banSet.has(`${finish.id}|${bg.id}`)) return '';
-                const compShort = composition === 'wordmark-only' ? 'wordmark'
-                  : composition === 'icon-only' ? 'icon'
-                  : composition;
-                const svgUrl = applyAssetAlias(
-                  `/_ensemble/brand/render/${brand.workspace_slug}-${compShort}-${finish.id}-${bg.id}.svg`,
-                  aliasPath,
-                ) ?? '';
-                const pngUrl = applyAssetAlias(
-                  `/_ensemble/brand/render/${brand.workspace_slug}-${compShort}-${finish.id}-${bg.id}.png`,
-                  aliasPath,
-                ) ?? '';
-                // v0.1.57: every logo tile uses the same #808080
-                // mid-grey chrome. v0.1.59: add download links for
-                // SVG + PNG so external consumers can grab assets
-                // without round-tripping through an admin tool.
-                // v0.1.62: click the tile to copy the SVG asset URL.
-                // Download links stay for explicit Save-As; click is
-                // the fast path for pasting into design tools.
-                return `<div>
-                  <div class="logo-tile" data-copy="${escapeAttr(svgUrl)}" title="Click to copy SVG URL">
-                    <img src="${escapeAttr(svgUrl)}" alt="${escapeHtml(`${finish.label} on ${bg.label}`)}">
-                  </div>
-                  <div class="logo-meta">
-                    <p style="font-size:12px;color:#6b7280;margin:8px 0 4px;">${escapeHtml(`${finish.label} · ${bg.label}`)}</p>
-                    <div class="logo-downloads">
-                      <a href="${escapeAttr(svgUrl)}" download class="dl-link">SVG</a>
-                      <a href="${escapeAttr(pngUrl)}" download class="dl-link">PNG</a>
-                    </div>
-                  </div>
-                </div>`;
-              }),
+        <!-- v0.1.65: client-side filter chips. Each chip toggles
+             a CSS class on the section root that hides non-matching
+             tiles via [data-bg="X"] / [data-comp="X"] / [data-finish="X"]
+             attribute selectors. No JS state, no rerender — just
+             toggling display:none via the .filter-X class on the
+             section element. -->
+        <div class="filters" data-filter-root>
+          <div class="filter-row">
+            <span class="filter-label">Background</span>
+            <button type="button" class="filter-chip active" data-filter="bg" data-value="all">All</button>
+            ${(() => {
+              // v0.1.65: order backgrounds simple → complex.
+              //   transparent (no chrome) → true-white (universal flat)
+              //   → true-black (universal flat) → light (brand color)
+              //   → dark (brand color). Approved-uses iteration follows
+              //   the same order; the chip set matches.
+              const order = ['transparent', 'true-white', 'true-black', 'light', 'dark'];
+              const orderedBgs = order
+                .map((id) => approvedBgs.find((b) => b.id === id))
+                .filter((b): b is typeof approvedBgs[number] => !!b);
+              return orderedBgs.map((bg) =>
+                `<button type="button" class="filter-chip" data-filter="bg" data-value="${escapeAttr(bg.id)}">${escapeHtml(bg.label)}</button>`
+              ).join('');
+            })()}
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">Composition</span>
+            <button type="button" class="filter-chip active" data-filter="comp" data-value="all">All</button>
+            ${(() => {
+              // v0.1.65: order compositions simple → complex.
+              //   icon-only (just the bug) → wordmark-only (just the
+              //   wordmark) → horizontal (icon + wordmark side-by-side)
+              //   → stacked (icon above/below wordmark).
+              const order = ['icon-only', 'wordmark-only', 'horizontal', 'stacked'];
+              return order
+                .filter((id) => approvedComps.includes(id))
+                .map((id) => {
+                  const label = id.replace('-', ' ');
+                  return `<button type="button" class="filter-chip" data-filter="comp" data-value="${escapeAttr(id)}">${escapeHtml(label)}</button>`;
+                }).join('');
+            })()}
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">Finish</span>
+            <button type="button" class="filter-chip active" data-filter="finish" data-value="all">All</button>
+            ${approvedFinishes.map((f) =>
+              `<button type="button" class="filter-chip" data-filter="finish" data-value="${escapeAttr(f.id)}">${escapeHtml(f.label)}</button>`
             ).join('')}
           </div>
-        `).join('')}
+        </div>
+        ${(() => {
+          // v0.1.65: restructure iteration order. Group by BACKGROUND
+          // first (simple → complex), then by COMPOSITION within each
+          // background. Operators reading the guide get a logical
+          // progression: every variant of the brand on transparent,
+          // then on white, then on black, then on brand light, then
+          // on brand dark. This mirrors how a designer evaluates a
+          // brand: "show me the logo first on the simplest surface,
+          // then layer in the brand-color treatments."
+          const bgOrder = ['transparent', 'true-white', 'true-black', 'light', 'dark'];
+          const compOrder = ['icon-only', 'wordmark-only', 'horizontal', 'stacked'];
+          const orderedBgs = bgOrder
+            .map((id) => approvedBgs.find((b) => b.id === id))
+            .filter((b): b is typeof approvedBgs[number] => !!b);
+          const orderedComps = compOrder.filter((id) => approvedComps.includes(id));
+          return orderedBgs.map((bg) => `
+            <p class="approved-bg-heading">${escapeHtml(bg.label)}</p>
+            <div class="logo-grid">
+              ${orderedComps.flatMap((composition) =>
+                approvedFinishes.map((finish) => {
+                  if (banSet.has(`${finish.id}|${bg.id}`)) return '';
+                  const compShort = composition === 'wordmark-only' ? 'wordmark'
+                    : composition === 'icon-only' ? 'icon'
+                    : composition;
+                  const svgUrl = applyAssetAlias(
+                    `/_ensemble/brand/render/${brand.workspace_slug}-${compShort}-${finish.id}-${bg.id}.svg`,
+                    aliasPath,
+                  ) ?? '';
+                  const pngUrl = applyAssetAlias(
+                    `/_ensemble/brand/render/${brand.workspace_slug}-${compShort}-${finish.id}-${bg.id}.png`,
+                    aliasPath,
+                  ) ?? '';
+                  // Each tile carries data-* attributes so the filter
+                  // chips can hide/show without JS state. Click still
+                  // copies SVG URL via the global delegated handler.
+                  return `<div class="logo-card" data-bg="${escapeAttr(bg.id)}" data-comp="${escapeAttr(composition)}" data-finish="${escapeAttr(finish.id)}">
+                    <div class="logo-tile" data-copy="${escapeAttr(svgUrl)}" title="Click to copy SVG URL">
+                      <img src="${escapeAttr(svgUrl)}" alt="${escapeHtml(`${finish.label} on ${bg.label}`)}">
+                    </div>
+                    <div class="logo-meta">
+                      <p style="font-size:12px;color:#6b7280;margin:8px 0 4px;">${escapeHtml(`${composition.replace('-', ' ')} · ${finish.label}`)}</p>
+                      <div class="logo-downloads">
+                        <a href="${escapeAttr(svgUrl)}" download class="dl-link">SVG</a>
+                        <a href="${escapeAttr(pngUrl)}" download class="dl-link">PNG</a>
+                      </div>
+                    </div>
+                  </div>`;
+                }),
+              ).join('')}
+            </div>
+          `).join('');
+        })()}
 
         <!-- v0.1.54: separate Backgrounded section removed.
              Light/dark background variants in the matrix above
@@ -539,6 +670,57 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
           t.style.opacity = '0';
           t.style.transform = 'translateX(-50%) translateY(20px)';
         }, 1100);
+      }
+      // v0.1.65: filter chips on the approved-uses section. Click
+      // toggles a class on the filter root; CSS attribute selectors
+      // hide non-matching tiles. Each row (bg / comp / finish) is
+      // independent — chips within a row are mutually exclusive.
+      const filterRoot = document.querySelector('[data-filter-root]');
+      if (filterRoot) {
+        // Move the data-filter-root to the parent section so the CSS
+        // selectors can hide .logo-card siblings, not children.
+        const section = filterRoot.closest('section');
+        if (section) {
+          section.setAttribute('data-filter-root', '');
+          filterRoot.removeAttribute('data-filter-root');
+        }
+        const rootEl = section || filterRoot;
+        filterRoot.addEventListener('click', (ev) => {
+          const chip = ev.target instanceof Element ? ev.target.closest('.filter-chip') : null;
+          if (!chip) return;
+          const filter = chip.getAttribute('data-filter');
+          const value = chip.getAttribute('data-value');
+          if (!filter || !value) return;
+          // Mark this chip active, deactivate siblings in the same row.
+          const row = chip.parentElement;
+          if (row) {
+            for (const sibling of row.querySelectorAll('.filter-chip')) {
+              sibling.classList.toggle('active', sibling === chip);
+            }
+          }
+          // Remove any existing filter-{filter}-* class on the root,
+          // then add the new one (unless "all" was clicked).
+          const prefix = 'filter-' + filter + '-';
+          for (const cls of Array.from(rootEl.classList)) {
+            if (cls.startsWith(prefix)) rootEl.classList.remove(cls);
+          }
+          if (value !== 'all') {
+            rootEl.classList.add(prefix + value);
+          }
+          // Hide background-section headings whose tiles are now all
+          // filtered out. Each heading is the <p.approved-bg-heading>
+          // immediately followed by a .logo-grid. Walk pairs.
+          for (const heading of rootEl.querySelectorAll('.approved-bg-heading')) {
+            const grid = heading.nextElementSibling;
+            if (!grid) continue;
+            const visible = grid.querySelectorAll('.logo-card:not([style*="display: none"])').length;
+            const hasVisible = Array.from(grid.querySelectorAll('.logo-card')).some((c) => {
+              return getComputedStyle(c).display !== 'none';
+            });
+            heading.style.display = hasVisible ? '' : 'none';
+            grid.style.display = hasVisible ? '' : 'none';
+          }
+        });
       }
       document.addEventListener('click', (ev) => {
         const target = ev.target instanceof Element ? ev.target.closest('[data-hex],[data-copy]') : null;
