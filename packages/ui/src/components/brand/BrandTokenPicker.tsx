@@ -19,7 +19,7 @@
 import * as React from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Button } from '../ui/button';
-import { ColorPicker } from '../ui/color-picker';
+import { ColorPickerPanel } from '../ui/color-picker';
 import { cn } from '../../lib/utils';
 
 export type PaletteRole = 'primary' | 'secondary' | 'accent' | 'neutral';
@@ -185,7 +185,7 @@ export function BrandTokenPicker({
             <p className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground font-medium mb-2">
               Custom hex
             </p>
-            <ColorPicker
+            <ColorPickerPanel
               value={isHex(value) ? value : '#000000'}
               onChange={(hex) => onChange(hex)}
             />

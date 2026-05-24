@@ -12,6 +12,7 @@
 
 import { resolveBrandImage } from './brand-images';
 import { parseWordmarkSegments } from './wordmark-segments';
+import type { FontRole, ResolvedRole, TextTransform } from './font-roles';
 
 interface Env {
   DB: D1Database;
@@ -101,6 +102,18 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
     tokens('font_sans', brand.tokens) ||
     `-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif`;
 
+  // v0.1.57: load all configured typography roles for the expanded
+  // typography section. Each role carries family + weight + style +
+  // letter-spacing + text-transform + font-size. We render one
+  // specimen per role using the workspace's actual settings.
+  const { loadAndResolveRoles } = await import('./font-roles');
+  let typographyRoles: Awaited<ReturnType<typeof loadAndResolveRoles>> | null = null;
+  try {
+    typographyRoles = await loadAndResolveRoles(env.DB, workspaceId);
+  } catch {
+    /* fall back to single-pangram section */
+  }
+
   const colorEntries = Object.entries(brand.tokens)
     .filter(([k, v]) => isHex(v) && !k.startsWith('logo_'))
     .map(([k, v]) => ({ name: prettifyTokenKey(k), value: v }));
@@ -146,12 +159,58 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
       .swatch .meta strong { display: block; color: #111827; }
       .swatch .meta code { color: #6b7280; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
       .logo-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-      .logo-tile { border: 1px solid #e5e7eb; border-radius: 8px; padding: 24px; display: flex; align-items: center; justify-content: center; min-height: 120px; }
-      .logo-tile.dark { background: #0a0a0a; border-color: #262626; }
+      /* v0.1.57: logo tiles use the same #808080 mid-grey chrome
+         the Brand Overview matrix uses (50%-luminance preview surface
+         — shows true light/dark logo relationships without bias). */
+      .logo-tile {
+        background: #808080;
+        border: 1px solid rgba(0, 0, 0, 0.1);
+        border-radius: 8px;
+        padding: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 120px;
+      }
       .logo-tile img { max-width: 100%; max-height: 80px; }
-      .typography-sample { padding: 24px; border: 1px solid #e5e7eb; border-radius: 8px; }
-      .typography-sample p { margin: 0 0 12px; }
-      .typography-sample p:last-child { margin: 0; }
+      /* Typography specimens — one row per configured role. */
+      .typography-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 0;
+        overflow: hidden;
+      }
+      .typo-row {
+        display: grid;
+        grid-template-columns: 160px 1fr;
+        gap: 24px;
+        align-items: baseline;
+        padding: 20px 24px;
+        border-top: 1px solid #f3f4f6;
+      }
+      .typo-row:first-child { border-top: 0; }
+      .typo-meta { font-size: 11px; color: #71717a; }
+      .typo-meta .role {
+        font-weight: 500;
+        color: #18181b;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        display: block;
+        margin-bottom: 4px;
+      }
+      .typo-meta .stack {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 10px;
+        color: #a1a1aa;
+        word-break: break-word;
+      }
+      .typo-meta .vitals {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 10px;
+        color: #a1a1aa;
+        margin-top: 2px;
+      }
+      .typo-specimen { line-height: 1.25; color: #18181b; }
       footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid #e5e7eb; font-size: 13px; color: #6b7280; }
     </style>
   </head>
@@ -198,9 +257,13 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
                   `/_ensemble/brand/render/${brand.workspace_slug}-${compShort}-${finish.id}-${bg.id}.svg`,
                   aliasPath,
                 ) ?? '';
-                const isDark = bg.id === 'dark';
+                // v0.1.57: every logo tile uses the same #808080
+                // mid-grey chrome regardless of bg variant. The
+                // background color is already INSIDE the rendered
+                // SVG via the padding system; the outer tile is a
+                // neutral preview surface.
                 return `<div>
-                  <div class="logo-tile${isDark ? ' dark' : ''}">
+                  <div class="logo-tile">
                     <img src="${escapeAttr(renderUrl)}" alt="${escapeHtml(`${finish.label} on ${bg.label}`)}">
                   </div>
                   <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">${escapeHtml(`${finish.label} · ${bg.label}`)}</p>
@@ -259,9 +322,8 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
               `/_ensemble/brand/render/${brand.workspace_slug}-wordmark-${ban.finishId}-${ban.backgroundId}.svg`,
               aliasPath,
             ) ?? '';
-            const isDark = ban.backgroundId === 'dark';
             return `<div>
-              <div class="logo-tile${isDark ? ' dark' : ''}" style="position:relative;">
+              <div class="logo-tile" style="position:relative;">
                 <img src="${escapeAttr(renderUrl)}" alt="banned use">
                 <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
                   <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -296,11 +358,7 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
 
       <section>
         <h2>Typography</h2>
-        <div class="typography-sample">
-          <p style="font-size:28px;font-weight:700;line-height:1.2;">The quick brown fox jumps over the lazy dog.</p>
-          <p style="font-size:18px;font-weight:500;line-height:1.4;">The quick brown fox jumps over the lazy dog.</p>
-          <p style="font-size:15px;line-height:1.5;color:#6b7280;">Stack: ${escapeHtml(font)}</p>
-        </div>
+        ${renderTypographySection(typographyRoles, font)}
       </section>
 
       <footer>
@@ -339,9 +397,11 @@ function renderWordmark(brand: BrandData): string {
   return `<div class="wordmark" style="color:${escapeAttr(brand.accent)}">${escapeHtml(brand.workspace_name)}</div>`;
 }
 
-function logoTile(label: string, src: string, dark: boolean): string {
+function logoTile(label: string, src: string, _dark: boolean): string {
+  // v0.1.57: dark parameter retained for signature compat but
+  // ignored — every logo tile uses the same #808080 chrome now.
   return `<div>
-    <div class="logo-tile${dark ? ' dark' : ''}">
+    <div class="logo-tile">
       <img src="${escapeAttr(src)}" alt="${escapeHtml(label)}">
     </div>
     <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">${escapeHtml(label)}</p>
@@ -381,4 +441,90 @@ function escapeHtml(s: string): string {
 
 function escapeAttr(s: string): string {
   return escapeHtml(s);
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Typography section — v0.1.57 expansion
+ *
+ * Replaces the pre-v0.1.57 two-pangram block with a per-role
+ * specimen card. Renders one row per CONFIGURED role using the
+ * operator's actual family + weight + style + letter-spacing +
+ * text-transform + font-size. Mirrors the structure of the
+ * Brand Overview typography specimen card.
+ *
+ * When the role loader fails (no DB, fresh workspace) the section
+ * gracefully falls back to the legacy pangram block.
+ * ──────────────────────────────────────────────────────────── */
+
+interface RoleSpec {
+  key: FontRole;
+  label: string;
+  preview: string;
+}
+
+const ROLE_DISPLAY_ORDER: RoleSpec[] = [
+  { key: 'display',    label: 'Display',    preview: 'Make something beautiful' },
+  { key: 'heading',    label: 'Heading',    preview: 'The quick brown fox' },
+  { key: 'subheading', label: 'Subheading', preview: 'Card title or modal heading' },
+  { key: 'body',       label: 'Body',       preview: 'The quick brown fox jumps over the lazy dog. Used for paragraphs, descriptions, and most reading.' },
+  { key: 'eyebrow',    label: 'Eyebrow',    preview: 'Product update' },
+  { key: 'label',      label: 'Label',      preview: 'Save changes' },
+  { key: 'caption',    label: 'Caption',    preview: 'Updated 5 minutes ago. Source: Ensemble v0.1.57 release notes.' },
+  { key: 'mono',       label: 'Mono',       preview: 'const x = 42;' },
+];
+
+function renderTypographySection(
+  roles: Record<FontRole, ResolvedRole> | null,
+  fallbackFontStack: string,
+): string {
+  if (!roles) {
+    // Legacy fallback when the role loader failed (e.g. fresh DB).
+    return `<div class="typography-card" style="padding:24px;">
+      <p style="font-size:28px;font-weight:700;line-height:1.2;margin:0 0 12px;">The quick brown fox jumps over the lazy dog.</p>
+      <p style="font-size:18px;font-weight:500;line-height:1.4;margin:0 0 12px;">The quick brown fox jumps over the lazy dog.</p>
+      <p style="font-size:15px;line-height:1.5;color:#6b7280;margin:0;">Stack: ${escapeHtml(fallbackFontStack)}</p>
+    </div>`;
+  }
+
+  // Build one row per role using the operator's actual settings.
+  const rows = ROLE_DISPLAY_ORDER.map((spec) => {
+    const r = roles[spec.key];
+    if (!r) return '';
+    // Family stack — synthesize from family + sensible fallback chain.
+    const stack = familyStack(r.family, spec.key);
+    const styleAttr = r.style === 'italic' ? 'italic' : 'normal';
+    const transformAttr = (r.textTransform || 'none') as TextTransform;
+    // Compute display size — clamp super-large display down so the
+    // /brand guide doesn't overflow its container on small screens.
+    const sizeRem = parseFloat(r.fontSize) || 1;
+    const displaySize = Math.min(sizeRem, 3) + 'rem';
+    return `
+      <div class="typo-row">
+        <div class="typo-meta">
+          <span class="role">${escapeHtml(spec.label)}</span>
+          <div class="stack">${escapeHtml(r.family)}${r.inheritedFrom ? ` <span style="color:#a1a1aa;">· inherits from ${escapeHtml(r.inheritedFrom)}</span>` : ''}</div>
+          <div class="vitals">${escapeHtml(r.weight)} · ${escapeHtml(displaySize)}${r.style === 'italic' ? ' · italic' : ''}${r.letterSpacing && r.letterSpacing !== '0em' ? ` · ${escapeHtml(r.letterSpacing)}` : ''}${transformAttr !== 'none' ? ` · ${escapeHtml(transformAttr)}` : ''}</div>
+        </div>
+        <div class="typo-specimen"
+             style="font-family:${escapeAttr(stack)};font-weight:${escapeAttr(r.weight)};font-style:${styleAttr};font-size:${displaySize};letter-spacing:${escapeAttr(r.letterSpacing || '0')};text-transform:${transformAttr};">
+          ${escapeHtml(spec.preview)}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `<div class="typography-card">${rows}</div>`;
+}
+
+/**
+ * Build a CSS font-family stack from a role's family + sensible
+ * generic fallback. Wraps multi-word families in quotes.
+ */
+function familyStack(family: string, role: FontRole): string {
+  const generic = role === 'mono' ? 'ui-monospace, monospace' : 'system-ui, sans-serif';
+  // System families don't need quotes.
+  if (/^(system-ui|sans-serif|serif|monospace|ui-monospace|-apple-system)$/i.test(family.trim())) {
+    return `${family}, ${generic}`;
+  }
+  return `"${family}", ${generic}`;
 }

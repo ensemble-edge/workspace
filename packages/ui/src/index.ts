@@ -155,8 +155,8 @@ export { Alert, AlertTitle, AlertDescription } from "./components/ui/alert";
 export { Slider } from "./components/ui/slider";
 
 // Color Picker (custom Ensemble component built from shadcn primitives)
-export { ColorPicker } from "./components/ui/color-picker";
-export type { ColorPickerProps, ColorPreset } from "./components/ui/color-picker";
+export { ColorPicker, ColorPickerPanel } from "./components/ui/color-picker";
+export type { ColorPickerProps, ColorPickerPanelProps, ColorPreset } from "./components/ui/color-picker";
 
 // Switch
 export { Switch } from "./components/ui/switch";

@@ -74,12 +74,20 @@ export interface Palette {
   overrides?: Partial<Record<Exclude<RungName, 'main'>, string>>;
 }
 
-/** Neutral has the same shape as a brand palette PLUS a hue mode
- *  ("branded" = derive from primary, "warm"/"cool"/"true" = preset
- *  hue overrides). When mode is "branded" the operator hasn't
- *  picked a main hex — it's computed from primary at resolve time. */
+/** Neutral has the same shape as a brand palette PLUS a hue mode.
+ *
+ *   'branded' → derive Main from primary's hue + low chroma
+ *   'warm'    → fixed amber/sand hue
+ *   'cool'    → fixed blue-grey hue
+ *   'true'    → pure achromatic
+ *   'custom'  → operator's typed `main` hex used directly
+ *
+ * For 'branded'/'warm'/'cool'/'true', Main is computed at resolve
+ * time and the stored `main` field is ignored. For 'custom', the
+ * stored `main` field is used as-is — operator typed it.
+ */
 export interface NeutralPalette extends Palette {
-  hueMode: 'branded' | 'warm' | 'cool' | 'true';
+  hueMode: 'branded' | 'warm' | 'cool' | 'true' | 'custom';
 }
 
 /* ──────────────────────────────────────────────────────────────

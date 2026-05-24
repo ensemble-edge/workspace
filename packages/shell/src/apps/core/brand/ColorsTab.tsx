@@ -72,7 +72,7 @@ interface Palette {
 }
 
 interface NeutralPalette extends Palette {
-  hueMode: 'branded' | 'warm' | 'cool' | 'true';
+  hueMode: 'branded' | 'warm' | 'cool' | 'true' | 'custom';
 }
 
 interface Gradient {
@@ -225,12 +225,31 @@ export function ColorsTab() {
       // Otherwise derive client-side via the same OkLCh offsets.
       return clientDeriveRungs(p.main, p.overrides);
     };
-    const palettes: ResolvedPalettes = {
-      primary: localResolve('primary'),
-      secondary: localResolve('secondary'),
-      accent: localResolve('accent'),
-      neutral: localResolve('neutral'),
-    };
+    // Resolve primary/secondary/accent normally.
+    const primary = localResolve('primary');
+    const secondary = localResolve('secondary');
+    const accent = localResolve('accent');
+    // Neutral has hueMode-driven Main resolution. Match the server's
+    // resolveNeutral() logic locally so the BrandCard preview reflects
+    // hue-mode flips in real time.
+    const neutralPalette = draft.palettes.neutral as NeutralPalette;
+    const neutralServer = resolved.palettes.neutral;
+    const neutralServerDoc = resolved.doc.palettes.neutral as NeutralPalette;
+    const neutralUnchanged =
+      neutralPalette.hueMode === neutralServerDoc.hueMode &&
+      neutralPalette.main.toLowerCase() === neutralServerDoc.main.toLowerCase() &&
+      JSON.stringify(neutralPalette.overrides ?? {}) === JSON.stringify(neutralServerDoc.overrides ?? {});
+    let neutral: Record<RungName, string>;
+    if (neutralUnchanged) {
+      neutral = neutralServer;
+    } else {
+      const effectiveMain =
+        neutralPalette.hueMode === 'custom'
+          ? (neutralPalette.main || clientNeutralMainFromHueMode('branded', primary.main))
+          : clientNeutralMainFromHueMode(neutralPalette.hueMode, primary.main);
+      neutral = clientDeriveRungs(effectiveMain, neutralPalette.overrides);
+    }
+    const palettes: ResolvedPalettes = { primary, secondary, accent, neutral };
     const gradients: BrandCardGradient[] = draft.gradients.map((g) => ({
       slug: g.slug,
       name: g.name,
@@ -281,7 +300,7 @@ export function ColorsTab() {
       return { ...d, palettes: { ...d.palettes, [role]: { ...p, overrides } } };
     });
   }
-  function updateNeutralHueMode(mode: 'branded' | 'warm' | 'cool' | 'true') {
+  function updateNeutralHueMode(mode: 'branded' | 'warm' | 'cool' | 'true' | 'custom') {
     setDraft((d) => d && ({ ...d, palettes: { ...d.palettes, neutral: { ...d.palettes.neutral, hueMode: mode } } }));
   }
   function updateGradientName(slug: string, name: string) {
@@ -455,41 +474,20 @@ export function ColorsTab() {
       </div>
 
       {/* Section 1 — Brand palettes + Neutral + Gradients + Semantic
-          rendered by BrandCard in edit mode */}
+          rendered by BrandCard in edit mode. v0.1.57: the Neutral
+          hue selector is now inline in NeutralStrip (was a separate
+          Card below); the BrandCard owns the entire Neutral surface
+          including hue mode + Main override. */}
       <BrandCard
         data={cardData}
         mode="edit"
         onPaletteNameChange={updatePaletteName}
         onPaletteMainChange={updatePaletteMain}
         onRungOverride={updateRungOverride}
+        onNeutralHueModeChange={updateNeutralHueMode}
         onGradientNameChange={updateGradientName}
         onSemanticChange={updateSemantic}
       />
-
-      {/* Section — Neutral hue mode (BrandCard doesn't expose this edit
-          surface; we put it just below the BrandCard to keep the visual
-          grouping). */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Neutral hue</CardTitle>
-          <CardDescription>
-            How neutral grey is tinted. Branded inherits hue from primary; the others use fixed presets.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Select value={draft.palettes.neutral.hueMode} onValueChange={(v) => updateNeutralHueMode(v as 'branded' | 'warm' | 'cool' | 'true')}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="branded">Branded (from primary)</SelectItem>
-              <SelectItem value="warm">Warm (amber/sand)</SelectItem>
-              <SelectItem value="cool">Cool (blue-grey)</SelectItem>
-              <SelectItem value="true">True (pure grey)</SelectItem>
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
 
       {/* Gradients editor — adds advanced controls below the BrandCard's
           display of gradients. The BrandCard's mode="edit" lets the
@@ -982,6 +980,36 @@ function oklabToOklch([L, a, b]: [number, number, number]): { L: number; C: numb
 function oklchToOklab({ L, C, h }: { L: number; C: number; h: number }): [number, number, number] {
   const rad = h * Math.PI / 180;
   return [L, C * Math.cos(rad), C * Math.sin(rad)];
+}
+
+/**
+ * Client mirror of services/brand-colors/derive.ts's
+ * neutralMainFromHueMode. Computes Neutral's Main hex from the
+ * hue mode. Used by the live preview so flipping Hue updates the
+ * neutral strip immediately without waiting for save.
+ */
+function clientNeutralMainFromHueMode(
+  hueMode: 'branded' | 'warm' | 'cool' | 'true' | 'custom',
+  primaryMainHex: string,
+): string {
+  if (hueMode === 'true') return '#737373';
+  if (hueMode === 'custom') hueMode = 'branded'; // fallback
+  // Mirror the OkLCh L=0.45, C=0.012 anchor the server uses.
+  const presetHue: Record<'branded' | 'warm' | 'cool', number | null> = {
+    branded: null, warm: 60, cool: 240,
+  };
+  const hue = presetHue[hueMode];
+  let h = 0;
+  if (hue !== null) {
+    h = hue;
+  } else {
+    // Pull hue from primary via the client's existing OkLab math.
+    const lab = linearToOklab(srgbToLinear(primaryMainHex));
+    const lch = oklabToOklch(lab);
+    h = lch.h;
+  }
+  const labFromLch = oklchToOklab({ L: 0.45, C: 0.012, h });
+  return linearToSrgbHex(oklabToLinear(labFromLch));
 }
 
 function clientDeriveRung(mainHex: string, rung: Exclude<RungName, 'main'>): string {

@@ -644,7 +644,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.56-apca-theme-preview-css-tab',
+      buildFingerprint: 'v0.1.57-neutral-inline-picker-simplification-manifest-fix',
       timestamp: new Date().toISOString(),
     });
   });
@@ -784,16 +784,30 @@ export function createCredentialsRoutes(): App {
     if (!workspace?.id) return c.notFound();
     const { buildWebManifest } = await import('../services/brand-render/favicon');
     const { getSetting } = await import('../services/workspace-settings');
+    // v0.1.57: resolve brand colors via the new BrandColorsDoc.
+    // Pre-v0.1.55 we read brand-primary/brand-background-light as
+    // raw token rows; those don't exist after the redesign — colors
+    // live in a single JSON blob and resolve through palettes +
+    // themes. This was breaking PWA add-to-home-screen because the
+    // manifest got hardcoded #3b82f6 / #ffffff defaults.
+    const { loadBrandColors } = await import('../services/brand-colors/load');
+    const { resolvePalettes, resolveBindingValue } = await import('../services/brand-colors/resolver');
 
-    // Read display name + brand colors from brand_tokens.
-    const rows = await c.env.DB.prepare(
+    // Display name from identity tokens (unchanged).
+    const idRows = await c.env.DB.prepare(
       `SELECT key, value FROM brand_tokens
-       WHERE workspace_id = ? AND category IN ('colors','identity') AND locale = ''
-         AND key IN ('display_name', 'workspace_name', 'brand-primary', 'brand-background-light')`,
+       WHERE workspace_id = ? AND category = 'identity' AND locale = ''
+         AND key IN ('display_name', 'workspace_name')`,
     ).bind(workspace.id).all<{ key: string; value: string }>();
-    const tokens: Record<string, string> = {};
-    for (const r of rows.results ?? []) tokens[r.key] = r.value;
-    const name = tokens['display_name'] || tokens['workspace_name'] || workspace.slug || 'Workspace';
+    const idTokens: Record<string, string> = {};
+    for (const r of idRows.results ?? []) idTokens[r.key] = r.value;
+    const name = idTokens['display_name'] || idTokens['workspace_name'] || workspace.slug || 'Workspace';
+
+    // Brand colors via the new doc.
+    const doc = await loadBrandColors(c.env.DB, workspace.id);
+    const palettes = resolvePalettes(doc);
+    const themeColor = resolveBindingValue(doc.themes.light.bindings.brand, palettes);
+    const backgroundColor = resolveBindingValue(doc.themes.light.bindings.canvas, palettes);
 
     // Manifest URLs need to be ABSOLUTE-ish (root-relative is fine —
     // the browser resolves them against the page that linked the
@@ -805,8 +819,8 @@ export function createCredentialsRoutes(): App {
     const manifest = buildWebManifest({
       name,
       shortName: name.length > 12 ? name.slice(0, 12) : name,
-      themeColor: tokens['brand-primary'] || '#3b82f6',
-      backgroundColor: tokens['brand-background-light'] || '#ffffff',
+      themeColor,
+      backgroundColor,
       iconBasePath,
     });
     return new Response(manifest, {

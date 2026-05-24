@@ -135,25 +135,60 @@ export function AppearanceTab() {
   const [bodyFont, setBodyFont] = useState('system');
   const [contentPadding, setContentPadding] = useState('1.5');
   const [cardPadding, setCardPadding] = useState('1.5');
-  const [brandColors, setBrandColors] = useState({ primary: '#3b82f6', secondary: '#1e293b', accent: '#ef4444' });
+  // v0.1.57: extended to carry semantic colors too so the Brand
+  // preset can push them into the workspace appearance alongside
+  // primary/secondary/accent. Each semantic field carries the Main
+  // hex from the BrandColorsDoc (the Light pair stays brand-side;
+  // workspace tokens only need one value per state).
+  const [brandColors, setBrandColors] = useState({
+    primary: '#3b82f6',
+    secondary: '#1e293b',
+    accent: '#ef4444',
+    success: '#16a34a',
+    info: '#3b82f6',
+    warning: '#f59e0b',
+    error: '#dc2626',
+  });
   const [loaded, setLoaded] = useState(false);
   const saveTimeout = useRef<ReturnType<typeof setTimeout>>();
 
   // Load saved settings + brand colors
   useEffect(() => {
-    // Load brand colors for the "Brand" preset
-    authedFetch('/_ensemble/core/brand/tokens/colors')
-      .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
-      .then((result) => {
-        const bc = { ...brandColors };
-        for (const t of result.data || []) {
-          if (t.key === 'brand-primary') bc.primary = t.value;
-          if (t.key === 'brand-secondary') bc.secondary = t.value;
-          if (t.key === 'brand-accent') bc.accent = t.value;
-        }
-        setBrandColors(bc);
+    // v0.1.57: load brand colors via the new BrandColorsDoc
+    // resolver. The old per-token query (/brand/tokens/colors with
+    // keys 'brand-primary' etc.) silently fell through because those
+    // rows no longer exist — brand colors live in a single JSON
+    // blob now. /resolved gives us the fully resolved palettes +
+    // semantic pairs in one shot.
+    type ResolvedDocResponse = {
+      palettes: {
+        primary: { main: string };
+        secondary: { main: string };
+        accent: { main: string };
+      };
+      doc: {
+        semantic: {
+          success: { main: string };
+          info: { main: string };
+          warning: { main: string };
+          error: { main: string };
+        };
+      };
+    };
+    authedFetch('/_ensemble/core/brand/colors-doc/resolved')
+      .then((r) => r.json() as Promise<ResolvedDocResponse>)
+      .then((res) => {
+        setBrandColors({
+          primary:   res.palettes.primary.main,
+          secondary: res.palettes.secondary.main,
+          accent:    res.palettes.accent.main,
+          success:   res.doc.semantic.success.main,
+          info:      res.doc.semantic.info.main,
+          warning:   res.doc.semantic.warning.main,
+          error:     res.doc.semantic.error.main,
+        });
       })
-      .catch(() => {});
+      .catch(() => { /* card stays on hardcoded defaults */ });
 
     authedFetch('/_ensemble/core/brand/tokens/custom')
       .then((res) => res.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
@@ -359,20 +394,34 @@ export function AppearanceTab() {
     setSuccessColor(''); setWarningColor(''); setErrorColor(''); setInfoColor('');
 
     if (presetId === 'brand') {
-      // Brand preset: populate from brand colors
+      // Brand preset: populate from brand colors — INCLUDING
+      // semantic colors. The Brand preset should mean "make the
+      // workspace look like our brand, all the way down to state
+      // indicators." Pre-v0.1.57 this only pushed primary/secondary/
+      // accent; semantic stayed at preset defaults and the brand's
+      // own Success/Info/Warning/Error were ignored.
       setButtonColor(brandColors.primary);
       setAccentColor(brandColors.accent);
       setCanvasColor('');
       setSidebarColor(brandColors.secondary);
       setCardColor('');
+      setSuccessColor(brandColors.success);
+      setInfoColor(brandColors.info);
+      setWarningColor(brandColors.warning);
+      setErrorColor(brandColors.error);
       resetInlineStyles();
       saveAndReload({
         ...allTokens(),
         themePreset: 'brand',
         buttonColor: brandColors.primary,
         accentColor: brandColors.accent,
-        canvasColor: '', sidebarColor: brandColors.secondary, cardColor: '',
-        successColor: '', warningColor: '', errorColor: '', infoColor: '',
+        canvasColor: '',
+        sidebarColor: brandColors.secondary,
+        cardColor: '',
+        successColor: brandColors.success,
+        infoColor: brandColors.info,
+        warningColor: brandColors.warning,
+        errorColor: brandColors.error,
       });
     } else {
       // Standard preset: clear overrides
@@ -391,14 +440,20 @@ export function AppearanceTab() {
 
   // Get the display value for a color picker — shows the preset default if no override
   const activePreset = THEME_PRESETS.find((t) => t.id === themePreset);
-  // For Brand preset, its expected overrides don't count as "customized"
+  // For Brand preset, its expected overrides don't count as
+  // "customized". v0.1.57: semantic colors now also derive from
+  // brand under the Brand preset, so a workspace successColor that
+  // matches brandColors.success is NOT a customization.
   const hasOverrides = themePreset === 'brand'
     ? !!(
         (buttonColor && buttonColor !== brandColors.primary) ||
         (accentColor && accentColor !== brandColors.accent) ||
         canvasColor || cardColor ||
         (sidebarColor && sidebarColor !== brandColors.secondary) ||
-        successColor || warningColor || errorColor || infoColor
+        (successColor && successColor !== brandColors.success) ||
+        (infoColor && infoColor !== brandColors.info) ||
+        (warningColor && warningColor !== brandColors.warning) ||
+        (errorColor && errorColor !== brandColors.error)
       )
     : !!(buttonColor || accentColor || canvasColor || sidebarColor || cardColor || successColor || warningColor || errorColor || infoColor);
   const displayValue = (override: string, presetKey: keyof typeof THEME_PRESETS[0]) =>

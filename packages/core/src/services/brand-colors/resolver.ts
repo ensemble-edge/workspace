@@ -56,12 +56,19 @@ function resolvePalette(p: Palette): ResolvedPalette {
 }
 
 function resolveNeutral(n: NeutralPalette, primaryMainHex: string): ResolvedPalette {
-  // For the "branded" hueMode the Main hex is computed from
-  // primary's hue; for preset modes it falls back to the operator's
-  // stored main if they manually overrode it, otherwise to the
-  // preset-derived value.
-  const computedMain = neutralMainFromHueMode(n.hueMode, primaryMainHex);
-  const effectiveMain = n.hueMode === 'branded' ? computedMain : (n.main || computedMain);
+  // Main hex resolution per hueMode:
+  //   custom  → operator's stored `main` field, used as-is
+  //   else    → computed from hueMode + primary's hue (for 'branded')
+  //
+  // The other rungs (Dark/Bright/Pastel/Faded) always derive from
+  // the effective Main via the standard OkLCh offsets, with per-
+  // rung overrides taking priority when present.
+  let effectiveMain: string;
+  if (n.hueMode === 'custom') {
+    effectiveMain = n.main || neutralMainFromHueMode('branded', primaryMainHex);
+  } else {
+    effectiveMain = neutralMainFromHueMode(n.hueMode, primaryMainHex);
+  }
   const derived = deriveRungs(effectiveMain);
   return {
     dark:   n.overrides?.dark   ?? derived.dark,

@@ -32,7 +32,7 @@ import * as React from 'react';
 import { useState } from 'react';
 import { toast } from '../ui/sonner';
 import { Input } from '../ui/input';
-import { ColorPicker } from '../ui/color-picker';
+import { ColorPickerPanel } from '../ui/color-picker';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { cn } from '../../lib/utils';
 
@@ -51,7 +51,7 @@ export interface BrandCardPalette {
   name: string;
   /** Operator-typed Main hex. */
   main: string;
-  hueMode?: 'branded' | 'warm' | 'cool' | 'true';
+  hueMode?: 'branded' | 'warm' | 'cool' | 'true' | 'custom';
 }
 
 export interface BrandCardGradient {
@@ -101,6 +101,10 @@ export interface BrandCardProps {
   onPaletteNameChange?: (role: PaletteRole, name: string) => void;
   onPaletteMainChange?: (role: PaletteRole, hex: string) => void;
   onRungOverride?: (role: PaletteRole, rung: Exclude<RungName, 'main'>, hex: string | null) => void;
+  /** Neutral palette only — change the hue mode (Branded / Warm /
+   *  Cool / True / Custom). Wired by the ColorsTab editor; ignored
+   *  in display mode. */
+  onNeutralHueModeChange?: (hueMode: 'branded' | 'warm' | 'cool' | 'true' | 'custom') => void;
   onGradientNameChange?: (slug: string, name: string) => void;
   onSemanticChange?: (
     role: 'success' | 'info' | 'warning' | 'error',
@@ -228,7 +232,7 @@ function PaletteCard({
             </div>
           </PopoverTrigger>
           <PopoverContent className="p-3 w-[280px]" align="start">
-            <ColorPicker
+            <ColorPickerPanel
               label={`${palette.name} main`}
               value={palette.main}
               onChange={(hex) => onMainChange?.(hex)}
@@ -382,7 +386,7 @@ function RungChip({ role, rung, hex, label, mode, onOverride, showMeta = true, c
           </button>
         </PopoverTrigger>
         <PopoverContent className="p-3 w-[280px]" align="start">
-          <ColorPicker
+          <ColorPickerPanel
             label={`${role}-${rung} override`}
             description="Reset returns to the OkLCh-derived value."
             value={hex}
@@ -430,16 +434,28 @@ interface NeutralStripProps {
   resolved: ResolvedPalette;
   mode: BrandCardMode;
   onNameChange?: (name: string) => void;
-  onHueModeChange?: (hueMode: 'branded' | 'warm' | 'cool' | 'true') => void;
+  onMainChange?: (hex: string) => void;
+  onHueModeChange?: (hueMode: 'branded' | 'warm' | 'cool' | 'true' | 'custom') => void;
   onRungOverride?: (rung: Exclude<RungName, 'main'>, hex: string | null) => void;
 }
 
-function NeutralStrip({ palette, resolved, mode, onNameChange, onRungOverride }: NeutralStripProps) {
+const HUE_MODE_LABELS: Record<'branded' | 'warm' | 'cool' | 'true' | 'custom', string> = {
+  branded: 'Branded',
+  warm:    'Warm',
+  cool:    'Cool',
+  true:    'True grey',
+  custom:  'Custom',
+};
+
+function NeutralStrip({ palette, resolved, mode, onNameChange, onMainChange, onHueModeChange, onRungOverride }: NeutralStripProps) {
   const isEdit = mode === 'edit';
+  const hueMode = palette.hueMode ?? 'branded';
+
   return (
     <div className="rounded-2xl border-[0.5px] border-black/[0.07] bg-background p-5">
-      <div className="grid grid-cols-[180px_1fr] gap-6 items-center">
-        <div className="flex flex-col gap-1">
+      <div className="grid grid-cols-[200px_1fr] gap-6 items-start">
+        {/* Meta column: name + role + hue selector + description */}
+        <div className="flex flex-col gap-2">
           {isEdit && onNameChange ? (
             <Input
               value={palette.name}
@@ -456,7 +472,7 @@ function NeutralStrip({ palette, resolved, mode, onNameChange, onRungOverride }:
             </p>
           )}
           <p
-            className="text-[11px] font-medium tracking-[0.12em] text-muted-foreground mt-1.5"
+            className="text-[11px] font-medium tracking-[0.12em] text-muted-foreground"
             style={{
               textTransform: 'lowercase',
               fontFamily: 'var(--brand-font-eyebrow, var(--brand-font-body, inherit))',
@@ -464,20 +480,96 @@ function NeutralStrip({ palette, resolved, mode, onNameChange, onRungOverride }:
           >
             neutral
           </p>
-          <p className="text-xs text-muted-foreground">
-            Surfaces · borders · muted text. Derived from primary by default.
-          </p>
+
+          {/* Hue selector (edit mode only) */}
+          {isEdit && onHueModeChange ? (
+            <div className="flex flex-col gap-1.5 mt-1">
+              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-[0.04em]">Hue</span>
+              <div className="flex flex-wrap gap-1">
+                {(['branded', 'warm', 'cool', 'true', 'custom'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onHueModeChange(m)}
+                    className={cn(
+                      'inline-flex items-center px-2 py-1 rounded-md border text-[10px] font-medium transition-colors',
+                      'outline-none focus-visible:ring-2 focus-visible:ring-foreground/30',
+                      hueMode === m
+                        ? 'border-foreground/40 bg-foreground/5 text-foreground'
+                        : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/20',
+                    )}
+                  >
+                    {HUE_MODE_LABELS[m]}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+                {hueMode === 'branded' && 'Inherits primary\'s hue. Cohesive with the brand.'}
+                {hueMode === 'warm' && 'Amber/sand tint. Use for sandstone / cream neutrals.'}
+                {hueMode === 'cool' && 'Blue-grey tint. Pairs with cooler primaries.'}
+                {hueMode === 'true' && 'Pure achromatic. No hue.'}
+                {hueMode === 'custom' && 'Click the Main chip to pick any hex.'}
+              </p>
+            </div>
+          ) : (
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              hue · {HUE_MODE_LABELS[hueMode].toLowerCase()}
+            </p>
+          )}
         </div>
+
+        {/* Rung grid — Main is editable when hueMode='custom'.
+            Other rungs use the standard override popover. */}
         <div className="grid grid-cols-5 gap-2">
           {(['dark', 'main', 'bright', 'pastel', 'faded'] as const).map((rung) => (
             <div key={rung} className="flex flex-col gap-1">
               {rung === 'main' ? (
-                <Swatch
-                  color={resolved.main}
-                  label={resolved.main.toUpperCase()}
-                  className="h-[36px] rounded-md"
-                  style={{ boxShadow: '0 0 0 1.5px var(--foreground, #18181B)' }}
-                />
+                // Main chip: in edit + custom mode → opens a ColorPicker
+                // popover that updates the operator's main hex. In edit
+                // mode for other hueModes → also clickable but flips
+                // hueMode to 'custom' as a side-effect (so a click means
+                // "I want to choose this exact color"). In display mode →
+                // copies hex like everything else.
+                isEdit && onMainChange ? (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="Edit neutral main"
+                        className="rounded-md border-[0.5px] border-black/10 cursor-pointer hover:-translate-y-px transition-transform outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
+                        style={{
+                          height: 36,
+                          backgroundColor: resolved.main,
+                          boxShadow: '0 0 0 1.5px var(--foreground, #18181B)',
+                        }}
+                      />
+                    </PopoverTrigger>
+                    <PopoverContent className="p-3 w-[280px]" align="start">
+                      <ColorPickerPanel
+                        label="Neutral main"
+                        description={hueMode === 'custom'
+                          ? 'Operator-typed neutral. Other rungs derive from this.'
+                          : 'Picking a hex switches Hue to Custom.'}
+                        value={resolved.main}
+                        onChange={(hex) => {
+                          onMainChange(hex);
+                          // Picking a hex implicitly means "Custom" mode
+                          if (hueMode !== 'custom') onHueModeChange?.('custom');
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                ) : (
+                  <Swatch
+                    color={resolved.main}
+                    label={resolved.main.toUpperCase()}
+                    className="rounded-md"
+                    style={{
+                      height: 36,
+                      boxShadow: '0 0 0 1.5px var(--foreground, #18181B)',
+                    }}
+                  />
+                )
               ) : (
                 <RungChip
                   role="neutral"
@@ -490,8 +582,18 @@ function NeutralStrip({ palette, resolved, mode, onNameChange, onRungOverride }:
                   chipHeight={36}
                 />
               )}
-              <span className="text-[11px] font-medium text-foreground capitalize">{rung}</span>
-              <span className="font-mono text-[9.5px] text-muted-foreground">{resolved[rung].toUpperCase()}</span>
+              <span
+                className="text-[10px] font-medium text-foreground capitalize tracking-[0.04em]"
+                style={{ fontFamily: 'var(--brand-font-label, var(--brand-font-body, inherit))' }}
+              >
+                {rung}
+              </span>
+              <span
+                className="text-[9.5px] text-muted-foreground"
+                style={{ fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)' }}
+              >
+                {resolved[rung].toUpperCase()}
+              </span>
             </div>
           ))}
         </div>
@@ -615,7 +717,7 @@ function SemanticCell({ role, pair, mode, onChange }: SemanticCellProps) {
                 />
               </PopoverTrigger>
               <PopoverContent className="p-3 w-[280px]" align="start">
-                <ColorPicker label={`${SEM_LABEL[role]} main`} value={pair.main} onChange={(hex) => onChange('main', hex)} />
+                <ColorPickerPanel label={`${SEM_LABEL[role]} main`} value={pair.main} onChange={(hex) => onChange('main', hex)} />
               </PopoverContent>
             </Popover>
             <Popover>
@@ -628,7 +730,7 @@ function SemanticCell({ role, pair, mode, onChange }: SemanticCellProps) {
                 />
               </PopoverTrigger>
               <PopoverContent className="p-3 w-[280px]" align="start">
-                <ColorPicker label={`${SEM_LABEL[role]} light`} value={pair.light} onChange={(hex) => onChange('light', hex)} />
+                <ColorPickerPanel label={`${SEM_LABEL[role]} light`} value={pair.light} onChange={(hex) => onChange('light', hex)} />
               </PopoverContent>
             </Popover>
           </>
@@ -661,6 +763,7 @@ export function BrandCard({
   onPaletteNameChange,
   onPaletteMainChange,
   onRungOverride,
+  onNeutralHueModeChange,
   onGradientNameChange,
   onSemanticChange,
   className,
@@ -720,6 +823,8 @@ export function BrandCard({
           resolved={data.resolvedPalettes.neutral}
           mode={mode}
           onNameChange={onPaletteNameChange ? (name) => onPaletteNameChange('neutral', name) : undefined}
+          onMainChange={onPaletteMainChange ? (hex) => onPaletteMainChange('neutral', hex) : undefined}
+          onHueModeChange={onNeutralHueModeChange}
           onRungOverride={onRungOverride ? (rung, hex) => onRungOverride('neutral', rung, hex) : undefined}
         />
       </section>

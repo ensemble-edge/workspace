@@ -94,12 +94,16 @@ export function deriveRungs(mainHex: string): Record<Exclude<RungName, 'main'>, 
  * five-rung ladder for surfaces, borders, and muted text.
  */
 export function neutralMainFromHueMode(
-  hueMode: 'branded' | 'warm' | 'cool' | 'true',
+  hueMode: 'branded' | 'warm' | 'cool' | 'true' | 'custom',
   primaryMainHex: string,
 ): string {
-  if (hueMode === 'true') return '#737373'; // pure achromatic
-  // Hue lookup for the non-'true' modes. 'true' is handled above
-  // because it returns a literal achromatic grey.
+  if (hueMode === 'true') return '#737373';   // pure achromatic
+  // 'custom' is technically operator-driven; resolver consults the
+  // stored .main field directly and only falls through to here when
+  // it's missing. Treat as 'branded' fallback.
+  if (hueMode === 'custom') hueMode = 'branded';
+  // Hue lookup for the non-'true' modes. 'true' returns a literal
+  // achromatic grey above.
   const presetHue: Record<'branded' | 'warm' | 'cool', number | null> = {
     branded: null,    // use primary's hue
     warm: 60,         // amber/sand
