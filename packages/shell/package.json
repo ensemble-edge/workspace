@@ -1,6 +1,6 @@
 {
   "name": "@ensemble-edge/shell",
-  "version": "0.1.0",
+  "version": "0.1.68",
   "description": "Ensemble workspace shell — React SPA with shadcn/ui",
   "type": "module",
   "main": "./dist/shell.js",

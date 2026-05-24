@@ -1,0 +1,1 @@
+{"version":3,"file":"use-events.d.ts","sourceRoot":"","sources":["../../src/hooks/use-events.ts"],"names":[],"mappings":"AAEA,MAAM,WAAW,eAAe;IAC9B,EAAE,EAAE,CAAC,IAAI,EAAE,MAAM,EAAE,OAAO,EAAE,CAAC,OAAO,EAAE,OAAO,KAAK,IAAI,KAAK,MAAM,IAAI,CAAC;IACtE,IAAI,EAAE,CAAC,IAAI,EAAE,MAAM,EAAE,OAAO,EAAE,OAAO,KAAK,IAAI,CAAC;CAChD;AAED,wBAAgB,SAAS,IAAI,eAAe,CAM3C"}
