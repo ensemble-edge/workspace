@@ -32,14 +32,17 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
   const palettes = resolvePalettes(doc);
   const hasGradients = doc.gradients.length > 0;
 
-  // Sub-renderers
+  // Sub-renderers. v0.1.59: every clickable swatch carries a
+  // data-hex attribute. The /brand page's existing swatch click
+  // handler picks these up and copies the hex to clipboard with a
+  // brief "Copied!" confirmation.
   const palette = (role: 'primary' | 'secondary' | 'accent') => {
     const p = doc.palettes[role];
     const r = palettes[role];
     const fg = onColorForeground(role, palettes).hex;
     return `
       <div style="border-radius:14px;overflow:hidden;background:#fff;border:0.5px solid rgba(0,0,0,0.07);">
-        <div style="aspect-ratio:16/11;padding:18px;background:${r.main};color:${fg};display:flex;flex-direction:column;justify-content:space-between;">
+        <div data-hex="${r.main}" title="Click to copy ${r.main.toUpperCase()}" style="aspect-ratio:16/11;padding:18px;background:${r.main};color:${fg};display:flex;flex-direction:column;justify-content:space-between;">
           <div>
             <div style="font-size:26px;font-weight:400;letter-spacing:-0.005em;line-height:1.05;">${escapeHtml(p.name)}</div>
             <div style="font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:0.08em;opacity:0.8;margin-top:2px;">${role}</div>
@@ -52,7 +55,7 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px;background:#fff;">
           ${(['dark', 'bright', 'pastel', 'faded'] as const).map((rung) => `
             <div style="display:flex;flex-direction:column;gap:4px;">
-              <div style="height:24px;border-radius:6px;background:${r[rung]};border:0.5px solid rgba(0,0,0,0.08);"></div>
+              <div data-hex="${r[rung]}" title="Click to copy ${r[rung].toUpperCase()}" style="height:24px;border-radius:6px;background:${r[rung]};border:0.5px solid rgba(0,0,0,0.08);"></div>
               <div style="font-size:11px;font-weight:500;color:#18181b;text-transform:capitalize;">${rung}</div>
               <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9.5px;color:#71717a;">${r[rung].toUpperCase()}</div>
             </div>
@@ -78,7 +81,7 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
               const isMain = rung === 'main';
               return `
                 <div style="display:flex;flex-direction:column;gap:4px;">
-                  <div style="height:32px;border-radius:6px;background:${r[rung]};border:0.5px solid rgba(0,0,0,0.08);${isMain ? 'box-shadow:0 0 0 1.5px #18181b;' : ''}"></div>
+                  <div data-hex="${r[rung]}" title="Click to copy ${r[rung].toUpperCase()}" style="height:32px;border-radius:6px;background:${r[rung]};border:0.5px solid rgba(0,0,0,0.08);${isMain ? 'box-shadow:0 0 0 1.5px #18181b;' : ''}"></div>
                   <div style="font-size:11px;font-weight:500;color:#18181b;text-transform:capitalize;">${rung}</div>
                   <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9.5px;color:#71717a;">${r[rung].toUpperCase()}</div>
                 </div>
@@ -129,8 +132,8 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
     return `
       <div style="display:flex;flex-direction:column;gap:6px;">
         <div style="display:grid;grid-template-columns:2fr 1fr;gap:4px;height:40px;">
-          <div style="border-radius:6px;background:${pair.main};border:0.5px solid rgba(0,0,0,0.08);"></div>
-          <div style="border-radius:6px;background:${pair.light};border:0.5px solid rgba(0,0,0,0.08);"></div>
+          <div data-hex="${pair.main}" title="Click to copy ${pair.main.toUpperCase()}" style="border-radius:6px;background:${pair.main};border:0.5px solid rgba(0,0,0,0.08);"></div>
+          <div data-hex="${pair.light}" title="Click to copy ${pair.light.toUpperCase()}" style="border-radius:6px;background:${pair.light};border:0.5px solid rgba(0,0,0,0.08);"></div>
         </div>
         <div style="font-size:13px;font-weight:500;">${label}</div>
         <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#71717a;">${pair.main.toUpperCase()} · ${pair.light.toUpperCase()}</div>

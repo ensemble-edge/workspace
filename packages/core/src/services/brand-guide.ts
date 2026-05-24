@@ -173,6 +173,84 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
         min-height: 120px;
       }
       .logo-tile img { max-width: 100%; max-height: 80px; }
+      .logo-meta { display: flex; flex-direction: column; }
+      .logo-downloads { display: flex; gap: 6px; }
+      .dl-link {
+        display: inline-flex;
+        align-items: center;
+        font-size: 10px;
+        font-weight: 500;
+        color: #6b7280;
+        background: rgba(0, 0, 0, 0.04);
+        padding: 2px 8px;
+        border-radius: 4px;
+        text-decoration: none;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        transition: background 0.12s, color 0.12s;
+      }
+      .dl-link:hover { background: rgba(0, 0, 0, 0.08); color: #18181b; }
+      /* v0.1.59: favicon + resources sections */
+      .favicon-row {
+        display: flex;
+        gap: 24px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        padding: 20px 24px;
+        background: #808080;
+        border: 1px solid rgba(0, 0, 0, 0.1);
+        border-radius: 8px;
+      }
+      .fav-tile { display: flex; flex-direction: column; align-items: center; }
+      .fav-tile-inner {
+        background: rgba(255, 255, 255, 0.6);
+        border-radius: 8px;
+        padding: 8px;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .fav-tile p { color: #fafafa !important; }
+      .resource-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      }
+      .resource-card {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 16px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        text-decoration: none;
+        color: inherit;
+        transition: border-color 0.12s, background 0.12s, transform 0.12s;
+      }
+      .resource-card:hover {
+        border-color: #18181b;
+        background: rgba(0, 0, 0, 0.02);
+        transform: translateY(-1px);
+      }
+      .resource-label {
+        font-size: 14px;
+        font-weight: 500;
+        color: #18181b;
+      }
+      .resource-path {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+        color: #6b7280;
+        word-break: break-all;
+      }
+      .resource-note {
+        font-size: 12px;
+        color: #71717a;
+        margin-top: 4px;
+        line-height: 1.4;
+      }
+      /* v0.1.59: click-to-copy hex on any element with data-hex.
+         Cursor + hover hint stays subtle so the page reads as a
+         reference document, not an app. */
+      [data-hex] { cursor: pointer; }
+      [data-hex]:hover { filter: brightness(0.97); }
       /* Typography specimens — one row per configured role. */
       .typography-card {
         border: 1px solid #e5e7eb;
@@ -182,10 +260,10 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
       }
       .typo-row {
         display: grid;
-        grid-template-columns: 160px 1fr;
-        gap: 24px;
-        align-items: baseline;
-        padding: 20px 24px;
+        grid-template-columns: 200px 1fr;
+        gap: 28px;
+        align-items: flex-start;
+        padding: 24px 28px;
         border-top: 1px solid #f3f4f6;
       }
       .typo-row:first-child { border-top: 0; }
@@ -211,6 +289,23 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
         margin-top: 2px;
       }
       .typo-specimen { line-height: 1.25; color: #18181b; }
+      /* v0.1.59: expanded typography rows — multi-line specimen
+         block per role, vital pills for at-a-glance settings. */
+      .typo-specimen-block { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+      .typo-primary { line-height: 1.15; color: #18181b; word-break: break-word; }
+      .typo-pangram { line-height: 1.4; color: #18181b; word-break: break-word; }
+      .typo-glyphs, .typo-numerals { line-height: 1.4; word-break: break-all; }
+      .typo-meta .vitals { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+      .vital-pill {
+        display: inline-flex;
+        align-items: center;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 10px;
+        color: #52525b;
+        background: rgba(0, 0, 0, 0.05);
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
       footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid #e5e7eb; font-size: 13px; color: #6b7280; }
     </style>
   </head>
@@ -253,20 +348,29 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
                 const compShort = composition === 'wordmark-only' ? 'wordmark'
                   : composition === 'icon-only' ? 'icon'
                   : composition;
-                const renderUrl = applyAssetAlias(
+                const svgUrl = applyAssetAlias(
                   `/_ensemble/brand/render/${brand.workspace_slug}-${compShort}-${finish.id}-${bg.id}.svg`,
                   aliasPath,
                 ) ?? '';
+                const pngUrl = applyAssetAlias(
+                  `/_ensemble/brand/render/${brand.workspace_slug}-${compShort}-${finish.id}-${bg.id}.png`,
+                  aliasPath,
+                ) ?? '';
                 // v0.1.57: every logo tile uses the same #808080
-                // mid-grey chrome regardless of bg variant. The
-                // background color is already INSIDE the rendered
-                // SVG via the padding system; the outer tile is a
-                // neutral preview surface.
+                // mid-grey chrome. v0.1.59: add download links for
+                // SVG + PNG so external consumers can grab assets
+                // without round-tripping through an admin tool.
                 return `<div>
                   <div class="logo-tile">
-                    <img src="${escapeAttr(renderUrl)}" alt="${escapeHtml(`${finish.label} on ${bg.label}`)}">
+                    <img src="${escapeAttr(svgUrl)}" alt="${escapeHtml(`${finish.label} on ${bg.label}`)}">
                   </div>
-                  <p style="font-size:12px;color:#6b7280;margin:8px 0 0;">${escapeHtml(`${finish.label} · ${bg.label}`)}</p>
+                  <div class="logo-meta">
+                    <p style="font-size:12px;color:#6b7280;margin:8px 0 4px;">${escapeHtml(`${finish.label} · ${bg.label}`)}</p>
+                    <div class="logo-downloads">
+                      <a href="${escapeAttr(svgUrl)}" download class="dl-link">SVG</a>
+                      <a href="${escapeAttr(pngUrl)}" download class="dl-link">PNG</a>
+                    </div>
+                  </div>
                 </div>`;
               }),
             ).join('')}
@@ -279,66 +383,11 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
              configured in Brand → Logos → Background settings. -->
       </section>
 
-      ${(bannedPairs.length > 0 || bannedComps.length > 0) ? `
-      <section>
-        <h2>Banned uses</h2>
-        <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">
-          Don't use the logo in these combinations — they're either illegible
-          (insufficient contrast) or off-brand by policy.
-        </p>
-        <div class="logo-grid">
-          ${bannedComps.map((composition) => {
-            // v0.1.47+: render a sample of this banned composition with the
-            // red X overlay so consumers learn the brand's allowed lockups.
-            // Uses full-color × transparent as the sample finish/bg since
-            // we just need to show *what the composition looks like*.
-            const compShort = composition === 'wordmark-only' ? 'wordmark'
-              : composition === 'icon-only' ? 'icon'
-              : composition;
-            const renderUrl = applyAssetAlias(
-              `/_ensemble/brand/render/${brand.workspace_slug}-${compShort}-full-color-transparent.svg`,
-              aliasPath,
-            ) ?? '';
-            const label = composition.replace('-', ' ');
-            return `<div>
-              <div class="logo-tile" style="position:relative;">
-                <img src="${escapeAttr(renderUrl)}" alt="banned composition: ${escapeAttr(label)}">
-                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
-                  <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <line x1="5" y1="5" x2="95" y2="95" stroke="#c62828" stroke-width="3"/>
-                    <line x1="95" y1="5" x2="5" y2="95" stroke="#c62828" stroke-width="3"/>
-                  </svg>
-                </div>
-              </div>
-              <p style="font-size:12px;color:#c62828;margin:8px 0 0;font-weight:600;text-transform:capitalize;">${escapeHtml(label)} lockup</p>
-              <p style="font-size:11px;color:#6b7280;margin:2px 0 0;">Not an approved composition for this brand.</p>
-            </div>`;
-          }).join('')}
-          ${bannedPairs.map((ban) => {
-            const finish = policy.finishes.find((f) => f.id === ban.finishId);
-            const bg = policy.backgrounds.find((b) => b.id === ban.backgroundId);
-            if (!finish || !bg) return '';
-            const renderUrl = applyAssetAlias(
-              `/_ensemble/brand/render/${brand.workspace_slug}-wordmark-${ban.finishId}-${ban.backgroundId}.svg`,
-              aliasPath,
-            ) ?? '';
-            return `<div>
-              <div class="logo-tile" style="position:relative;">
-                <img src="${escapeAttr(renderUrl)}" alt="banned use">
-                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
-                  <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <line x1="5" y1="5" x2="95" y2="95" stroke="#c62828" stroke-width="3"/>
-                    <line x1="95" y1="5" x2="5" y2="95" stroke="#c62828" stroke-width="3"/>
-                  </svg>
-                </div>
-              </div>
-              <p style="font-size:12px;color:#c62828;margin:8px 0 0;font-weight:600;">${escapeHtml(`${finish.label} · ${bg.label}`)}</p>
-              ${ban.reason ? `<p style="font-size:11px;color:#6b7280;margin:2px 0 0;">${escapeHtml(ban.reason)}</p>` : ''}
-            </div>`;
-          }).join('')}
-        </div>
-      </section>
-      ` : ''}
+      <!-- v0.1.59: banned-uses section removed. External brand
+           consumers (the audience for /brand) primarily need to know
+           what IS approved. Banned use enforcement lives at the
+           variants matrix in the admin app — the public guide just
+           shows the approved uses cleanly. -->
 
       ${
         brandColorsHtml
@@ -359,6 +408,75 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
       <section>
         <h2>Typography</h2>
         ${renderTypographySection(typographyRoles, font)}
+      </section>
+
+      <!-- v0.1.59: favicon section. Shows the favicon at common
+           browser sizes so external consumers can see what the
+           bookmark/tab/home-screen artifact looks like. -->
+      <section>
+        <h2>Favicon</h2>
+        <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">
+          What this brand looks like in browser tabs, bookmarks, and home-screen icons.
+        </p>
+        <div class="favicon-row">
+          ${[
+            { size: 32,  label: '32 · tab',    suffix: '-32.png' as const },
+            { size: 180, label: '180 · iOS',   suffix: '-180.png' as const },
+            { size: 192, label: '192 · Android', suffix: '-192.png' as const },
+            { size: 512, label: '512 · PWA',   suffix: '-512.png' as const },
+          ].map((f) => {
+            const url = applyAssetAlias(`/_ensemble/brand/favicon${f.suffix}`, aliasPath) ?? '';
+            const displayPx = Math.min(f.size, 64);
+            return `<div class="fav-tile">
+              <div class="fav-tile-inner" style="width:${displayPx}px;height:${displayPx}px;">
+                <img src="${escapeAttr(url)}" alt="favicon ${f.size}" style="width:100%;height:100%;object-fit:contain;">
+              </div>
+              <p style="font-size:11px;color:#6b7280;margin:8px 0 0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">${escapeHtml(f.label)}</p>
+            </div>`;
+          }).join('')}
+        </div>
+      </section>
+
+      <!-- v0.1.59: Resources section — links to public CSS, JSON
+           spec, manifest, and the favicon SVG so external
+           collaborators can integrate this brand into their own
+           projects. -->
+      <section>
+        <h2>Resources</h2>
+        <p style="font-size:13px;color:#6b7280;margin:0 0 12px;">
+          Use this brand in any external project. Reference the CSS directly or download the spec.
+        </p>
+        <div class="resource-grid">
+          ${[
+            {
+              label: 'Brand CSS',
+              path: '/_ensemble/brand/css',
+              note: 'CSS custom properties (--primary-main, --gradient-*, --brand-*) for any project',
+            },
+            {
+              label: 'Brand spec (JSON)',
+              path: '/_ensemble/brand/spec',
+              note: 'Full machine-readable brand definition — palettes, themes, gradients, semantic, typography',
+            },
+            {
+              label: 'Web manifest',
+              path: '/_ensemble/brand/manifest.webmanifest',
+              note: 'PWA manifest with theme colors + favicon icons',
+            },
+            {
+              label: 'Favicon SVG',
+              path: '/_ensemble/brand/favicon.svg',
+              note: 'Vector favicon for modern browsers',
+            },
+          ].map((r) => {
+            const url = applyAssetAlias(r.path, aliasPath) ?? r.path;
+            return `<a class="resource-card" href="${escapeAttr(url)}" target="_blank" rel="noreferrer noopener">
+              <span class="resource-label">${escapeHtml(r.label)}</span>
+              <span class="resource-path">${escapeHtml(url)}</span>
+              <span class="resource-note">${escapeHtml(r.note)}</span>
+            </a>`;
+          }).join('')}
+        </div>
       </section>
 
       <footer>
@@ -486,6 +604,13 @@ function renderTypographySection(
     </div>`;
   }
 
+  // v0.1.59: expanded specimen — pangram + 36/54-char glyph string +
+  // size info per role. Mirrors the Brand Overview typography card
+  // density so external collaborators see the same depth admins do.
+  const PANGRAM = 'The quick brown fox jumps over the lazy dog.';
+  const GLYPHS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  const NUMERALS = '0123456789 .,;:!?‘’“”—–';
+
   // Build one row per role using the operator's actual settings.
   const rows = ROLE_DISPLAY_ORDER.map((spec) => {
     const r = roles[spec.key];
@@ -494,20 +619,41 @@ function renderTypographySection(
     const stack = familyStack(r.family, spec.key);
     const styleAttr = r.style === 'italic' ? 'italic' : 'normal';
     const transformAttr = (r.textTransform || 'none') as TextTransform;
-    // Compute display size — clamp super-large display down so the
-    // /brand guide doesn't overflow its container on small screens.
+    // Display size for the primary specimen line. Clamp huge values
+    // down so the /brand guide doesn't overflow on narrow screens.
     const sizeRem = parseFloat(r.fontSize) || 1;
     const displaySize = Math.min(sizeRem, 3) + 'rem';
+    const isMono = spec.key === 'mono';
+    // For mono, swap the glyph string to something code-like.
+    const glyphLine = isMono ? 'const fn = () => { return 42; };' : GLYPHS;
+    const numeralLine = isMono ? 'array[0] === true && i < 10' : NUMERALS;
+    const styleString = `font-family:${escapeAttr(stack)};font-weight:${escapeAttr(r.weight)};font-style:${styleAttr};letter-spacing:${escapeAttr(r.letterSpacing || '0')};text-transform:${transformAttr};`;
     return `
       <div class="typo-row">
         <div class="typo-meta">
           <span class="role">${escapeHtml(spec.label)}</span>
           <div class="stack">${escapeHtml(r.family)}${r.inheritedFrom ? ` <span style="color:#a1a1aa;">· inherits from ${escapeHtml(r.inheritedFrom)}</span>` : ''}</div>
-          <div class="vitals">${escapeHtml(r.weight)} · ${escapeHtml(displaySize)}${r.style === 'italic' ? ' · italic' : ''}${r.letterSpacing && r.letterSpacing !== '0em' ? ` · ${escapeHtml(r.letterSpacing)}` : ''}${transformAttr !== 'none' ? ` · ${escapeHtml(transformAttr)}` : ''}</div>
+          <div class="vitals">
+            <span class="vital-pill">${escapeHtml(r.weight)}</span>
+            <span class="vital-pill">${escapeHtml(r.fontSize)}</span>
+            ${r.style === 'italic' ? `<span class="vital-pill">italic</span>` : ''}
+            ${r.letterSpacing && r.letterSpacing !== '0em' ? `<span class="vital-pill">tracking ${escapeHtml(r.letterSpacing)}</span>` : ''}
+            ${transformAttr !== 'none' ? `<span class="vital-pill">${escapeHtml(transformAttr)}</span>` : ''}
+          </div>
         </div>
-        <div class="typo-specimen"
-             style="font-family:${escapeAttr(stack)};font-weight:${escapeAttr(r.weight)};font-style:${styleAttr};font-size:${displaySize};letter-spacing:${escapeAttr(r.letterSpacing || '0')};text-transform:${transformAttr};">
-          ${escapeHtml(spec.preview)}
+        <div class="typo-specimen-block">
+          <div class="typo-primary" style="${styleString}font-size:${displaySize};">
+            ${escapeHtml(spec.preview)}
+          </div>
+          <div class="typo-pangram" style="${styleString}font-size:1.0rem;">
+            ${escapeHtml(PANGRAM)}
+          </div>
+          <div class="typo-glyphs" style="${styleString}font-size:0.9rem;color:#71717a;">
+            ${escapeHtml(glyphLine)}
+          </div>
+          <div class="typo-numerals" style="${styleString}font-size:0.85rem;color:#a1a1aa;">
+            ${escapeHtml(numeralLine)}
+          </div>
         </div>
       </div>
     `;

@@ -118,6 +118,42 @@ export function AppSidebar() {
     return () => { cancelled = true; };
   }, []);
 
+  // v0.1.59: read the resolved sidebar background hex so Wordmark
+  // can APCA-check segment colors against it. The brand-css endpoint
+  // emits --sidebar-background as an HSL triplet ("180 60% 35%"); we
+  // need a hex for the Wordmark APCA helper. Compute on mount + after
+  // brand.tokens.changed so it stays in sync when operator swaps
+  // themes.
+  const [sidebarBgHex, setSidebarBgHex] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    function readSidebarBg() {
+      if (typeof window === 'undefined') return;
+      // Read the CSS variable from the computed style. shadcn emits
+      // the HSL triplet without hsl() wrapping, which is what the
+      // tailwind theme-mapping expects. We re-wrap for browser
+      // resolution then read the computed color.
+      const probe = document.createElement('div');
+      probe.style.color = 'hsl(var(--sidebar-background))';
+      probe.style.display = 'none';
+      document.body.appendChild(probe);
+      const rgb = getComputedStyle(probe).color;
+      document.body.removeChild(probe);
+      // rgb is "rgb(R, G, B)" or "rgba(R, G, B, A)" — convert to hex.
+      const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb);
+      if (!m) return;
+      const hex = '#' + [m[1], m[2], m[3]].map((n) => parseInt(n, 10).toString(16).padStart(2, '0')).join('');
+      setSidebarBgHex(hex);
+    }
+    readSidebarBg();
+    // Brand changes (theme preset swap, sidebar color edit) cause
+    // /brand.css to reload via the existing watcher in the brand
+    // admin tabs. We re-read on next animation frame so the new
+    // computed style is in place.
+    const handler = () => requestAnimationFrame(readSidebarBg);
+    window.addEventListener('brand-css-reloaded', handler);
+    return () => window.removeEventListener('brand-css-reloaded', handler);
+  }, []);
+
   const handleNavClick = (itemPath: string, e: React.MouseEvent) => {
     e.preventDefault();
     navigate(itemPath);
@@ -147,8 +183,9 @@ export function AppSidebar() {
                     name={name}
                     imageHeight={20}
                     className="font-semibold"
+                    surfaceColor={sidebarBgHex}
                   />
-                  <span className="text-xs text-muted-foreground">Workspace</span>
+                  <span className="text-xs text-sidebar-muted-foreground">Workspace</span>
                 </div>
               </a>
             </SidebarMenuButton>
@@ -211,12 +248,20 @@ export function AppSidebar() {
                     </AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">{userName}</span>
-                    <span className="truncate text-xs text-muted-foreground">
+                    {/* v0.1.59: use sidebar-aware foreground tokens.
+                        text-muted-foreground reads --muted-foreground
+                        which is the workspace canvas's muted, NOT the
+                        sidebar's. When the sidebar bg is brand-colored
+                        (e.g. Curalisto teal), the workspace muted
+                        often fails APCA against it. The brand-css
+                        generator emits --sidebar-muted-foreground;
+                        this consumer now reads it. */}
+                    <span className="truncate font-semibold text-sidebar-foreground">{userName}</span>
+                    <span className="truncate text-xs text-sidebar-muted-foreground">
                       {currentUser?.email}
                     </span>
                   </div>
-                  <ChevronUp className="ml-auto size-4" />
+                  <ChevronUp className="ml-auto size-4 text-sidebar-foreground" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent

@@ -73,6 +73,14 @@
   --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
   --color-sidebar-border: hsl(var(--sidebar-border));
   --color-sidebar-ring: hsl(var(--sidebar-ring));
+  /* v0.1.59: sidebar-aware muted-foreground. The brand-css generator
+     emits --sidebar-muted-foreground when the sidebar bg is overridden
+     (so secondary text — user email, hint text — has APCA contrast
+     against the new bg). Without this @theme mapping, the utility
+     class `text-sidebar-muted-foreground` would compile to nothing
+     and consumers would silently fall back to the workspace-level
+     `--muted-foreground`. */
+  --color-sidebar-muted-foreground: hsl(var(--sidebar-muted-foreground, var(--muted-foreground)));
 
   --radius-xl: calc(var(--radius) + 4px);
   --radius-lg: var(--radius);

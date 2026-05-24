@@ -644,7 +644,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.58-neutral-fixed-anchors-sidebar-foreground-fixes',
+      buildFingerprint: 'v0.1.59-nav-contrast-brand-guide-expansion',
       timestamp: new Date().toISOString(),
     });
   });
