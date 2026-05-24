@@ -89,6 +89,16 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
     primary: brand.tokens['brand-primary'] || brand.accent,
   };
   const bannedPairs = effectiveBannedPairs(policy, brandColors);
+
+  // v0.1.66: compute a brand-snapshot hash that gets appended to every
+  // emitted tile URL as ?v=<hash>. When the operator saves a policy /
+  // brand-colors / token change, the hash changes, the URLs in this
+  // HTML change, and the browser/CDN re-fetches fresh assets — no
+  // operator action required. This is the same hashSnapshot used by
+  // the render-side cache key, so the same logical inputs produce the
+  // same hash on both sides of the wire.
+  const { hashSnapshot } = await import('./brand-render/cache');
+  const brandSnapshot = hashSnapshot({ policy, tokens: brand.tokens, brandColors });
   const allComps = Object.entries(policy.compositions) as Array<[string, { allowed: boolean }]>;
   const approvedComps = allComps.filter(([, c]) => c.allowed).map(([id]) => id);
   // v0.1.47+: compositions explicitly disabled in policy show up in
@@ -416,8 +426,8 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
           ? `<section>
               <h2>Logo marks</h2>
               <div class="logo-grid">
-                ${wordmarkLight ? logoTile('Wordmark', wordmarkLight, false) : ''}
-                ${iconLight ? logoTile('Icon', iconLight, false) : ''}
+                ${wordmarkLight ? logoTile('Wordmark', `${wordmarkLight}?v=${brandSnapshot}`, false) : ''}
+                ${iconLight ? logoTile('Icon', `${iconLight}?v=${brandSnapshot}`, false) : ''}
               </div>
             </section>`
           : ''
@@ -509,14 +519,14 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
                   const compShort = composition === 'wordmark-only' ? 'wordmark'
                     : composition === 'icon-only' ? 'icon'
                     : composition;
-                  const svgUrl = applyAssetAlias(
+                  const svgUrl = (applyAssetAlias(
                     `/_ensemble/brand/render/${brand.workspace_slug}-${compShort}-${finish.id}-${bg.id}.svg`,
                     aliasPath,
-                  ) ?? '';
-                  const pngUrl = applyAssetAlias(
+                  ) ?? '') + `?v=${brandSnapshot}`;
+                  const pngUrl = (applyAssetAlias(
                     `/_ensemble/brand/render/${brand.workspace_slug}-${compShort}-${finish.id}-${bg.id}.png`,
                     aliasPath,
-                  ) ?? '';
+                  ) ?? '') + `?v=${brandSnapshot}`;
                   // Each tile carries data-* attributes so the filter
                   // chips can hide/show without JS state. Click still
                   // copies SVG URL via the global delegated handler.
@@ -675,6 +685,12 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
       // toggles a class on the filter root; CSS attribute selectors
       // hide non-matching tiles. Each row (bg / comp / finish) is
       // independent — chips within a row are mutually exclusive.
+      //
+      // v0.1.66: heading-hide reworked. Previously read getComputedStyle
+      // in the same tick as the class change, which returned stale
+      // values when switching from one filter to another. Now we
+      // compute heading visibility from the FILTER STATE directly
+      // (which bg/comp/finish is active), independent of DOM layout.
       const filterRoot = document.querySelector('[data-filter-root]');
       if (filterRoot) {
         // Move the data-filter-root to the parent section so the CSS
@@ -685,6 +701,34 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
           filterRoot.removeAttribute('data-filter-root');
         }
         const rootEl = section || filterRoot;
+        function activeFilterValue(filter) {
+          const chip = filterRoot.querySelector('.filter-chip.active[data-filter="' + filter + '"]');
+          return chip ? chip.getAttribute('data-value') : 'all';
+        }
+        function applyHeadingVisibility() {
+          // For each <p.approved-bg-heading> + <div.logo-grid> pair,
+          // show iff the section's bg matches the current bg filter
+          // AND at least one tile in the grid matches the current
+          // comp + finish filters. Pure set math on attributes — no
+          // getComputedStyle reads.
+          const bgFilter = activeFilterValue('bg');
+          const compFilter = activeFilterValue('comp');
+          const finishFilter = activeFilterValue('finish');
+          for (const heading of rootEl.querySelectorAll('.approved-bg-heading')) {
+            const grid = heading.nextElementSibling;
+            if (!grid) continue;
+            const cards = Array.from(grid.querySelectorAll('.logo-card'));
+            const sectionBg = cards[0] ? cards[0].getAttribute('data-bg') : '';
+            const bgOk = bgFilter === 'all' || sectionBg === bgFilter;
+            const hasMatch = bgOk && cards.some((c) => {
+              const compOk = compFilter === 'all' || c.getAttribute('data-comp') === compFilter;
+              const finishOk = finishFilter === 'all' || c.getAttribute('data-finish') === finishFilter;
+              return compOk && finishOk;
+            });
+            heading.style.display = hasMatch ? '' : 'none';
+            grid.style.display = hasMatch ? '' : 'none';
+          }
+        }
         filterRoot.addEventListener('click', (ev) => {
           const chip = ev.target instanceof Element ? ev.target.closest('.filter-chip') : null;
           if (!chip) return;
@@ -707,19 +751,7 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
           if (value !== 'all') {
             rootEl.classList.add(prefix + value);
           }
-          // Hide background-section headings whose tiles are now all
-          // filtered out. Each heading is the <p.approved-bg-heading>
-          // immediately followed by a .logo-grid. Walk pairs.
-          for (const heading of rootEl.querySelectorAll('.approved-bg-heading')) {
-            const grid = heading.nextElementSibling;
-            if (!grid) continue;
-            const visible = grid.querySelectorAll('.logo-card:not([style*="display: none"])').length;
-            const hasVisible = Array.from(grid.querySelectorAll('.logo-card')).some((c) => {
-              return getComputedStyle(c).display !== 'none';
-            });
-            heading.style.display = hasVisible ? '' : 'none';
-            grid.style.display = hasVisible ? '' : 'none';
-          }
+          applyHeadingVisibility();
         });
       }
       document.addEventListener('click', (ev) => {
@@ -727,8 +759,15 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
         if (!target) return;
         const hex = target.getAttribute('data-hex');
         const copy = target.getAttribute('data-copy');
-        const value = hex || copy;
+        // v0.1.66: when copying a URL, promote relative paths to
+        // origin-qualified absolute URLs so the operator can paste
+        // them directly into design tools, decks, emails, etc.
+        // Relative URLs only work in the same-origin context.
+        let value = hex || copy;
         if (!value) return;
+        if (copy && /^\//.test(copy)) {
+          value = location.origin + copy;
+        }
         navigator.clipboard?.writeText(value);
         // Legacy .swatch tiles flip their hex label inline for
         // continuity with the v0.1.59 UX.

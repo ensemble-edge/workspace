@@ -498,6 +498,7 @@ function LogoVariantsCard() {
                       background={bg}
                       workspaceSlug={policy.workspaceSlug || 'workspace'}
                       assetAliasPath={policy.assetAliasPath || ''}
+                      cacheBuster={reloadToken}
                     />
                   );
                 }),
@@ -523,6 +524,7 @@ function VariantCell({
   background,
   workspaceSlug,
   assetAliasPath,
+  cacheBuster,
 }: {
   composition: CompositionId;
   finish: { id: FinishId; label: string };
@@ -530,6 +532,8 @@ function VariantCell({
   workspaceSlug: string;
   /** Pretty alias path (e.g. 'assets'). Empty → use canonical /_ensemble/. */
   assetAliasPath: string;
+  /** v0.1.66: bumps on brand.tokens.changed so img tags re-fetch. */
+  cacheBuster?: number;
 }) {
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   // Unified URL model (v0.1.46+): every brand resource lives under
@@ -545,16 +549,23 @@ function VariantCell({
     : composition;
   const tailSvg = `${workspaceSlug}-${compShort}-${finish.id}-${background.id}.svg`;
   const tailPng = `${workspaceSlug}-${compShort}-${finish.id}-${background.id}.png`;
-  const renderUrl = assetAliasPath
+  // v0.1.66: append the cacheBuster as a query param on EVERY URL the
+  // cell uses (img src, copy-markup fetch, download). Without this,
+  // the React component remounting on brand events doesn't actually
+  // force the browser to re-fetch the asset — the URL is unchanged.
+  // The cacheBuster is undefined-safe to keep the URL clean when no
+  // brand events have fired yet.
+  const buster = cacheBuster != null ? `?v=${cacheBuster}` : '';
+  const renderUrl = (assetAliasPath
     ? `/${assetAliasPath}/brand/render/${tailSvg}`
-    : `/_ensemble/brand/render/${tailSvg}`;
+    : `/_ensemble/brand/render/${tailSvg}`) + buster;
   // v0.1.53: PNG variant of the same composition. Same URL grammar,
   // .png extension instead of .svg — the path-style render route
   // dispatches to resvg-wasm for rasterization. Operators get
   // download buttons for both formats per cell.
-  const pngUrl = assetAliasPath
+  const pngUrl = (assetAliasPath
     ? `/${assetAliasPath}/brand/render/${tailPng}`
-    : `/_ensemble/brand/render/${tailPng}`;
+    : `/_ensemble/brand/render/${tailPng}`) + buster;
   // Same URL — browser auto-saves with the filename from the URL path.
   const downloadUrl = renderUrl;
 
