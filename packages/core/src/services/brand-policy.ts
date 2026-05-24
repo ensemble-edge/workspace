@@ -74,9 +74,9 @@ export interface CompositionConfig {
 export interface BackgroundedConfig {
   /** Master toggle for the backgrounded variant. */
   allowed: boolean;
-  /** Backgrounded-on-light variant approved (uses brand-background-light). */
+  /** Backgrounded-on-light variant approved. */
   lightAllowed: boolean;
-  /** Backgrounded-on-dark variant approved (uses brand-background-dark). */
+  /** Backgrounded-on-dark variant approved. */
   darkAllowed: boolean;
   /**
    * Outer padding between the logo and the background-tile edge, in
@@ -84,6 +84,21 @@ export interface BackgroundedConfig {
    * Default: 0.5em.
    */
   padding: number;
+  /**
+   * v0.1.60: tile color reference for the light background variant.
+   * Accepts the same forms as wordmark segment colors:
+   *   - Palette rung ref: "neutral-faded", "primary-pastel"
+   *   - Gradient ref: "gradient-sunrise"
+   *   - Literal hex: "#FAF8F4"
+   * Default when unset: "neutral-faded" (the near-white canvas).
+   */
+  lightTile?: string;
+  /**
+   * v0.1.60: tile color reference for the dark background variant.
+   * Accepts the same forms as lightTile. Default when unset:
+   * "neutral-dark" (the near-black canvas).
+   */
+  darkTile?: string;
 }
 
 export interface FinishOption {
@@ -148,9 +163,21 @@ export function defaultPolicy(): LogoPolicy {
       { id: 'mono-brand',  label: 'Mono brand', allowed: false, fillOverride: 'var(--brand-primary)' },
     ],
     backgrounds: [
+      // v0.1.60: five background variants.
+      //   transparent → no background
+      //   true-white  → universal #FFFFFF (high-contrast, press, faxable)
+      //   true-black  → universal #0A0A0A (high-contrast, dark UI)
+      //   light       → brand-light (operator's lightTile token)
+      //   dark        → brand-dark (operator's darkTile token)
+      // true-white/true-black are ALWAYS allowed regardless of
+      // operator config — they're universal artifacts every brand
+      // ships. light/dark are operator-controlled via
+      // policy.backgrounded.lightAllowed/darkAllowed.
       { id: 'transparent', label: 'Transparent', allowed: true, color: 'transparent' },
-      { id: 'light',       label: 'Light',       allowed: true, color: 'var(--brand-background-light)' },
-      { id: 'dark',        label: 'Dark',        allowed: true, color: 'var(--brand-background-dark)' },
+      { id: 'true-white',  label: 'White',       allowed: true, color: '#FFFFFF' },
+      { id: 'true-black',  label: 'Black',       allowed: true, color: '#0A0A0A' },
+      { id: 'light',       label: 'Brand light', allowed: true, color: 'var(--brand-background-light)' },
+      { id: 'dark',        label: 'Brand dark',  allowed: true, color: 'var(--brand-background-dark)' },
     ],
     bannedPairs: [
       // Operator-curated bans persist here. Contrast-based auto-bans

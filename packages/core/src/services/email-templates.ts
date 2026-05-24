@@ -65,7 +65,26 @@ async function loadBrandContext(env: Env, workspaceId: string): Promise<BrandCon
   const tokens: Record<string, string> = {};
   for (const r of tokenRows.results ?? []) tokens[r.key] = r.value;
 
-  const accent = tokens['accent'] || '#3B82F6';
+  // v0.1.60: resolve the brand accent color via the BrandColorsDoc.
+  // Pre-v0.1.55, the workspace stored a flat 'accent' token in
+  // brand_tokens; v0.1.55 stopped writing that key (replaced by the
+  // doc-based palette model). Email templates can't read CSS
+  // variables (most email clients strip them), so we need an inline
+  // hex value. Resolve via the new doc → light theme's `brand`
+  // binding → through palettes. Falls back to legacy token + default
+  // for fresh workspaces.
+  let accent = tokens['accent'] || '';
+  try {
+    const { loadBrandColors } = await import('./brand-colors/load');
+    const { resolvePalettes, resolveBindingValue } = await import('./brand-colors/resolver');
+    const doc = await loadBrandColors(env.DB, workspaceId);
+    const palettes = resolvePalettes(doc);
+    const resolved = resolveBindingValue(doc.themes.light.bindings.brand, palettes);
+    if (resolved) accent = resolved;
+  } catch {
+    /* fall through to legacy / default */
+  }
+  if (!accent) accent = '#3B82F6';
 
   // Resolve logo paths. They may be relative ('/_ensemble/brand/asset/...')
   // — for email use, we must absolutize them with workspace_public_url.

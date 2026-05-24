@@ -67,6 +67,19 @@ export interface WordmarkSegment {
   color?: string;
 }
 
+/** Resolved palettes for palette-rung-ref segments. */
+export type ResolvedPalettesForRender = Record<
+  'primary' | 'secondary' | 'accent' | 'neutral',
+  Record<'dark' | 'main' | 'bright' | 'pastel' | 'faded', string>
+>;
+
+/** Gradient defs for gradient-ref segments. */
+export interface GradientForRender {
+  slug: string;
+  /** Resolved CSS gradient string for clip-text rendering. */
+  css: string;
+}
+
 export interface WordmarkInputs {
   /** When provided, render as styled text (segment array). */
   segments?: WordmarkSegment[];
@@ -83,6 +96,9 @@ export interface WordmarkInputs {
   textTransform?: 'none' | 'uppercase' | 'lowercase';
   /** Applied to every segment that doesn't specify its own color. */
   defaultFill?: string;
+  /** v0.1.60: palette + gradient resolution for token-ref segments. */
+  palettes?: ResolvedPalettesForRender;
+  gradients?: GradientForRender[];
 }
 
 function applyTransform(s: string, t?: WordmarkInputs['textTransform']): string {
@@ -127,10 +143,41 @@ function buildWordmark(inputs: WordmarkInputs): SatoriElement {
   const style = inputs.fontStyle ?? 'normal';
   const ls = inputs.letterSpacingEm ?? 0;
 
+  // v0.1.60: resolve segment color through palettes + gradients.
+  // Gradient refs render via background-clip:text (Satori supports
+  // the CSS subset including backgroundClip + WebkitBackgroundClip).
+  const resolveSegmentStyle = (raw: string | undefined): Record<string, string> => {
+    if (!raw) return { color: inputs.defaultFill ?? '#0a0a0a' };
+    const t = raw.trim();
+    // Gradient ref
+    if (/^gradient-[a-z0-9-]+$/.test(t)) {
+      const slug = t.replace(/^gradient-/, '');
+      const g = inputs.gradients?.find((x) => x.slug === slug);
+      if (g) {
+        return {
+          background: g.css,
+          backgroundClip: 'text',
+          WebkitBackgroundClip: 'text',
+          color: 'transparent',
+          WebkitTextFillColor: 'transparent',
+        };
+      }
+      return { color: inputs.defaultFill ?? '#0a0a0a' };
+    }
+    // Palette rung ref
+    const m = /^(primary|secondary|accent|neutral)-(dark|main|bright|pastel|faded)$/.exec(t);
+    if (m && inputs.palettes) {
+      const role = m[1] as keyof ResolvedPalettesForRender;
+      const rung = m[2] as keyof ResolvedPalettesForRender[typeof role];
+      return { color: inputs.palettes[role][rung] };
+    }
+    // Literal hex
+    if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(t)) return { color: t };
+    return { color: inputs.defaultFill ?? '#0a0a0a' };
+  };
+
   const spans = segments.map((seg) => el('span', {
-    style: {
-      color: seg.color ?? inputs.defaultFill ?? '#0a0a0a',
-    },
+    style: resolveSegmentStyle(seg.color),
   }, applyTransform(seg.text, inputs.textTransform)));
 
   return el('div', {
@@ -289,7 +336,10 @@ export function composeLockup(inputs: ComposeInputs): SatoriElement {
 export interface BackgroundedInputs {
   /** Inner lockup element to wrap. */
   inner: SatoriElement;
-  /** Tile background color (resolved hex from brand tokens). */
+  /** Tile background. v0.1.60: accepts a hex color OR a CSS gradient
+   *  string. When the string starts with "linear-gradient(" or
+   *  "radial-gradient(", we set the `background` shorthand;
+   *  otherwise treat as a flat hex and set `backgroundColor`. */
   tileColor: string;
   /** Outer padding as a fraction of wordmark size (em). */
   paddingEm: number;
@@ -299,18 +349,23 @@ export interface BackgroundedInputs {
  * Wrap a composition in a brand-color tile. Flex-centered inside the
  * tile so the lockup is naturally centered both axes regardless of
  * inner dimensions.
+ *
+ * v0.1.60: tileColor can be a CSS gradient string; we detect the
+ * "linear-gradient("/"radial-gradient(" prefix and use background
+ * shorthand for those. Hex values continue to use backgroundColor.
  */
 export function wrapInBackground(inputs: BackgroundedInputs): SatoriElement {
   const paddingPx = WORDMARK_SIZE_PX * inputs.paddingEm;
-  return el('div', {
-    style: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: paddingPx,
-      backgroundColor: inputs.tileColor,
-    },
-  }, [inputs.inner]);
+  const isGradient = /^(linear|radial)-gradient\(/.test(inputs.tileColor);
+  const style: Record<string, unknown> = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: paddingPx,
+  };
+  if (isGradient) style.background = inputs.tileColor;
+  else style.backgroundColor = inputs.tileColor;
+  return el('div', { style }, [inputs.inner]);
 }
 
 /* ──────────────────────────────────────────────────────────────

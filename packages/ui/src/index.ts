@@ -269,7 +269,7 @@ export type { SaveStatusProps, SaveStatusState } from "./components/ensemble/sav
 
 // Wordmark - segmented or image-based workspace brand mark
 export { Wordmark } from "./components/ensemble/wordmark";
-export type { WordmarkProps, WordmarkSegment } from "./components/ensemble/wordmark";
+export type { WordmarkProps, WordmarkSegment, WordmarkResolvedPalettes, WordmarkGradient } from "./components/ensemble/wordmark";
 
 // FontCombobox - typeahead picker for font families (system + Google Fonts)
 export { FontCombobox } from "./components/ensemble/font-combobox";
@@ -289,7 +289,7 @@ export type {
 // Used by theme binding editors and gradient stop editors where the operator
 // should pick from the workspace's known tokens rather than a raw hex.
 export { BrandTokenPicker } from "./components/brand/BrandTokenPicker";
-export type { BrandTokenPickerProps } from "./components/brand/BrandTokenPicker";
+export type { BrandTokenPickerProps, PickableGradient } from "./components/brand/BrandTokenPicker";
 
 // Future components:
 // export { NavItem } from "./components/ensemble/nav-item";

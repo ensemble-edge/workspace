@@ -103,7 +103,22 @@ export async function renderBrandAssetV2(req: RenderRequest): Promise<RenderResu
   }
 
   // ── 2. Source resolution ──
-  const wordmarkInputs = buildWordmarkInputs(tokens);
+  // v0.1.60: load the brand colors doc for palette + gradient
+  // resolution. Wordmark segments can reference palette rungs or
+  // gradients; the renderer needs the doc to turn refs into CSS.
+  const { loadBrandColors } = await import('../brand-colors/load');
+  const { resolvePalettes, resolveStopValue } = await import('../brand-colors/resolver');
+  const brandDoc = await loadBrandColors(req.env.DB, req.workspaceId);
+  const resolvedPalettes = resolvePalettes(brandDoc);
+  // Convert gradients to {slug, css} for the wordmark renderer.
+  const renderGradients = brandDoc.gradients.map((g) => {
+    const stops = g.stops.map((s) => resolveStopValue(s, resolvedPalettes)).join(', ');
+    const css = g.mode === 'radial'
+      ? `radial-gradient(circle, ${stops})`
+      : `linear-gradient(${g.angle}deg, ${stops})`;
+    return { slug: g.slug, css };
+  });
+  const wordmarkInputs = buildWordmarkInputs(tokens, resolvedPalettes, renderGradients);
   const iconSvg = await loadIconSvg(req.env, req.workspaceId, tokens);
 
   if (req.composition === 'wordmark-only' && !wordmarkInputs.segments?.length && !wordmarkInputs.svgString) {
@@ -146,7 +161,7 @@ export async function renderBrandAssetV2(req: RenderRequest): Promise<RenderResu
   // Editorial renders bypass persistent caching (operator is
   // actively dragging sliders; the output is throwaway).
   if (req.overrides) {
-    const fresh = await produceAsset({ req, policy, tokens, wordmarkInputs, iconSvg, brandColors });
+    const fresh = await produceAsset({ req, policy, tokens, wordmarkInputs, iconSvg, brandColors, resolvedPalettes, renderGradients });
     return { ...fresh, editorial: true };
   }
 
@@ -154,7 +169,7 @@ export async function renderBrandAssetV2(req: RenderRequest): Promise<RenderResu
     env: req.env,
     workspaceId: req.workspaceId,
     key: cacheKey,
-    produce: () => produceAsset({ req, policy, tokens, wordmarkInputs, iconSvg, brandColors }),
+    produce: () => produceAsset({ req, policy, tokens, wordmarkInputs, iconSvg, brandColors, resolvedPalettes, renderGradients }),
   });
   return { ...cached, editorial: false };
 }
@@ -170,10 +185,15 @@ interface ProduceInputs {
   wordmarkInputs: WordmarkInputs;
   iconSvg: string | null;
   brandColors: { bgLight: string; bgDark: string; primary: string };
+  /** v0.1.60: resolved palettes + gradient defs for tile-color
+   *  resolution inside produce. Threaded from renderBrandAssetV2's
+   *  outer scope so we don't reload + re-resolve here. */
+  resolvedPalettes: import('./lockup').ResolvedPalettesForRender;
+  renderGradients: import('./lockup').GradientForRender[];
 }
 
 async function produceAsset(inputs: ProduceInputs): Promise<CachedAsset> {
-  const { req, policy, wordmarkInputs, iconSvg, brandColors } = inputs;
+  const { req, policy, wordmarkInputs, iconSvg, brandColors, resolvedPalettes, renderGradients } = inputs;
 
   // Resolve finish color.
   const finishConfig = policy.finishes.find((f) => f.id === req.finish);
@@ -208,17 +228,40 @@ async function produceAsset(inputs: ProduceInputs): Promise<CachedAsset> {
   // gates anything — the background axis itself decides.
   const bg = policy.backgrounds.find((b) => b.id === req.backgroundId);
   if (bg && bg.id !== 'transparent') {
-    let bgColor = bg.color;
-    if (bgColor === 'var(--brand-background-light)') bgColor = brandColors.bgLight;
-    else if (bgColor === 'var(--brand-background-dark)') bgColor = brandColors.bgDark;
-    // Padding pulls from policy.backgrounded.padding when present;
-    // defaults to 0.5em when the policy doesn't have the field
-    // (older workspaces). 0 padding = full-bleed (the old "no
-    // padding" behavior is now just "set padding to 0").
+    // v0.1.60: five background variants.
+    //   true-white / true-black → universal flat fills, NO token
+    //     resolution. Always #FFFFFF / #0A0A0A. Always allowed.
+    //     Tile padding still applies so the logo sits inside a
+    //     proper boundary, but the color is fixed.
+    //   light / dark → brand-tile variants resolved through
+    //     policy.backgrounded.lightTile / .darkTile (token refs
+    //     with palette + gradient support). Operator-controlled.
+    let tileColor: string;
+    if (bg.id === 'true-white') {
+      tileColor = '#FFFFFF';
+    } else if (bg.id === 'true-black') {
+      tileColor = '#0A0A0A';
+    } else {
+      const isLight = bg.id === 'light';
+      const tileTokenRef = isLight
+        ? (policy.backgrounded?.lightTile ?? 'neutral-faded')
+        : (policy.backgrounded?.darkTile ?? 'neutral-dark');
+      const gradMatch = /^gradient-([a-z0-9-]+)$/.exec(tileTokenRef);
+      if (gradMatch) {
+        const g = renderGradients.find((x) => x.slug === gradMatch[1]);
+        tileColor = g?.css ?? brandColors.bgLight;
+      } else {
+        const { resolveBindingValue } = await import('../brand-colors/resolver');
+        tileColor = resolveBindingValue(tileTokenRef, resolvedPalettes);
+        if (!tileColor || (tileColor === '#0a0a0a' && tileTokenRef !== 'neutral-dark')) {
+          tileColor = isLight ? brandColors.bgLight : brandColors.bgDark;
+        }
+      }
+    }
     const paddingEm = policy.backgrounded?.padding ?? 0.5;
     tree = wrapInBackground({
       inner: tree,
-      tileColor: bgColor,
+      tileColor,
       paddingEm,
     });
   }
@@ -339,7 +382,11 @@ function pickRenderRelevantTokens(tokens: Record<string, string>): Record<string
   return out;
 }
 
-function buildWordmarkInputs(tokens: Record<string, string>): WordmarkInputs {
+function buildWordmarkInputs(
+  tokens: Record<string, string>,
+  palettes?: import('./lockup').ResolvedPalettesForRender,
+  gradients?: import('./lockup').GradientForRender[],
+): WordmarkInputs {
   // SVG upload wins (operator hand-tuned wordmark).
   const svgUrl = tokens['logo_wordmark_svg'] || tokens['logo_wordmark'];
   if (svgUrl && svgUrl.endsWith('.svg')) {
@@ -371,6 +418,8 @@ function buildWordmarkInputs(tokens: Record<string, string>): WordmarkInputs {
     fontStyle: (tokens['wordmark_style'] as 'normal' | 'italic') || 'normal',
     letterSpacingEm,
     textTransform: (tokens['wordmark_text_transform'] as 'none' | 'uppercase' | 'lowercase') || 'none',
+    palettes,
+    gradients,
   };
 }
 

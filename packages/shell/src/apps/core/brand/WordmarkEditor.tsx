@@ -2,15 +2,16 @@
  * WordmarkEditor — segmented wordmark builder (controlled component).
  *
  * Stored shape (JSON-stringified in brand_token `wordmark_text`):
- *   [{ text: 'Cura', color: '#137774' }, { text: 'listo', color: '#F2795D' }]
+ *   [{ text: 'Cura', color: '#137774' }, { text: 'listo', color: 'primary-main' }]
  *
- * Each segment has required `text` and optional `color` (falls back to
- * the workspace accent at render time). The UI is a list of rows —
- * text input + color swatch — with add/remove. The live preview shows
- * how the wordmark renders, concatenated.
+ * Each segment has required `text` and optional `color`. v0.1.60: the
+ * color field now accepts THREE forms:
+ *   1. Literal hex: "#137774"
+ *   2. Palette rung ref: "primary-main", "accent-bright", "neutral-faded"
+ *   3. Gradient ref: "gradient-sunrise"
  *
- * MVP intentionally avoids contenteditable: simpler to reason about,
- * easier to debug, no cursor/selection edge cases.
+ * The resolver (resolveSegmentColor below + the Wordmark React
+ * component + the server-side Satori renderer) handles all three.
  *
  * Controlled component — parent owns the JSON string value and the
  * save trigger (LogosTab batches all logo + wordmark saves into one
@@ -21,8 +22,10 @@ import * as React from 'react';
 import { Plus, Trash2, GripVertical } from 'lucide-react';
 
 import {
-  Button, Input, Label,
+  Button, Input,
+  BrandTokenPicker,
 } from '@ensemble-edge/ui';
+import type { ResolvedPalettes, PickableGradient } from '@ensemble-edge/ui';
 
 import { resolveFamilyStack } from './font-utils';
 
@@ -32,10 +35,13 @@ export interface WordmarkSegment {
 }
 
 const HEX_RE = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
+const RUNG_RE = /^(primary|secondary|accent|neutral)-(dark|main|bright|pastel|faded)$/;
+const GRADIENT_RE = /^gradient-[a-z0-9-]+$/;
 
 export function isValidWordmarkColor(c: string): boolean {
   if (!c) return true;
-  return HEX_RE.test(c.trim());
+  const t = c.trim();
+  return HEX_RE.test(t) || RUNG_RE.test(t) || GRADIENT_RE.test(t);
 }
 
 export function parseWordmarkSegments(raw: string): WordmarkSegment[] {
@@ -62,10 +68,54 @@ export function serializeWordmarkSegments(segments: WordmarkSegment[]): string {
   return JSON.stringify(cleaned);
 }
 
-/**
- * Controlled editor. Parent passes the raw JSON `value` and gets back
- * a new JSON string via `onChange` whenever segments change.
- */
+/** v0.1.60: resolve a stored segment color value to render-ready
+ *  CSS. Returns either a flat color string or a background style
+ *  spec for gradient-on-text (background-clip). */
+export interface ResolvedSegmentStyle {
+  color?: string;
+  background?: string;
+  webkitBackgroundClip?: string;
+  backgroundClip?: string;
+  /** When using background-clip:text, color must be transparent. */
+  webkitTextFillColor?: string;
+}
+
+function resolveSegmentColor(
+  raw: string | undefined,
+  palettes: ResolvedPalettes | undefined,
+  gradients: PickableGradient[],
+): ResolvedSegmentStyle {
+  if (!raw) return {};
+  const t = raw.trim();
+  // Gradient ref → background-clip:text technique
+  if (GRADIENT_RE.test(t)) {
+    const slug = t.replace(/^gradient-/, '');
+    const g = gradients.find((x) => x.slug === slug);
+    if (g) {
+      return {
+        background: g.css,
+        webkitBackgroundClip: 'text',
+        backgroundClip: 'text',
+        color: 'transparent',
+        webkitTextFillColor: 'transparent',
+      };
+    }
+    // Unknown gradient — fall through to text-color:transparent
+    // (operator sees nothing, which signals the bad ref clearly).
+    return { color: 'transparent' };
+  }
+  // Palette rung ref → resolve to hex
+  if (palettes && RUNG_RE.test(t)) {
+    const m = RUNG_RE.exec(t)!;
+    const role = m[1] as keyof ResolvedPalettes;
+    const rung = m[2] as keyof ResolvedPalettes[typeof role];
+    return { color: palettes[role][rung] };
+  }
+  // Literal hex
+  if (HEX_RE.test(t)) return { color: t };
+  return {};
+}
+
 export interface WordmarkTypography {
   family?: string;
   weight?: string;
@@ -78,11 +128,17 @@ export function WordmarkEditor({
   value,
   onChange,
   typography,
+  palettes,
+  gradients = [],
 }: {
   value: string;
   onChange: (next: string) => void;
   /** Live typography tokens — preview re-renders as these change. */
   typography?: WordmarkTypography;
+  /** v0.1.60: resolved palettes for the segment color picker. */
+  palettes?: ResolvedPalettes;
+  /** v0.1.60: available gradients for the segment color picker. */
+  gradients?: PickableGradient[];
 }) {
   const segments = parseWordmarkSegments(value);
 
@@ -107,7 +163,12 @@ export function WordmarkEditor({
       {segments.length > 0 && (
         <div className="rounded-md border bg-muted/30 p-4">
           <p className="text-xs text-muted-foreground mb-2">Preview</p>
-          <WordmarkPreview segments={segments} typography={typography} />
+          <WordmarkPreview
+            segments={segments}
+            typography={typography}
+            palettes={palettes}
+            gradients={gradients}
+          />
         </div>
       )}
 
@@ -118,6 +179,8 @@ export function WordmarkEditor({
             segment={seg}
             onChange={(patch) => update(i, patch)}
             onRemove={() => removeSegment(i)}
+            palettes={palettes}
+            gradients={gradients}
           />
         ))}
         <Button type="button" variant="outline" size="sm" onClick={addSegment}>
@@ -132,15 +195,23 @@ function SegmentRow({
   segment,
   onChange,
   onRemove,
+  palettes,
+  gradients,
 }: {
   segment: WordmarkSegment;
   onChange: (patch: Partial<WordmarkSegment>) => void;
   onRemove: () => void;
+  palettes?: ResolvedPalettes;
+  gradients: PickableGradient[];
 }) {
+  // v0.1.60: when palettes are available, use BrandTokenPicker so
+  // operators pick from palette rungs / gradients / hex. The picker
+  // requires palettes; fall back to a plain hex input when palettes
+  // aren't ready yet (loading state).
   return (
     <div className="flex items-center gap-2 rounded-md border p-2">
       <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
-      <div className="flex-1 space-y-1.5">
+      <div className="flex-1 space-y-1.5 min-w-0">
         <Input
           value={segment.text}
           onChange={(e) => onChange({ text: e.target.value })}
@@ -149,20 +220,33 @@ function SegmentRow({
         />
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <Label className="text-xs text-muted-foreground">Color</Label>
-        <input
-          type="color"
-          value={segment.color || '#000000'}
-          onChange={(e) => onChange({ color: e.target.value })}
-          className="h-8 w-10 rounded border cursor-pointer"
-          title="Pick color"
-        />
-        <Input
-          value={segment.color ?? ''}
-          onChange={(e) => onChange({ color: e.target.value })}
-          placeholder="#137774"
-          className="h-8 w-24 font-mono text-xs"
-        />
+        {palettes ? (
+          <BrandTokenPicker
+            value={segment.color ?? ''}
+            onChange={(v) => onChange({ color: v })}
+            palettes={palettes}
+            gradients={gradients}
+            allowHex
+            allowGradient
+            label="Pick segment color"
+          />
+        ) : (
+          <>
+            <input
+              type="color"
+              value={segment.color || '#000000'}
+              onChange={(e) => onChange({ color: e.target.value })}
+              className="h-8 w-10 rounded border cursor-pointer"
+              title="Pick color"
+            />
+            <Input
+              value={segment.color ?? ''}
+              onChange={(e) => onChange({ color: e.target.value })}
+              placeholder="#137774"
+              className="h-8 w-24 font-mono text-xs"
+            />
+          </>
+        )}
       </div>
       <Button
         type="button"
@@ -181,14 +265,14 @@ function SegmentRow({
 function WordmarkPreview({
   segments,
   typography,
+  palettes,
+  gradients,
 }: {
   segments: WordmarkSegment[];
   typography?: WordmarkTypography;
+  palettes?: ResolvedPalettes;
+  gradients: PickableGradient[];
 }) {
-  // Build a style object from the live typography tokens. When no family
-  // is set the wordmark "inherits Display" — we fall through to the
-  // built-in font-bold/2xl Tailwind defaults so the preview matches what
-  // ships when the operator leaves wordmark typography unconfigured.
   const hasTypography = !!typography?.family;
   const previewStyle: React.CSSProperties = hasTypography
     ? {
@@ -210,11 +294,26 @@ function WordmarkPreview({
 
   return (
     <span className={className} style={previewStyle}>
-      {segments.map((s, i) => (
-        <span key={i} style={s.color ? { color: s.color } : undefined}>
-          {s.text}
-        </span>
-      ))}
+      {segments.map((s, i) => {
+        // v0.1.60: resolve each segment via the new color resolver so
+        // gradient refs render with background-clip:text, palette
+        // refs resolve to hex, and literal hex passes through.
+        const resolved = resolveSegmentColor(s.color, palettes, gradients);
+        return (
+          <span
+            key={i}
+            style={{
+              color: resolved.color,
+              background: resolved.background,
+              WebkitBackgroundClip: resolved.webkitBackgroundClip as React.CSSProperties['WebkitBackgroundClip'],
+              backgroundClip: resolved.backgroundClip as React.CSSProperties['backgroundClip'],
+              WebkitTextFillColor: resolved.webkitTextFillColor,
+            }}
+          >
+            {s.text}
+          </span>
+        );
+      })}
     </span>
   );
 }

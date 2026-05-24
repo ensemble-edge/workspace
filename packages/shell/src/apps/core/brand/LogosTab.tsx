@@ -26,9 +26,10 @@ import {
   Button, Input, Label, SaveStatus, FontCombobox,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
   Slider, Switch,
+  BrandTokenPicker,
   toast,
 } from '@ensemble-edge/ui';
-import type { FontComboboxOption } from '@ensemble-edge/ui';
+import type { FontComboboxOption, ResolvedPalettes, PickableGradient } from '@ensemble-edge/ui';
 
 import { authedFetch, emitWorkspaceEvent } from '../../../state';
 import { useFormStatus } from '../../../hooks/useFormStatus';
@@ -129,8 +130,40 @@ export function LogosTab() {
   const [tokens, setTokens] = useState<Record<string, string>>({});
   const [fontCatalog, setFontCatalog] = useState<GoogleFontEntry[]>([]);
   const [catalogIsFallback, setCatalogIsFallback] = useState(false);
+  // v0.1.60: load palettes + gradients so the WordmarkEditor's
+  // segment-color picker (and the background-settings tile pickers)
+  // can offer palette rungs + gradient refs. Loads once on mount;
+  // refreshes are handled by the brand.tokens.changed event from
+  // the Colors tab.
+  const [palettes, setPalettes] = useState<ResolvedPalettes | null>(null);
+  const [gradients, setGradients] = useState<PickableGradient[]>([]);
   const upgradingRef = React.useRef(false);
   const status = useFormStatus({ value: tokens, mode: 'manual' });
+
+  // Load resolved brand colors doc for token pickers.
+  useEffect(() => {
+    let cancelled = false;
+    authedFetch('/_ensemble/core/brand/colors-doc/resolved')
+      .then((r) => r.json() as Promise<{
+        palettes: ResolvedPalettes;
+        gradients: Array<{ slug: string; name: string; mode: string; angle: number; resolvedStops: Array<{ hex: string }> }>;
+      }>)
+      .then((res) => {
+        if (cancelled) return;
+        setPalettes(res.palettes);
+        // Convert to PickableGradient with resolved CSS string per entry.
+        const pickable: PickableGradient[] = (res.gradients ?? []).map((g) => {
+          const stops = g.resolvedStops.map((s) => s.hex).join(', ');
+          const css = g.mode === 'radial'
+            ? `radial-gradient(circle, ${stops})`
+            : `linear-gradient(${g.angle}deg, ${stops})`;
+          return { slug: g.slug, name: g.name, css };
+        });
+        setGradients(pickable);
+      })
+      .catch(() => { /* picker falls back to legacy hex input */ });
+    return () => { cancelled = true; };
+  }, []);
 
   // Load the Google Fonts catalog once for the wordmark Family picker.
   // Falls back to the bundled top-40 list when the proxy returns empty.
@@ -286,6 +319,8 @@ export function LogosTab() {
               onPersist={persistToken}
               fontCatalog={fontCatalog}
               onFirstSearch={upgradeCatalog}
+              palettes={palettes}
+              gradients={gradients}
             />
           ) : (
             <SlotCard
@@ -305,7 +340,7 @@ export function LogosTab() {
           mouse-up). The variants matrix on Brand Overview and the
           public brand guide already read from this policy — these
           editors fill the missing write side. */}
-      <CompositionPolicyEditors />
+      <CompositionPolicyEditors palettes={palettes} gradients={gradients} />
 
       <div className="flex items-center gap-3">
         <Button onClick={handleSave} disabled={!status.dirty || saving}>
@@ -334,6 +369,8 @@ function WordmarkCard({
   onPersist,
   fontCatalog,
   onFirstSearch,
+  palettes,
+  gradients,
 }: {
   slot: SlotDef;
   tokens: Record<string, string>;
@@ -341,6 +378,8 @@ function WordmarkCard({
   onPersist: (key: string, value: string) => Promise<void>;
   fontCatalog: GoogleFontEntry[];
   onFirstSearch?: () => void;
+  palettes: ResolvedPalettes | null;
+  gradients: PickableGradient[];
 }) {
   const textValue = tokens['wordmark_text'] || '';
   const imageValue = tokens[tokenKey(slot.key, 'base')] || '';
@@ -405,6 +444,8 @@ function WordmarkCard({
                 letterSpacing: tokens['wordmark_letter_spacing'] || undefined,
                 textTransform: (tokens['wordmark_text_transform'] as 'none' | 'uppercase' | 'lowercase') || undefined,
               }}
+              palettes={palettes ?? undefined}
+              gradients={gradients}
             />
           </div>
         ) : (
@@ -819,6 +860,9 @@ type LogoPolicyShape = {
     lightAllowed: boolean;
     darkAllowed: boolean;
     padding: number;
+    /** v0.1.60: tile color refs. */
+    lightTile?: string;
+    darkTile?: string;
   };
 };
 
@@ -842,7 +886,13 @@ type LogoPolicyShape = {
  * React updates the <img> element when the URL changes — no manual
  * cache-bust needed.
  */
-function CompositionPolicyEditors() {
+function CompositionPolicyEditors({
+  palettes,
+  gradients,
+}: {
+  palettes: ResolvedPalettes | null;
+  gradients: PickableGradient[];
+}) {
   const [savedPolicy, setSavedPolicy] = useState<LogoPolicyShape | null>(null);
   const [workspaceSlug, setWorkspaceSlug] = useState<string>('');
   const [aliasPath, setAliasPath] = useState<string>('');
@@ -921,6 +971,8 @@ function CompositionPolicyEditors() {
         workspaceSlug={workspaceSlug}
         aliasPath={aliasPath}
         onSave={(c) => saveSlice({ backgrounded: c })}
+        palettes={palettes}
+        gradients={gradients}
         key={`b-${reloadKey}`}
       />
     </div>
@@ -1133,6 +1185,9 @@ interface BackgroundedConfig {
   lightAllowed: boolean;
   darkAllowed: boolean;
   padding: number;
+  /** v0.1.60: tile color refs (token, gradient ref, or hex). */
+  lightTile?: string;
+  darkTile?: string;
 }
 
 function BackgroundSettingsCard({
@@ -1140,21 +1195,40 @@ function BackgroundSettingsCard({
   workspaceSlug,
   aliasPath,
   onSave,
+  palettes,
+  gradients,
 }: {
   savedConfig: BackgroundedConfig;
   workspaceSlug: string;
   aliasPath: string;
   onSave: (config: BackgroundedConfig) => Promise<boolean>;
+  palettes: ResolvedPalettes | null;
+  gradients: PickableGradient[];
 }) {
   // Force allowed=true on load — the master toggle is gone; the
   // light/dark sub-toggles govern whether each variant exists.
-  const [draft, setDraft] = useState<BackgroundedConfig>({ ...savedConfig, allowed: true });
+  // v0.1.60: default lightTile=neutral-faded, darkTile=neutral-dark
+  // when unset. These are token refs (not raw hex) so they cascade
+  // when the operator edits the neutral palette.
+  const [draft, setDraft] = useState<BackgroundedConfig>({
+    ...savedConfig,
+    allowed: true,
+    lightTile: savedConfig.lightTile ?? 'neutral-faded',
+    darkTile: savedConfig.darkTile ?? 'neutral-dark',
+  });
   const [saving, setSaving] = useState(false);
   const [previewMode, setPreviewMode] = useState<'light' | 'dark'>(
     savedConfig.lightAllowed ? 'light' : 'dark',
   );
 
-  useEffect(() => { setDraft({ ...savedConfig, allowed: true }); }, [savedConfig]);
+  useEffect(() => {
+    setDraft({
+      ...savedConfig,
+      allowed: true,
+      lightTile: savedConfig.lightTile ?? 'neutral-faded',
+      darkTile: savedConfig.darkTile ?? 'neutral-dark',
+    });
+  }, [savedConfig]);
 
   const dirty = JSON.stringify(draft) !== JSON.stringify({ ...savedConfig, allowed: true });
 
@@ -1204,19 +1278,32 @@ function BackgroundSettingsCard({
           />
         </div>
 
-        {/* Light/Dark sub-variant toggles + preview-mode selector */}
+        {/* v0.1.60: Light/Dark tile color pickers. Each picker
+            accepts palette rungs, gradient refs, or custom hex.
+            Defaults: neutral-faded (light) and neutral-dark (dark)
+            so tiles follow the operator's neutral palette without
+            additional configuration. */}
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-md border p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium">Light background</p>
-                <p className="text-[10px] text-muted-foreground">Uses brand-background-light</p>
-              </div>
+              <p className="text-xs font-medium">Light background</p>
               <Switch
                 checked={draft.lightAllowed}
                 onCheckedChange={(v) => setDraft({ ...draft, lightAllowed: v })}
               />
             </div>
+            {palettes && (
+              <BrandTokenPicker
+                value={draft.lightTile ?? 'neutral-faded'}
+                onChange={(v) => setDraft({ ...draft, lightTile: v })}
+                palettes={palettes}
+                gradients={gradients}
+                allowHex
+                allowGradient
+                label="Light tile color"
+                className="w-full"
+              />
+            )}
             <Button
               type="button"
               variant={previewMode === 'light' ? 'default' : 'outline'}
@@ -1229,15 +1316,24 @@ function BackgroundSettingsCard({
           </div>
           <div className="rounded-md border p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium">Dark background</p>
-                <p className="text-[10px] text-muted-foreground">Uses brand-background-dark</p>
-              </div>
+              <p className="text-xs font-medium">Dark background</p>
               <Switch
                 checked={draft.darkAllowed}
                 onCheckedChange={(v) => setDraft({ ...draft, darkAllowed: v })}
               />
             </div>
+            {palettes && (
+              <BrandTokenPicker
+                value={draft.darkTile ?? 'neutral-dark'}
+                onChange={(v) => setDraft({ ...draft, darkTile: v })}
+                palettes={palettes}
+                gradients={gradients}
+                allowHex
+                allowGradient
+                label="Dark tile color"
+                className="w-full"
+              />
+            )}
             <Button
               type="button"
               variant={previewMode === 'dark' ? 'default' : 'outline'}

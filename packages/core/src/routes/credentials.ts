@@ -567,7 +567,10 @@ export function createCredentialsRoutes(): App {
     const FINISHES: Array<'full-color' | 'mono-black' | 'mono-white' | 'mono-brand'> = [
       'full-color', 'mono-black', 'mono-white', 'mono-brand',
     ];
-    const BGS = ['transparent', 'light', 'dark'];
+    // v0.1.60: five backgrounds. true-white / true-black are
+    // universal high-contrast variants; light / dark are brand-
+    // colored variants the operator configures.
+    const BGS = ['transparent', 'true-white', 'true-black', 'light', 'dark'];
 
     // v0.1.49: parse override + backgrounded query params so the
     // path-style route accepts the same live-preview controls as
@@ -644,7 +647,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.59-nav-contrast-brand-guide-expansion',
+      buildFingerprint: 'v0.1.60-token-pickers-everywhere-five-bg-variants',
       timestamp: new Date().toISOString(),
     });
   });
@@ -1575,12 +1578,19 @@ export function createCredentialsRoutes(): App {
       }
     }
 
-    // Favicon — checked as the brand_token `logo_favicon`. If set, done.
+    // Favicon — v0.1.31 removed the standalone logo_favicon upload
+    // slot. Favicons are now generated from the icon mark on demand
+    // (favicon.svg + favicon-*.png). So "favicon configured" really
+    // means "icon mark configured" — we check the icon-mark tokens
+    // operators populate via Brand → Logos.
     let faviconDone = false;
     try {
       const row = await c.env.DB.prepare(
         `SELECT value FROM brand_tokens
-         WHERE workspace_id = ? AND category = 'identity' AND key = 'logo_favicon' AND locale = ''`,
+         WHERE workspace_id = ? AND category = 'identity'
+           AND key IN ('logo_icon_mark_svg', 'logo_icon_mark', 'logo_favicon')
+           AND locale = ''
+         LIMIT 1`,
       )
         .bind(workspace.id)
         .first<{ value: string }>();

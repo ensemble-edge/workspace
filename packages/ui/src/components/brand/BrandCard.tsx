@@ -829,8 +829,14 @@ export function BrandCard({
         />
       </section>
 
-      {/* Section 3 — Gradients — hidden entirely when empty */}
-      {hasGradients && (
+      {/* Section 3 — Gradients — hidden entirely when empty AND
+          ALSO hidden in edit mode (v0.1.60). In edit mode, the
+          host (ColorsTab) renders its own inline gradient editor
+          where each banner sits directly above its controls; the
+          BrandCard's banner-only display would duplicate that. The
+          display mode still shows banners — that's where the
+          /brand public guide + Brand Overview show gradients. */}
+      {hasGradients && mode !== 'edit' && (
         <section>
           <header className="flex items-baseline justify-between mb-3.5">
             <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground" style={{ fontFamily: 'var(--brand-font-eyebrow, var(--brand-font-body, inherit))' }}>

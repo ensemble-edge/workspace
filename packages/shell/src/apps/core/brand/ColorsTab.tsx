@@ -501,6 +501,7 @@ export function ColorsTab() {
         onAdd={addGradient}
         onRemove={removeGradient}
         onUpdate={updateGradient}
+        onNameChange={updateGradientName}
       />
 
       {/* Themes — separate from BrandCard by spec (themes are
@@ -527,49 +528,67 @@ function GradientsEditor({
   onAdd,
   onRemove,
   onUpdate,
+  onNameChange,
 }: {
   gradients: Gradient[];
   palettes: ResolvedPalettes;
   onAdd: () => void;
   onRemove: (slug: string) => void;
   onUpdate: (slug: string, patch: Partial<Gradient>) => void;
+  onNameChange?: (slug: string, name: string) => void;
 }) {
   const atCap = gradients.length >= 5;
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <CardTitle className="text-base">Gradient controls</CardTitle>
-            <CardDescription>
-              Stops, angle, and mode for each gradient. Stops are picked from existing
-              palette rungs plus the system tokens <code>white</code> and <code>black</code>.
-              Hex is not allowed in gradient stops — override a palette rung if you need a custom color.
-            </CardDescription>
-          </div>
+    <section className="space-y-3.5">
+      <header className="flex items-baseline justify-between">
+        <h2
+          className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground"
+          style={{ fontFamily: 'var(--brand-font-eyebrow, var(--brand-font-body, inherit))' }}
+        >
+          Gradients
+        </h2>
+        <div className="flex items-center gap-3">
+          <span
+            className="text-[11px] text-muted-foreground"
+            style={{ fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)' }}
+          >
+            {gradients.length} of 5
+          </span>
           {atCap ? (
-            <Button type="button" variant="outline" size="sm" disabled title="Maximum 5 gradients reached">
+            <Button type="button" variant="outline" size="sm" disabled title="Maximum 5 gradients reached" className="h-7 px-2 text-xs">
               <Plus className="h-3.5 w-3.5 mr-1" /> Add gradient
             </Button>
           ) : (
-            <Button type="button" variant="outline" size="sm" onClick={onAdd}>
+            <Button type="button" variant="outline" size="sm" onClick={onAdd} className="h-7 px-2 text-xs">
               <Plus className="h-3.5 w-3.5 mr-1" /> Add gradient
             </Button>
           )}
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {gradients.length === 0 ? (
-          <p className="text-xs text-muted-foreground italic">
-            No gradients defined yet. Click <strong>Add gradient</strong> to compose one from your palette rungs.
-          </p>
-        ) : (
-          gradients.map((g) => (
-            <GradientRow key={g.slug} gradient={g} palettes={palettes} onUpdate={onUpdate} onRemove={onRemove} />
-          ))
-        )}
-      </CardContent>
-    </Card>
+      </header>
+      <p className="text-xs text-muted-foreground max-w-[680px]">
+        Compose from your palette rungs + system tokens <code>white</code> / <code>black</code>.
+        Stops are token-only — override a palette rung if you need a custom color. Each gradient's
+        live preview sits directly above its controls.
+      </p>
+      {gradients.length === 0 ? (
+        <p className="text-xs text-muted-foreground italic py-4">
+          No gradients defined yet. Click <strong>Add gradient</strong> above to compose one from your palette rungs.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          {gradients.map((g) => (
+            <GradientRow
+              key={g.slug}
+              gradient={g}
+              palettes={palettes}
+              onUpdate={onUpdate}
+              onRemove={onRemove}
+              onNameChange={onNameChange}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -578,11 +597,13 @@ function GradientRow({
   palettes,
   onUpdate,
   onRemove,
+  onNameChange,
 }: {
   gradient: Gradient;
   palettes: ResolvedPalettes;
   onUpdate: (slug: string, patch: Partial<Gradient>) => void;
   onRemove: (slug: string) => void;
+  onNameChange?: (slug: string, name: string) => void;
 }) {
   const stops = gradient.stops;
   const canAddStop = stops.length < 4;
@@ -602,19 +623,93 @@ function GradientRow({
     onUpdate(gradient.slug, { stops: stops.filter((_, i) => i !== idx) });
   }
 
+  // Resolved stops → CSS gradient string for the banner preview.
+  const resolvedStops = stops.map((s) => resolveStopLocal(s, palettes));
+  const cssGradient = gradient.mode === 'radial'
+    ? `radial-gradient(circle, ${resolvedStops.join(', ')})`
+    : `linear-gradient(${gradient.angle}deg, ${resolvedStops.join(', ')})`;
+  // On-color foreground for the banner name — pick black/white by
+  // first stop's luminance (matches the same heuristic the brand
+  // guide uses for its banners).
+  const firstHex = resolvedStops[0] ?? '#000000';
+  const lum = relLum(firstHex);
+  const onColor = lum < 0.5 ? '#FAFAFA' : '#0A0A0A';
+
   return (
-    <div className="rounded-md border p-3 space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="font-mono text-xs text-muted-foreground">gradient-{gradient.slug}</span>
-        </div>
-        <Button type="button" variant="ghost" size="sm" onClick={() => onRemove(gradient.slug)} className="h-7 px-2 text-xs">
-          <Trash2 className="h-3.5 w-3.5 mr-1" /> Remove
-        </Button>
+    <div className="rounded-2xl overflow-hidden border-[0.5px] border-black/[0.07] bg-background">
+      {/* v0.1.60: live banner preview at the top of each row so the
+          gradient and its controls are visually adjacent — operator
+          sees the resulting gradient directly above the controls
+          that drive it. Replaces the old layout where banners lived
+          in the BrandCard above and controls in a separate card. */}
+      <div
+        className="h-[90px] flex items-center px-5"
+        style={{ background: cssGradient, color: onColor }}
+      >
+        {onNameChange ? (
+          <Input
+            value={gradient.name}
+            onChange={(e) => onNameChange(gradient.slug, e.currentTarget.value)}
+            className="bg-transparent border-0 px-0 h-auto text-[28px] font-normal tracking-tight focus-visible:ring-0 hover:bg-black/5"
+            style={{
+              color: onColor,
+              fontFamily: 'var(--brand-font-display, var(--brand-font-heading, inherit))',
+            }}
+          />
+        ) : (
+          <p
+            className="text-[28px] font-normal tracking-tight leading-none"
+            style={{
+              color: onColor,
+              fontFamily: 'var(--brand-font-display, var(--brand-font-heading, inherit))',
+            }}
+          >
+            {gradient.name}
+          </p>
+        )}
       </div>
 
-      <div className="space-y-2">
-        <Label className="text-xs">Stops</Label>
+      {/* Controls strip — all on one row (mode + angle + remove). */}
+      <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-black/[0.07] flex-wrap">
+        <span
+          className="text-[11px] text-muted-foreground"
+          style={{ fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)' }}
+        >
+          gradient-{gradient.slug}
+        </span>
+        <div className="flex items-center gap-3">
+          <Select value={gradient.mode} onValueChange={(v) => onUpdate(gradient.slug, { mode: v as 'linear' | 'radial' })}>
+            <SelectTrigger className="w-[100px] h-7 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="linear">Linear</SelectItem>
+              <SelectItem value="radial">Radial</SelectItem>
+            </SelectContent>
+          </Select>
+          {gradient.mode === 'linear' && (
+            <Select value={String(gradient.angle)} onValueChange={(v) => onUpdate(gradient.slug, { angle: Number(v) as Gradient['angle'] })}>
+              <SelectTrigger className="w-[80px] h-7 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">0°</SelectItem>
+                <SelectItem value="45">45°</SelectItem>
+                <SelectItem value="90">90°</SelectItem>
+                <SelectItem value="135">135°</SelectItem>
+                <SelectItem value="180">180°</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+          <Button type="button" variant="ghost" size="sm" onClick={() => onRemove(gradient.slug)} className="h-7 px-2 text-xs">
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Stops row — each stop's BrandTokenPicker. */}
+      <div className="px-4 pb-4 space-y-2">
+        <Label className="text-xs text-muted-foreground">Stops</Label>
         <div className="flex flex-wrap items-center gap-2">
           {stops.map((stop, idx) => (
             <React.Fragment key={idx}>
@@ -638,38 +733,6 @@ function GradientRow({
             </Button>
           )}
         </div>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs">Mode</Label>
-          <Select value={gradient.mode} onValueChange={(v) => onUpdate(gradient.slug, { mode: v as 'linear' | 'radial' })}>
-            <SelectTrigger className="w-[120px] h-8">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="linear">Linear</SelectItem>
-              <SelectItem value="radial">Radial</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        {gradient.mode === 'linear' && (
-          <div className="flex flex-col gap-1">
-            <Label className="text-xs">Angle</Label>
-            <Select value={String(gradient.angle)} onValueChange={(v) => onUpdate(gradient.slug, { angle: Number(v) as Gradient['angle'] })}>
-              <SelectTrigger className="w-[120px] h-8">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="0">0°</SelectItem>
-                <SelectItem value="45">45°</SelectItem>
-                <SelectItem value="90">90°</SelectItem>
-                <SelectItem value="135">135°</SelectItem>
-                <SelectItem value="180">180°</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
       </div>
     </div>
   );

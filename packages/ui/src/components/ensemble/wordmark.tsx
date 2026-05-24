@@ -21,8 +21,33 @@ import { cn } from "../../lib/utils";
  * If neither is set, falls back to rendering `name`.
  */
 export interface WordmarkSegment {
+  /** Text content of this segment. */
   text: string;
+  /**
+   * v0.1.60: color reference. Can be:
+   *   - Literal hex: "#137774"
+   *   - Palette rung ref: "primary-main", "neutral-faded"
+   *   - Gradient ref: "gradient-sunrise" (rendered via background-clip:text)
+   * Resolved via the optional `palettes`/`gradients` props on Wordmark.
+   * When unresolvable (no palettes/gradients passed or unknown ref),
+   * falls through to undefined (inherits parent color).
+   */
   color?: string;
+}
+
+/** Palette type used by Wordmark for resolving rung refs. */
+export interface WordmarkResolvedPalettes {
+  primary: Record<'dark' | 'main' | 'bright' | 'pastel' | 'faded', string>;
+  secondary: Record<'dark' | 'main' | 'bright' | 'pastel' | 'faded', string>;
+  accent: Record<'dark' | 'main' | 'bright' | 'pastel' | 'faded', string>;
+  neutral: Record<'dark' | 'main' | 'bright' | 'pastel' | 'faded', string>;
+}
+
+/** v0.1.60: gradient definitions for segment color resolution. */
+export interface WordmarkGradient {
+  slug: string;
+  /** Resolved CSS gradient string ("linear-gradient(...)" or "radial-gradient(...)"). */
+  css: string;
 }
 
 export interface WordmarkProps extends React.HTMLAttributes<HTMLSpanElement> {
@@ -40,16 +65,24 @@ export interface WordmarkProps extends React.HTMLAttributes<HTMLSpanElement> {
    * v0.1.59: hex color of the surface this wordmark sits on. When
    * provided, segment colors that fail APCA contrast (|Lc| < 45)
    * against this surface fall back to a high-contrast near-white
-   * or near-black per segment. This is what fixes the
-   * coral-wordmark-on-teal-sidebar contrast problem — the consumer
-   * (e.g. AppSidebar) passes the sidebar bg, and segments that
-   * would be illegible get auto-corrected.
-   *
-   * When omitted, segment colors render exactly as the operator
-   * configured them — that's the right default for the workspace
-   * canvas where the operator's choices are intentional.
+   * or near-black per segment.
    */
   surfaceColor?: string;
+  /**
+   * v0.1.60: resolved palettes for palette-rung-ref segments
+   * ("primary-main" etc.). When unset, palette refs in segments
+   * render as if uncolored (segment falls back to inherit). Pass
+   * this whenever any segment color might be a palette ref.
+   */
+  palettes?: WordmarkResolvedPalettes;
+  /**
+   * v0.1.60: gradient defs for gradient-ref segments
+   * ("gradient-sunrise"). When a segment color is a gradient ref,
+   * we apply background-clip:text technique to render the gradient
+   * on the text. When unset, gradient refs render as inherited
+   * color.
+   */
+  gradients?: ReadonlyArray<WordmarkGradient>;
 }
 
 /* APCA-W3 contrast helpers (kept local — copying ~30 lines is
@@ -105,8 +138,44 @@ function fallbackForeground(surfaceHex: string): string {
   return lightLc >= darkLc ? '#FAFAFA' : '#0A0A0A';
 }
 
+/** Resolve a stored segment color to render-ready CSS properties.
+ *  v0.1.60. Mirrors the WordmarkEditor preview logic. */
+function resolveSegmentColor(
+  raw: string | undefined,
+  palettes: WordmarkResolvedPalettes | undefined,
+  gradients: ReadonlyArray<WordmarkGradient> | undefined,
+): React.CSSProperties {
+  if (!raw) return {};
+  const t = raw.trim();
+  // Gradient ref → background-clip:text
+  if (/^gradient-[a-z0-9-]+$/.test(t)) {
+    const slug = t.replace(/^gradient-/, '');
+    const g = gradients?.find((x) => x.slug === slug);
+    if (g) {
+      return {
+        background: g.css,
+        WebkitBackgroundClip: 'text',
+        backgroundClip: 'text',
+        color: 'transparent',
+        WebkitTextFillColor: 'transparent',
+      };
+    }
+    return {};
+  }
+  // Palette rung ref
+  const m = /^(primary|secondary|accent|neutral)-(dark|main|bright|pastel|faded)$/.exec(t);
+  if (m && palettes) {
+    const role = m[1] as keyof WordmarkResolvedPalettes;
+    const rung = m[2] as keyof WordmarkResolvedPalettes[typeof role];
+    return { color: palettes[role][rung] };
+  }
+  // Literal hex
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(t)) return { color: t };
+  return {};
+}
+
 export const Wordmark = React.forwardRef<HTMLSpanElement, WordmarkProps>(
-  ({ segments, imageUrl, name, alt, imageHeight = 32, surfaceColor, className, ...rest }, ref) => {
+  ({ segments, imageUrl, name, alt, imageHeight = 32, surfaceColor, palettes, gradients, className, ...rest }, ref) => {
     // Segments win when present.
     if (segments && segments.length > 0) {
       // v0.1.17: read --font-wordmark CSS variables (with display
@@ -139,20 +208,24 @@ export const Wordmark = React.forwardRef<HTMLSpanElement, WordmarkProps>(
           {...rest}
         >
           {segments.map((s, i) => {
-            // v0.1.59: when a surfaceColor is provided and the
-            // segment's operator-configured color fails APCA against
-            // it, swap to a high-contrast fallback. The operator's
-            // intent (the segment color) is preserved everywhere
-            // surfaceColor isn't provided — i.e. the workspace
-            // canvas where the operator's choices are intentional.
-            let effective = s.color;
-            if (s.color && surfaceColor) {
-              if (Math.abs(apcaLc(s.color, surfaceColor)) < WORDMARK_APCA_MIN) {
-                effective = fallbackFor();
+            // v0.1.60: resolve segment color through palettes +
+            // gradients. Gradient refs render via background-clip:text;
+            // palette refs resolve to hex; literal hex passes through.
+            const resolved = resolveSegmentColor(s.color, palettes, gradients);
+            // v0.1.59 APCA fallback: when the segment is a FLAT color
+            // (gradient refs are excluded — clipping a gradient to
+            // text on a low-contrast surface is the operator's
+            // intentional choice and shouldn't be overridden), check
+            // APCA against the surface and fall back if needed.
+            const isGradientSegment = !!resolved.background;
+            let finalStyle: React.CSSProperties = resolved;
+            if (!isGradientSegment && resolved.color && surfaceColor) {
+              if (Math.abs(apcaLc(resolved.color, surfaceColor)) < WORDMARK_APCA_MIN) {
+                finalStyle = { color: fallbackFor() };
               }
             }
             return (
-              <span key={i} style={effective ? { color: effective } : undefined}>
+              <span key={i} style={Object.keys(finalStyle).length ? finalStyle : undefined}>
                 {s.text}
               </span>
             );

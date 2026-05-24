@@ -21,6 +21,10 @@
  * successor to WCAG 2.x contrast and is what the brand card uses
  * for the on-color foreground decision and the dark-theme generator.
  */
+// culori has no @types/culori published. Ambient declarations live
+// at workspace-root /types/culori.d.ts; every package's tsconfig
+// includes the workspace types dir so cross-package builds (e.g.
+// auth → core) pick up the declarations consistently.
 import { oklch, formatHex, parse, wcagContrast } from 'culori';
 import type { RungName } from './schema';
 
