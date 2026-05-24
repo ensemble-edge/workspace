@@ -1137,13 +1137,24 @@ function TierRow({ tier, onChanged }: { tier: AiTier; onChanged: () => void }) {
       const r = await authedFetch(`/_ensemble/ai/tiers/${tier.name}/create-route`, {
         method: 'POST',
       });
-      const body = (await r.json()) as { ok?: boolean; error?: string };
+      // v0.1.67: the service returns `.message` (and optionally
+      // `.manual_url`), NOT `.error`. The prior shape mismatch made
+      // every failure show the generic fallback. Surface the real
+      // message in the toast so operators see the actual Cloudflare
+      // error (e.g. "API token does not have AI Gateway: Edit
+      // permission") without having to hover the info icon.
+      const body = (await r.json()) as {
+        ok?: boolean;
+        message?: string;
+        error?: string;
+        manual_url?: string;
+      };
       if (r.ok && body.ok) {
         toast.success(`Route ${tier.gateway_route} provisioned`);
       } else {
         toast.error('Provisioning failed', {
           description:
-            body.error ?? 'See the info icon next to the tier for details.',
+            body.message ?? body.error ?? 'See the info icon next to the tier for details.',
         });
       }
       onChanged();

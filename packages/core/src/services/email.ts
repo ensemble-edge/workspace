@@ -155,18 +155,44 @@ async function verifyViaCloudflare(env: Env, workspaceId: string): Promise<Verif
   if (!domain) return { status: 'failed', message: 'Sending domain not set' };
   if (!accountId || !cfToken) return { status: 'failed', message: 'Connection (Cloudflare) credentials not set' };
 
-  // Check that the zone exists and has DKIM/SPF records.
-  // First, find the zone id for the domain.
-  const zoneR = await fetch(
-    `https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent(domain)}`,
-    { headers: { Authorization: `Bearer ${cfToken}` } },
-  );
-  if (!zoneR.ok) return { status: 'failed', message: `Cloudflare API: ${zoneR.status}` };
-  const zoneBody = await zoneR.json<{ result?: Array<{ id: string }> }>();
-  const zone = zoneBody.result?.[0];
-  if (!zone) return { status: 'failed', message: `No zone found for ${domain} in this account` };
+  // Find the zone that owns this domain. Cloudflare zones are
+  // registered at the registrable-domain level (curalisto.com), not
+  // per-subdomain. A sending domain like `io.curalisto.com` lives
+  // as DNS records under the parent zone, so we walk up labels until
+  // we find a zone that exists in the account.
+  //
+  // v0.1.67: prior versions only queried the exact domain, which
+  // 404'd for every subdomain sender — operators saw
+  // "No zone found for io.curalisto.com in this account" with no
+  // hint that they should retry against the root.
+  async function findZone(name: string): Promise<{ id: string; name: string } | null> {
+    let candidate = name;
+    while (candidate.includes('.')) {
+      const r = await fetch(
+        `https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent(candidate)}`,
+        { headers: { Authorization: `Bearer ${cfToken}` } },
+      );
+      if (!r.ok) return null;
+      const body = await r.json<{ result?: Array<{ id: string; name: string }> }>();
+      const z = body.result?.[0];
+      if (z) return z;
+      candidate = candidate.slice(candidate.indexOf('.') + 1);
+    }
+    return null;
+  }
+  const zone = await findZone(domain);
+  if (!zone) {
+    return {
+      status: 'failed',
+      message: `No Cloudflare zone matches ${domain} (or any parent) in this account. Add the zone in Cloudflare DNS first.`,
+    };
+  }
 
-  // Look for SPF (TXT containing "v=spf1") and DKIM (subdomains like *_domainkey)
+  // Look for SPF (TXT containing "v=spf1") and DKIM (subdomains like
+  // *_domainkey). DNS records are scoped to the parent zone but their
+  // `name` field reflects the full subdomain, so subdomain senders
+  // get correctly evaluated against records like
+  // `io.curalisto.com` TXT v=spf1 / `default._domainkey.io.curalisto.com`.
   const dnsR = await fetch(
     `https://api.cloudflare.com/client/v4/zones/${zone.id}/dns_records?type=TXT&per_page=200`,
     { headers: { Authorization: `Bearer ${cfToken}` } },
@@ -175,11 +201,21 @@ async function verifyViaCloudflare(env: Env, workspaceId: string): Promise<Verif
   const dnsBody = await dnsR.json<{ result?: Array<{ name: string; content: string }> }>();
   const records = dnsBody.result ?? [];
 
-  const hasSpf = records.some((r) => r.content.includes('v=spf1'));
-  const hasDkim = records.some((r) => r.name.includes('_domainkey'));
+  // v0.1.67: scope the SPF/DKIM checks to the sending domain
+  // specifically. The zone may be the parent (curalisto.com) but the
+  // sender is the subdomain (io.curalisto.com) — we only want
+  // records that match the sending domain, not unrelated SPF records
+  // on the root.
+  const domainLower = domain.toLowerCase();
+  const matchesDomain = (r: { name: string }) => r.name.toLowerCase() === domainLower;
+  const matchesDkim = (r: { name: string }) =>
+    r.name.toLowerCase().includes('_domainkey') &&
+    r.name.toLowerCase().endsWith('.' + domainLower);
+  const hasSpf = records.some((r) => matchesDomain(r) && r.content.includes('v=spf1'));
+  const hasDkim = records.some(matchesDkim);
   if (hasSpf && hasDkim) return { status: 'verified' };
   if (hasSpf || hasDkim) return { status: 'pending', message: `${hasSpf ? '' : 'SPF missing. '}${hasDkim ? '' : 'DKIM missing.'}` };
-  return { status: 'pending', message: 'No SPF or DKIM records found. Configure them in Cloudflare DNS.' };
+  return { status: 'pending', message: `No SPF or DKIM records found for ${domain}. Configure them in Cloudflare DNS under zone ${zone.name}.` };
 }
 
 async function verifyViaResend(env: Env, workspaceId: string): Promise<VerifyResult> {

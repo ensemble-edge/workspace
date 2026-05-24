@@ -246,9 +246,15 @@ export async function provisionTierRoute(
       },
       body: JSON.stringify({
         name: tier.gateway_route,
-        // Initial config is minimal; operator configures the model
-        // mapping in the Cloudflare dashboard.
         enabled: true,
+        // v0.1.67: CF AI Gateway routes API requires an `elements`
+        // array (each element is a provider+model target). Empty is
+        // accepted at creation time — the operator wires the actual
+        // targets in the Cloudflare dashboard after provisioning.
+        // Without this field CF returns 400 code=7001 "Required"
+        // at body.elements, which was the silent failure operators
+        // hit on every "Provision" click.
+        elements: [],
       }),
     },
   );
