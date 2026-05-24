@@ -247,7 +247,9 @@ export function ColorsTab() {
         neutralPalette.hueMode === 'custom'
           ? (neutralPalette.main || clientNeutralMainFromHueMode('branded', primary.main))
           : clientNeutralMainFromHueMode(neutralPalette.hueMode, primary.main);
-      neutral = clientDeriveRungs(effectiveMain, neutralPalette.overrides);
+      // v0.1.58: neutral uses the dedicated derivation (fixed L
+      // anchors at the extremes), not the brand-palette logic.
+      neutral = clientDeriveNeutralRungs(effectiveMain, neutralPalette.overrides);
     }
     const palettes: ResolvedPalettes = { primary, secondary, accent, neutral };
     const gradients: BrandCardGradient[] = draft.gradients.map((g) => ({
@@ -1029,6 +1031,40 @@ function clientDeriveRungs(mainHex: string, overrides: Palette['overrides']): Re
     bright: overrides?.bright ?? clientDeriveRung(mainHex, 'bright'),
     pastel: overrides?.pastel ?? clientDeriveRung(mainHex, 'pastel'),
     faded:  overrides?.faded  ?? clientDeriveRung(mainHex, 'faded'),
+  };
+}
+
+/**
+ * Client mirror of services/brand-colors/derive.ts's
+ * deriveNeutralRungs. Fixed L anchors at the extremes; only Bright
+ * scales with Main. Used by the live preview so the operator sees
+ * the correct neutral output (Faded ≈ #FAF8F4 for Curalisto) as
+ * they type, not the brand-palette-derived intermediate values.
+ */
+const NEUTRAL_L_ANCHORS = { dark: 0.14, pastel: 0.83, faded: 0.97 } as const;
+const NEUTRAL_C_MUL = { dark: 0.70, bright: 0.85, pastel: 0.50, faded: 0.15 } as const;
+
+function clientDeriveNeutralRung(mainHex: string, rung: Exclude<RungName, 'main'>, L_main: number, C: number, h: number): string {
+  let L: number;
+  let cMul: number;
+  if (rung === 'dark')   { L = NEUTRAL_L_ANCHORS.dark;   cMul = NEUTRAL_C_MUL.dark; }
+  else if (rung === 'pastel') { L = NEUTRAL_L_ANCHORS.pastel; cMul = NEUTRAL_C_MUL.pastel; }
+  else if (rung === 'faded')  { L = NEUTRAL_L_ANCHORS.faded;  cMul = NEUTRAL_C_MUL.faded; }
+  else /* bright */ { L = (L_main + NEUTRAL_L_ANCHORS.pastel) / 2; cMul = NEUTRAL_C_MUL.bright; }
+  const nextC = Math.max(0, C * cMul);
+  const lab = oklchToOklab({ L, C: nextC, h });
+  return linearToSrgbHex(oklabToLinear(lab));
+}
+
+function clientDeriveNeutralRungs(mainHex: string, overrides: Palette['overrides']): Record<RungName, string> {
+  const lab = linearToOklab(srgbToLinear(mainHex));
+  const lch = oklabToOklch(lab);
+  return {
+    dark:   overrides?.dark   ?? clientDeriveNeutralRung(mainHex, 'dark',   lch.L, lch.C, lch.h),
+    main:   mainHex,
+    bright: overrides?.bright ?? clientDeriveNeutralRung(mainHex, 'bright', lch.L, lch.C, lch.h),
+    pastel: overrides?.pastel ?? clientDeriveNeutralRung(mainHex, 'pastel', lch.L, lch.C, lch.h),
+    faded:  overrides?.faded  ?? clientDeriveNeutralRung(mainHex, 'faded',  lch.L, lch.C, lch.h),
   };
 }
 

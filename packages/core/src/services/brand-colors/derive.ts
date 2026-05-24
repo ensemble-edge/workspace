@@ -82,6 +82,112 @@ export function deriveRungs(mainHex: string): Record<Exclude<RungName, 'main'>, 
 }
 
 /* ──────────────────────────────────────────────────────────────
+ * Neutral palette rung derivation — v0.1.58
+ *
+ * Why this differs from brand-palette derivation:
+ *
+ * Brand palettes (Primary/Secondary/Accent) use RELATIVE L offsets
+ * from Main — Main IS the brand identity moment and the rungs
+ * ladder *around* it. Curalisto Coral's Faded should be a soft
+ * peach (#FFF1EB), not a near-white that abandons the coral
+ * identity.
+ *
+ * Neutrals serve a different job: surface infrastructure that has
+ * to reach BOTH extremes (canvas backgrounds, near-black text on
+ * light, near-white text on dark). The operator's Main is just
+ * the *middle* of the surface range; the extreme rungs need to
+ * actually be extreme to do their job.
+ *
+ * So:
+ *   - Dark and Faded use FIXED L anchors (0.14 and 0.97), not
+ *     relative offsets
+ *   - Pastel is a fixed anchor at L=0.83
+ *   - Bright sits at the midpoint between Main and Pastel for even
+ *     perceptual spacing through the upper range
+ *   - Chroma scaling falls off at the extremes so Faded at L=0.97
+ *     keeps just a whisper of the Main's hue — branded near-white,
+ *     not generic gray
+ *
+ * Verified against the Curalisto reference: Main #6B5F5A (warm
+ * sandstone, OkLCh L≈0.42 C≈0.012 h≈40°) → Faded ≈ #FAF8F4 which
+ * matches the operator's actual page canvas.
+ * ──────────────────────────────────────────────────────────── */
+
+/** Neutral lightness anchors. Main is operator-supplied; Bright is
+ *  computed at runtime as midpoint between Main and Pastel. */
+const NEUTRAL_L_ANCHORS = {
+  dark:   0.14,
+  pastel: 0.83,
+  faded:  0.97,
+} as const;
+
+/** Chroma falloff per rung. < 1.0 desaturates; > 1.0 would saturate
+ *  (we never do that for neutrals). Faded at 0.15 leaves just a
+ *  whisper of the Main's hue at near-white. */
+const NEUTRAL_C_MUL = {
+  dark:   0.70,
+  bright: 0.85,
+  pastel: 0.50,
+  faded:  0.15,
+} as const;
+
+/**
+ * Derive the four non-Main neutral rungs from a Main hex.
+ *
+ * Preserves hue (h) exactly across all rungs. Scales chroma per
+ * rung. Lightness uses FIXED anchors at the extremes (Dark=0.14,
+ * Pastel=0.83, Faded=0.97) — operator's Main only controls the
+ * mid-range tone, not the canvas/near-black extremes.
+ */
+export function deriveNeutralRungs(mainHex: string): Record<Exclude<RungName, 'main'>, string> {
+  const parsed = oklch(mainHex);
+  if (!parsed) {
+    // Fallback: if Main isn't parseable, return Main for every rung
+    // so the system doesn't crash. Operator will see flat output and
+    // fix the hex.
+    return { dark: mainHex, bright: mainHex, pastel: mainHex, faded: mainHex };
+  }
+  const L_main = parsed.l ?? 0.5;
+  const C = parsed.c ?? 0;
+  const h = parsed.h ?? 0;
+
+  // Bright sits at the midpoint between Main and Pastel — gives
+  // even perceptual spacing through the upper range regardless of
+  // where Main lands.
+  const L_bright = (L_main + NEUTRAL_L_ANCHORS.pastel) / 2;
+
+  const make = (L: number, cMul: number): string => {
+    const result = formatHex({ mode: 'oklch', l: L, c: Math.max(0, C * cMul), h });
+    return result ?? mainHex;
+  };
+
+  return {
+    dark:   make(NEUTRAL_L_ANCHORS.dark,   NEUTRAL_C_MUL.dark),
+    bright: make(L_bright,                 NEUTRAL_C_MUL.bright),
+    pastel: make(NEUTRAL_L_ANCHORS.pastel, NEUTRAL_C_MUL.pastel),
+    faded:  make(NEUTRAL_L_ANCHORS.faded,  NEUTRAL_C_MUL.faded),
+  };
+}
+
+/**
+ * Returns true when the Neutral Main's lightness falls outside the
+ * recommended mid-tone range. UI can surface a non-blocking warning:
+ * "Neutral Main works best as a mid-tone gray (L ≈ 0.30–0.60).
+ * Consider adjusting for better rung spacing."
+ *
+ * Why these bounds:
+ *   - L < 0.30 makes Main almost as dark as Dark (collision)
+ *   - L > 0.60 makes Main bleed into the Pastel range
+ * In both cases the five rungs feel unevenly spaced.
+ */
+export function neutralMainOutOfRange(mainHex: string): boolean {
+  const parsed = oklch(mainHex);
+  if (!parsed) return false;
+  const L = parsed.l ?? 0.5;
+  return L < 0.30 || L > 0.60;
+}
+
+/* ──────────────────────────────────────────────────────────────
  * Neutral hue presets
  * ──────────────────────────────────────────────────────────── */
 

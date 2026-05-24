@@ -9,7 +9,7 @@
  * funnels through here so the resolution logic lives in exactly
  * one place.
  */
-import { deriveRung, deriveRungs, neutralMainFromHueMode, hueBiasedForeground, pickHigherContrast, contrastRatio, apcaContrast } from './derive';
+import { deriveRung, deriveRungs, deriveNeutralRungs, neutralMainFromHueMode, hueBiasedForeground, pickHigherContrast, contrastRatio, apcaContrast } from './derive';
 import {
   isPaletteRungRef, isHex, parseRungRef,
   type BrandColorsDoc, type Palette, type NeutralPalette,
@@ -60,16 +60,20 @@ function resolveNeutral(n: NeutralPalette, primaryMainHex: string): ResolvedPale
   //   custom  → operator's stored `main` field, used as-is
   //   else    → computed from hueMode + primary's hue (for 'branded')
   //
-  // The other rungs (Dark/Bright/Pastel/Faded) always derive from
-  // the effective Main via the standard OkLCh offsets, with per-
-  // rung overrides taking priority when present.
+  // v0.1.58: rungs derive via deriveNeutralRungs (NOT the brand-
+  // palette deriveRungs). Neutrals need fixed L anchors at the
+  // extremes — Faded at L=0.97, Dark at L=0.14 — so canvas
+  // backgrounds and near-black text actually reach those values.
+  // The previous brand-rule derivation produced Faded ≈ L 0.87
+  // (visibly gray instead of near-white) and Dark ≈ L 0.21
+  // (charcoal instead of near-black).
   let effectiveMain: string;
   if (n.hueMode === 'custom') {
     effectiveMain = n.main || neutralMainFromHueMode('branded', primaryMainHex);
   } else {
     effectiveMain = neutralMainFromHueMode(n.hueMode, primaryMainHex);
   }
-  const derived = deriveRungs(effectiveMain);
+  const derived = deriveNeutralRungs(effectiveMain);
   return {
     dark:   n.overrides?.dark   ?? derived.dark,
     main:   effectiveMain,

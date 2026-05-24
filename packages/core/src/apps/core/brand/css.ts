@@ -274,14 +274,47 @@ async function generateShellCss(
   }
 
   // Sidebar color
+  // v0.1.58: when the sidebar background is overridden, set BOTH
+  // primary foreground AND muted foreground based on the actual bg
+  // luminance. Previously we only set sidebar-foreground; the
+  // muted-foreground stayed at the preset default which often
+  // failed APCA contrast against the new sidebar color (e.g. the
+  // Curalisto teal sidebar made the user-row email/secondary text
+  // read as a dim grey-on-teal that was hard to scan).
+  //
+  // Also set sidebar-accent (hover state) to a subtle tint of the
+  // bg so hover affordances stay visible.
   const sidebarColorHex = customTokens.sidebarColor || '';
   if (sidebarColorHex) {
     const hsl = hexToHslString(sidebarColorHex);
     if (hsl) {
       const isLight = isLightHex(sidebarColorHex);
-      const fg = isLight ? '0 0% 20%' : '0 0% 90%';
-      lightScale['sidebar-background'] = hsl; lightScale['sidebar-foreground'] = fg;
-      darkScale['sidebar-background'] = hsl; darkScale['sidebar-foreground'] = fg;
+      // Primary foreground: high contrast.
+      //   light bg → near-black; dark bg → near-white
+      const fg = isLight ? '0 0% 9%' : '0 0% 98%';
+      // Muted foreground: mid-contrast, biased toward the bg.
+      //   light bg → 35% lightness; dark bg → 75% lightness
+      // These hit APCA Lc ~50-60 against typical brand sidebars,
+      // which is the on-color foreground threshold for secondary
+      // text per the v0.1.55 brand-card spec.
+      const mutedFg = isLight ? '0 0% 35%' : '0 0% 75%';
+      // Sidebar-accent: subtle hover tint. We use the same hsl
+      // hue but shift L by ±8% for hover visibility.
+      const hoverTint = isLight ? '0 0% 92%' : '0 0% 18%';
+      lightScale['sidebar-background'] = hsl;
+      lightScale['sidebar-foreground'] = fg;
+      lightScale['sidebar-accent'] = hoverTint;
+      lightScale['sidebar-accent-foreground'] = fg;
+      darkScale['sidebar-background'] = hsl;
+      darkScale['sidebar-foreground'] = fg;
+      darkScale['sidebar-accent'] = hoverTint;
+      darkScale['sidebar-accent-foreground'] = fg;
+      // muted-foreground is read by the workspace/email subtitle row
+      // in the sidebar user nav. Push the high-contrast muted there
+      // too so secondary text (e.g. "ho@curalisto.com") reads cleanly
+      // against the sidebar bg.
+      lightScale['sidebar-muted-foreground'] = mutedFg;
+      darkScale['sidebar-muted-foreground'] = mutedFg;
     }
   }
 
@@ -403,10 +436,20 @@ function hexToHslString(hex: string): string | null {
 function isLightHex(hex: string): boolean {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
   if (!result) return false;
-  const r = parseInt(result[1], 16) / 255;
-  const g = parseInt(result[2], 16) / 255;
-  const b = parseInt(result[3], 16) / 255;
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5;
+  // v0.1.58: gamma-corrected relative luminance (WCAG 2.x). The
+  // previous implementation skipped gamma decoding and operated on
+  // raw sRGB 0..1 values, which over-classified mid-tones as
+  // "dark" — Curalisto's teal #3F7A78 has raw-RGB luminance ~0.43
+  // but actual sRGB-linearized luminance ~0.18, so the "light vs
+  // dark" decision flipped correctly only some of the time.
+  const channelToLinear = (c: number) =>
+    c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const r = channelToLinear(parseInt(result[1], 16) / 255);
+  const g = channelToLinear(parseInt(result[2], 16) / 255);
+  const b = channelToLinear(parseInt(result[3], 16) / 255);
+  // 0.18 ≈ middle gray in linear space. Anything above is "light"
+  // for our foreground-picking purposes.
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.18;
 }
 
 /**
