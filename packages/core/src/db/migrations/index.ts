@@ -16,6 +16,7 @@ import { migration as m008 } from './008_ai_tier_last_error';
 import { migration as m009 } from './009_workspace_locales';
 import { migration as m010 } from './010_workspace_settings';
 import { migration as m011 } from './011_ai_tier_provider';
+import { migration as m012 } from './012_workspace_api_keys';
 
 /**
  * All migrations in order.
@@ -33,4 +34,5 @@ export const migrations: Migration[] = [
   m009,
   m010,
   m011,
+  m012,
 ];

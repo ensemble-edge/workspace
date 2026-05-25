@@ -18,9 +18,11 @@ import { useHashTab } from '../../../hooks/useHashTab';
 import { GeneralTab } from './GeneralTab';
 import { AppearanceTab } from './AppearanceTab';
 import { ConnectionsTab } from './ConnectionsTab';
+import { ApiKeysTab } from './ApiKeysTab';
+import { AuditLogTab } from './AuditLogTab';
 import { DangerZoneTab } from './DangerZoneTab';
 
-const TABS = ['general', 'appearance', 'connections', 'danger'] as const;
+const TABS = ['general', 'appearance', 'connections', 'api', 'audit', 'danger'] as const;
 
 export function AdminPage() {
   const [tab, setTab] = useHashTab('general', TABS);
@@ -39,12 +41,16 @@ export function AdminPage() {
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
           <TabsTrigger value="connections">Connections</TabsTrigger>
+          <TabsTrigger value="api">API</TabsTrigger>
+          <TabsTrigger value="audit">Audit Log</TabsTrigger>
           <TabsTrigger value="danger">Danger Zone</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general"><GeneralTab /></TabsContent>
         <TabsContent value="appearance"><AppearanceTab /></TabsContent>
         <TabsContent value="connections"><ConnectionsTab /></TabsContent>
+        <TabsContent value="api"><ApiKeysTab /></TabsContent>
+        <TabsContent value="audit"><AuditLogTab /></TabsContent>
         <TabsContent value="danger"><DangerZoneTab /></TabsContent>
       </Tabs>
     </div>

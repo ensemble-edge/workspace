@@ -10,6 +10,7 @@ import type { Context, Next, MiddlewareHandler } from 'hono';
 import type { Env, ContextVariables, JWTPayload, User, Membership, Role } from '../types';
 import { getAuthCookies } from '../utils/cookies';
 import { verifyAccessToken, getJwtSecret } from '../utils/jwt';
+import { findApiKeyByPlaintext } from '../services/api-keys';
 
 /**
  * Auth middleware options.
@@ -45,6 +46,62 @@ export function auth(options: AuthMiddlewareOptions = {}): MiddlewareHandler<{
   const { required = true } = options;
 
   return async (c: Context<{ Bindings: Env; Variables: ContextVariables }>, next: Next) => {
+    // v0.1.76: bearer auth check runs BEFORE the cookie check. If the
+    // caller sent Authorization: Bearer wks_..., authenticate via the
+    // workspace_api_keys table and set the same user/membership context
+    // the UI would have from a session cookie. The workspace's existing
+    // role/permission checks then apply uniformly to bearer + cookie
+    // callers. The bearer's creator is treated as the acting user; the
+    // bearer's id is also stashed in c.set('apiKey') for audit logging.
+    const authzHeader = c.req.header('Authorization');
+    if (authzHeader?.startsWith('Bearer wks_')) {
+      const plaintext = authzHeader.slice('Bearer '.length).trim();
+      const apiKey = await findApiKeyByPlaintext(c.env, plaintext);
+      if (apiKey) {
+        // Resolve the key's creator + their workspace membership so we
+        // can produce the same User/Membership shape cookie auth uses.
+        const memberRow = await c.env.DB.prepare(
+          `SELECT u.id, u.email, u.handle, m.role
+             FROM users u
+             JOIN memberships m ON m.user_id = u.id
+            WHERE u.id = ? AND m.workspace_id = ?`
+        ).bind(apiKey.created_by_user_id, apiKey.workspace_id).first<{
+          id: string; email: string; handle: string | null; role: string;
+        }>();
+        // If the creator was removed from the workspace, treat the key
+        // as inactive. The key row stays around for audit but auth fails.
+        if (memberRow) {
+          const user: User = {
+            id: memberRow.id,
+            email: memberRow.email,
+            handle: memberRow.handle,
+            displayName: null,
+            avatarUrl: null,
+            locale: 'en',
+            createdAt: '',
+          };
+          const membership: Membership = {
+            userId: memberRow.id,
+            workspaceId: apiKey.workspace_id,
+            role: memberRow.role as Role,
+            createdAt: '',
+          };
+          c.set('user', user);
+          c.set('membership', membership);
+          c.set('apiKey', { id: apiKey.id, name: apiKey.name });
+          await next();
+          return;
+        }
+      }
+      // Bearer header was present but token invalid/revoked/expired or
+      // creator removed. Fail closed — don't fall through to cookie.
+      if (required) {
+        return c.json({ error: 'Invalid or revoked API key' }, 401);
+      }
+      await next();
+      return;
+    }
+
     // Get token from cookie
     const { accessToken } = getAuthCookies(c.req.header('Cookie'));
 

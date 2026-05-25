@@ -243,6 +243,14 @@ export interface ContextVariables {
   jwtPayload: JWTPayload | null;
   /** Request ID for logging */
   requestId: string;
+  /**
+   * Present when the request was authenticated via a workspace API key
+   * (Authorization: Bearer wks_...). Null/undefined for cookie-auth.
+   * The user/membership context still gets populated from the key's
+   * creator + their workspace role, so role-based middleware works
+   * uniformly across cookie and bearer auth.
+   */
+  apiKey?: { id: string; name: string } | null;
 }
 
 /**

@@ -25,6 +25,7 @@ import { getJwtSecret } from '../utils/jwt';
 import { sendEmail } from '../services/email';
 import { renderMagicLinkEmail } from '../services/email-templates';
 import { getCredential, getWorkspacePublicUrl } from '../services/credentials';
+import { recordAudit } from '../services/audit-log';
 
 /**
  * Create auth router.
@@ -84,6 +85,16 @@ export function createAuthRoutes() {
         append: true,
       });
 
+      // v0.1.76: audit successful logins.
+      await recordAudit(c.env, {
+        workspaceId: workspace.id,
+        action: 'auth.login',
+        actorId: result.user.id,
+        actorHandle: result.user.email,
+        ipAddress: c.req.header('cf-connecting-ip') ?? null,
+        details: { method: 'password' },
+      });
+
       return c.json({
         user: result.user,
         membership: result.membership,
@@ -93,6 +104,22 @@ export function createAuthRoutes() {
 
       // Don't reveal if email exists or not
       if (message === 'Invalid credentials' || message === 'User is not a member of this workspace') {
+        // v0.1.76: audit failed login attempts (the email is logged as
+        // actor_handle even when it doesn't match a real user, so
+        // operators can spot brute-force attempts).
+        const ws = c.get('workspace');
+        if (ws?.id) {
+          try {
+            const failBody = await c.req.json<{ email?: string }>().catch(() => ({} as { email?: string }));
+            await recordAudit(c.env, {
+              workspaceId: ws.id,
+              action: 'auth.failed_login',
+              actorHandle: failBody.email ?? null,
+              ipAddress: c.req.header('cf-connecting-ip') ?? null,
+              details: { reason: message, method: 'password' },
+            });
+          } catch { /* never throw from audit */ }
+        }
         return c.json({ error: 'Invalid email or password' }, 401);
       }
 
@@ -116,6 +143,20 @@ export function createAuthRoutes() {
         });
 
         await authService.logout(refreshToken);
+      }
+
+      // v0.1.76: audit logout. The auth middleware should have set user
+      // context if the session was valid; we use it for the actor.
+      const ws = c.get('workspace');
+      const user = c.get('user');
+      if (ws?.id) {
+        await recordAudit(c.env, {
+          workspaceId: ws.id,
+          action: 'auth.logout',
+          actorId: user?.id ?? null,
+          actorHandle: user?.email ?? null,
+          ipAddress: c.req.header('cf-connecting-ip') ?? null,
+        });
       }
 
       // Clear all auth cookies
@@ -418,6 +459,16 @@ export function createAuthRoutes() {
     const cookieOptions = getCookieOptionsForEnv(c.env.ENVIRONMENT, c.req.url);
     c.header('Set-Cookie', setAccessTokenCookie(session.accessToken, cookieOptions), { append: true });
     c.header('Set-Cookie', setRefreshTokenCookie(session.refreshToken, cookieOptions), { append: true });
+
+    // v0.1.76: audit magic-link login.
+    await recordAudit(c.env, {
+      workspaceId: workspace.id,
+      action: 'auth.login',
+      actorId: row.id,
+      actorHandle: row.email,
+      ipAddress: c.req.header('cf-connecting-ip') ?? null,
+      details: { method: 'magic_link' },
+    });
 
     return c.redirect('/');
   });

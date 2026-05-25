@@ -1,4 +1,5 @@
 import type { CoreAppDefinition } from '../../types';
+import { registerAdminRoutes } from './routes';
 
 export const adminApp: CoreAppDefinition = {
   manifest: {
@@ -14,7 +15,5 @@ export const adminApp: CoreAppDefinition = {
       path: '/settings',
     },
   },
-  registerRoutes: () => {
-    // TODO: Phase 2 — workspace settings CRUD routes
-  },
+  registerRoutes: registerAdminRoutes,
 };

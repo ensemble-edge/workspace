@@ -660,7 +660,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.75-ai-gateway-hyphen-route-names',
+      buildFingerprint: 'v0.1.76-api-keys-audit-log-expanded',
       timestamp: new Date().toISOString(),
     });
   });
@@ -954,6 +954,18 @@ export function createCredentialsRoutes(): App {
     await setCredential(c.env, workspace.id, c.req.param('key'), body.category, body.value, {
       isSecret: body.is_secret,
       updatedBy: user?.id,
+    });
+
+    // v0.1.76: audit credential changes. We log the KEY (e.g.
+    // "cloudflare_api_token", "email_sending_domain") but never the
+    // value — secrets must not appear in audit details.
+    const { recordAudit, auditContext } = await import('../services/audit-log');
+    await recordAudit(c.env, {
+      ...auditContext(c),
+      action: 'credentials.updated',
+      resourceType: 'credential',
+      resourceId: c.req.param('key'),
+      details: { category: body.category, is_secret: body.is_secret },
     });
 
     // Side-effect: saving the AI Gateway namespace seeds default tiers.
@@ -1642,7 +1654,19 @@ export function createCredentialsRoutes(): App {
     if (check instanceof Response) return check;
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
-    const result = await provisionTierRoute(c.env, workspace.id, c.req.param('name'));
+    const tierName = c.req.param('name');
+    const result = await provisionTierRoute(c.env, workspace.id, tierName);
+    // v0.1.76: audit successful provisioning (skip noisy failures —
+    // they're already persisted in workspace_ai_tiers.last_error).
+    if (result.ok) {
+      const { recordAudit, auditContext } = await import('../services/audit-log');
+      await recordAudit(c.env, {
+        ...auditContext(c),
+        action: 'ai_tier.provisioned',
+        resourceType: 'ai_tier',
+        resourceId: tierName,
+      });
+    }
     return c.json(result);
   });
 
