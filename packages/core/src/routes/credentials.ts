@@ -665,8 +665,8 @@ export function createCredentialsRoutes(): App {
   // Old path kept as alias for back-compat with any operator scripts.
   const versionPayload = () => ({
     package: '@ensemble-edge/workspace',
-    version: '0.1.77',
-    buildFingerprint: 'v0.1.77-audit-consolidation-version-endpoint',
+    version: '0.1.78',
+    buildFingerprint: 'v0.1.78-sidebar-audit-removed-scope-tests-expanded',
     timestamp: new Date().toISOString(),
   });
   app.get('/_ensemble/version', (c) => c.json(versionPayload()));
@@ -1111,7 +1111,8 @@ export function createCredentialsRoutes(): App {
       });
     }
 
-    // 4. AI Gateway — list gateways on the account.
+    // 4a. AI Gateway:Edit — list gateways (management scope).
+    // Required to create/configure routes (provisioning step).
     if (accountId) {
       const aiR = await fetch(
         `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai-gateway/gateways?per_page=1`,
@@ -1122,11 +1123,103 @@ export function createCredentialsRoutes(): App {
         ok: aiR.ok,
         detail: aiR.ok
           ? 'Token can list AI Gateway namespaces.'
-          : `HTTP ${aiR.status} — token likely missing AI Gateway scope.`,
+          : `HTTP ${aiR.status} — token likely missing AI Gateway:Edit scope.`,
       });
     } else {
       scopes.push({
         name: 'AI Gateway:Edit',
+        ok: false,
+        detail: 'Cannot test — set the Cloudflare Account ID first.',
+      });
+    }
+
+    // 4b. AI Gateway:Run — runtime dispatch scope. v0.1.78: separate
+    // permission from Edit. Required for the workspace's tier proxy
+    // (/_ensemble/ai/call/:tier) and "Test tier" button. Without it,
+    // dispatch returns code 2005 "Failed to get response from provider"
+    // which is misleading — the actual cause is missing Run scope.
+    // No documented "verify scope" endpoint exists; we probe by listing
+    // gateways via the runtime base (which requires Run). If that
+    // succeeds → has Run; if 401/403 → missing.
+    if (accountId) {
+      // The runtime endpoint requires a real route to call. We don't
+      // have a guaranteed one, so we probe the gateways' logs endpoint
+      // which CF treats as a Run-permission-required read.
+      const gatewayName = await getCredential(c.env, workspace.id, 'ai_gateway_name');
+      if (gatewayName) {
+        const runR = await fetch(
+          `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai-gateway/gateways/${gatewayName}/logs?per_page=1`,
+          { headers: auth },
+        );
+        scopes.push({
+          name: 'AI Gateway:Run',
+          ok: runR.ok,
+          detail: runR.ok
+            ? 'Token can dispatch through AI Gateway routes (runtime).'
+            : `HTTP ${runR.status} — token missing AI Gateway:Run scope. Required for the "Test tier" button and guest-app AI calls.`,
+        });
+      } else {
+        scopes.push({
+          name: 'AI Gateway:Run',
+          ok: false,
+          detail: 'Cannot test — set the AI Gateway name first.',
+        });
+      }
+    } else {
+      scopes.push({
+        name: 'AI Gateway:Run',
+        ok: false,
+        detail: 'Cannot test — set the Cloudflare Account ID first.',
+      });
+    }
+
+    // 4c. Workers AI:Read — required for the workers-ai tier provider
+    // to dispatch via the gateway. Token issued via the gateway
+    // dashboard's "Create authentication token" flow defaults to
+    // including this.
+    if (accountId) {
+      const waiR = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/models?per_page=1`,
+        { headers: auth },
+      );
+      scopes.push({
+        name: 'Workers AI:Read',
+        ok: waiR.ok,
+        detail: waiR.ok
+          ? 'Token can list Workers AI models.'
+          : `HTTP ${waiR.status} — token missing Workers AI:Read scope. Required for workers-ai tier dispatch.`,
+      });
+    } else {
+      scopes.push({
+        name: 'Workers AI:Read',
+        ok: false,
+        detail: 'Cannot test — set the Cloudflare Account ID first.',
+      });
+    }
+
+    // 4d. Email Sending:Write — Cloudflare's new transactional email
+    // product (public beta April 2026). Required for the worker's
+    // env.SEND_EMAIL.send() binding to dispatch through the Email
+    // Sending product (not the legacy Email Routing reply path).
+    if (accountId) {
+      const esR = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/email-security/settings`,
+        { headers: auth },
+      );
+      // The /email-security endpoint requires Email Sending scope to
+      // read. If it 401/403s, token lacks it. Other errors may be
+      // benign (e.g. 404 if no settings yet).
+      const esOk = esR.ok || esR.status === 404;
+      scopes.push({
+        name: 'Email Sending:Write',
+        ok: esOk,
+        detail: esOk
+          ? 'Token can access Email Sending product.'
+          : `HTTP ${esR.status} — token may be missing Email Sending scope. Required for outbound email via env.SEND_EMAIL.`,
+      });
+    } else {
+      scopes.push({
+        name: 'Email Sending:Write',
         ok: false,
         detail: 'Cannot test — set the Cloudflare Account ID first.',
       });

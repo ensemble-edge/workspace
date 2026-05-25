@@ -426,10 +426,11 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
           { id: 'people', label: 'People', icon: 'users', path: '/people' },
           { id: 'brand', label: 'Brand', icon: 'palette', path: '/brand' },
           { id: 'apps-manage', label: 'Apps', icon: 'grid-3x3', path: '/apps' },
-          { id: 'auth', label: 'Auth & Security', icon: 'shield', path: '/auth' },
-          { id: 'audit', label: 'Audit Log', icon: 'scroll-text', path: '/audit' },
           { id: 'knowledge', label: 'Knowledge', icon: 'book-open', path: '/knowledge' },
-          { id: 'nav', label: 'Navigation', icon: 'panel-left', path: '/nav' },
+          // v0.1.78: audit log moved into Settings → Audit Log tab; no
+          // longer a sidebar entry. Auth & Security and Navigation were
+          // scaffolding placeholders without real pages; removed from
+          // sidebar pending real implementations.
           { id: 'settings', label: 'Settings', icon: 'settings', path: '/settings' },
         ],
       },
