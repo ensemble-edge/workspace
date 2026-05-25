@@ -259,12 +259,41 @@ export interface UseAIResult {
   call: (body: unknown) => Promise<{
     response: Response;
     data: unknown;
+    /** v0.1.83: convenience accessor — extracted reply text from common
+     *  provider shapes (OpenAI chat completion, Anthropic messages,
+     *  Workers AI generate). Empty string if no recognizable shape. */
+    text: string;
     fallback: string | null;
   }>;
   loading: boolean;
   error: string | null;
   /** If the workspace fell back from the requested tier, name of the tier used. */
   fallback: string | null;
+}
+
+/**
+ * Extract the assistant's reply text from a provider-shaped response.
+ * Knows OpenAI chat-completion, Anthropic messages, Workers AI bare
+ * generate. Returns '' when no recognizable text field is present.
+ * v0.1.83: matches the same helper in @ensemble-edge/sdk so both
+ * surfaces produce identical `result.text` for the same body.
+ */
+function extractAiText(data: unknown): string {
+  if (!data || typeof data !== 'object') return '';
+  const d = data as Record<string, unknown>;
+  const choices = d.choices as Array<{ message?: { content?: string } }> | undefined;
+  if (Array.isArray(choices) && choices[0]?.message?.content) {
+    return String(choices[0].message.content);
+  }
+  const content = d.content as Array<{ text?: string }> | undefined;
+  if (Array.isArray(content) && content[0]?.text) {
+    return String(content[0].text);
+  }
+  const result = d.result as { response?: string; translated_text?: string } | undefined;
+  if (result?.response) return String(result.response);
+  if (result?.translated_text) return String(result.translated_text);
+  if (typeof d.response === 'string') return d.response;
+  return '';
 }
 
 function useAI({ tier }: { tier: string }): UseAIResult {
@@ -299,7 +328,9 @@ function useAI({ tier }: { tier: string }): UseAIResult {
               : `AI call failed: ${response.status}`;
           setError(msg);
         }
-        return { response, data, fallback: fb };
+        // v0.1.83: add `text` convenience for the most common
+        // single-reply case. Identical to @ensemble-edge/sdk's useAI.
+        return { response, data, text: extractAiText(data), fallback: fb };
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'AI call failed';
         setError(msg);

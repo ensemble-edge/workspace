@@ -194,39 +194,58 @@ Returns `{ user, isAuthenticated, logout }`. Same `user` slice as
 Subscribe to workspace events (brand changes, sessions, etc.).
 Unchanged from earlier SDK versions.
 
-### `useAI(tier?)`
+### `useAI({ tier })`
 
 Call workspace-managed AI tiers (`smart` / `good` / `simple` / custom)
 without seeing provider credentials. The operator wires each tier
 name to a specific model in the workspace's Settings → Connections →
 AI Access tab; your guest app picks a tier by name.
 
+**Identical shape** to `@ensemble-edge/guest-runtime`'s `useAI` — code
+lifts cleanly between iframe-tier guests, component-tier guests, and
+external SDK consumers.
+
 ```ts
 import { useAI } from '@ensemble-edge/sdk';
 
 function Summarize() {
-  const ai = useAI('smart');
+  const ai = useAI({ tier: 'smart' });
 
   async function go(text: string) {
-    const result = await ai.run({
+    const { text: reply, data, fallback } = await ai.call({
       messages: [
         { role: 'system', content: 'Summarize concisely.' },
         { role: 'user', content: text },
       ],
       max_tokens: 256,
     });
-    return result.text;
+    return reply;
+    // Full provider response also available as `data`
   }
+
+  return <button disabled={ai.loading} onClick={() => go('...')}>
+    {ai.loading ? 'Thinking...' : 'Summarize'}
+  </button>;
 }
 ```
 
-Result shape:
-- `text: string` — the assistant's reply (first choice's content)
-- `model: string` — which underlying model actually served the response
-- `usage?: { prompt_tokens, completion_tokens, total_tokens }` — provider-reported
-- `raw: AiChatCompletion` — the full response body
-- `fallback_used: string | null` — set if the workspace fell back to a
-  different tier than requested (header passthrough)
+Hook return:
+- `call(body) → Promise<AiCallResult>` — send a chat-completion body
+- `loading: boolean` — true while a call is in flight
+- `error: string | null` — set on the most recent failure
+- `fallback: string | null` — set if the most recent call used a
+  fallback tier (the workspace served a different tier than requested)
+
+`AiCallResult` shape:
+- `text: string` — convenience accessor; the assistant's reply
+  extracted from common provider shapes (OpenAI chat completion,
+  Anthropic messages, Workers AI generate). Empty string for shapes
+  the SDK doesn't recognize — use `data` directly in that case.
+- `data: unknown` — the full parsed response body, provider-shaped.
+- `fallback: string | null` — same signal as the hook's `fallback`,
+  scoped to this specific call.
+- `response: Response` — raw fetch Response for advanced uses
+  (streaming, custom header inspection, etc).
 
 Conventional tier semantics (operator-configurable, but typical):
 
@@ -236,28 +255,33 @@ Conventional tier semantics (operator-configurable, but typical):
 | `good`   | Production default. Balanced quality and cost. |
 | `smart`  | Maximum capability. Reasoning, planning, long-form. |
 
-Two call signatures:
-
-```ts
-// 1. Bound tier (most common)
-const ai = useAI('smart');
-await ai.run({ messages: [...] });
-
-// 2. Unbound — pick tier per-call
-const ai = useAI();
-await ai.run('simple', { messages: [...] });
-```
-
-For non-React guest apps:
-
-```ts
-import { aiClient } from '@ensemble-edge/sdk';
-const result = await aiClient.run('good', { messages: [...] });
-```
-
 The workspace's session cookie is sent automatically (`credentials:
 'include'`), so embedded guest apps "just work." Standalone usage
 requires the workspace API key on the request.
+
+#### Provider response shapes (when to use `data` vs `text`)
+
+`text` covers ~90% of cases (single-turn chat completion). For other
+patterns — multi-choice (n > 1), function calls / tool use, vision
+input, streaming — drop down to `data` and reach into the
+provider-shaped payload directly:
+
+```ts
+const { data } = await ai.call({ ... });
+
+// OpenAI multi-choice:
+const allChoices = (data as any).choices.map((c: any) => c.message.content);
+
+// Anthropic tool use:
+const toolCalls = (data as any).content.filter((b: any) => b.type === 'tool_use');
+
+// OpenAI function call:
+const fn = (data as any).choices[0].message.function_call;
+```
+
+The hook intentionally does NOT normalize across providers beyond
+`text` — the assumption is that guest apps building advanced features
+already know which tier (= which provider) they're calling.
 
 ## Using @ensemble-edge/ui for guest-app interfaces
 

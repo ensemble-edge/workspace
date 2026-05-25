@@ -23,6 +23,28 @@ import type { WorkspaceEvent, WorkspaceEventType } from './state';
  * guest-runtime is for iframe-tier guests. Same shape, same behavior,
  * different host context.
  */
+/** v0.1.83: matches the extractor in @ensemble-edge/sdk and
+ *  @ensemble-edge/guest-runtime so result.text is identical across all
+ *  three useAI surfaces (component-tier shell, iframe-tier runtime,
+ *  external SDK). */
+function extractAiText(data: unknown): string {
+  if (!data || typeof data !== 'object') return '';
+  const d = data as Record<string, unknown>;
+  const choices = d.choices as Array<{ message?: { content?: string } }> | undefined;
+  if (Array.isArray(choices) && choices[0]?.message?.content) {
+    return String(choices[0].message.content);
+  }
+  const content = d.content as Array<{ text?: string }> | undefined;
+  if (Array.isArray(content) && content[0]?.text) {
+    return String(content[0].text);
+  }
+  const result = d.result as { response?: string; translated_text?: string } | undefined;
+  if (result?.response) return String(result.response);
+  if (result?.translated_text) return String(result.translated_text);
+  if (typeof d.response === 'string') return d.response;
+  return '';
+}
+
 function useAI({ tier }: { tier: string }) {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -58,7 +80,7 @@ function useAI({ tier }: { tier: string }) {
               : `AI call failed: ${response.status}`;
           setError(msg);
         }
-        return { response, data, fallback: fb };
+        return { response, data, text: extractAiText(data), fallback: fb };
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'AI call failed';
         setError(msg);

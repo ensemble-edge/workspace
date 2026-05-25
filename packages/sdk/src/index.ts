@@ -36,18 +36,11 @@ export { useEvents } from './hooks/use-events';
 
 // AI tier access — guest apps call workspace-managed AI tiers
 // (smart / good / simple / etc) without seeing provider credentials.
-// v0.1.82.
+// v0.1.83: shape harmonized with @ensemble-edge/guest-runtime so the
+// same code lifts cleanly between iframe-tier and component-tier
+// guests. useAI({ tier }) → { call, loading, error, fallback }.
 export { useAI } from './hooks/use-ai';
-export type { UseAIReturn } from './hooks/use-ai';
-export { aiClient, createAiClient } from './ai';
-export type {
-  AiTierName,
-  AiMessage,
-  AiCallOptions,
-  AiChatCompletion,
-  AiResult,
-  AiClient,
-} from './ai';
+export type { UseAIReturn, UseAIOptions, AiCallResult } from './hooks/use-ai';
 
 // Public types.
 export type { WorkspaceContext, ThemeMode } from './types';
