@@ -660,7 +660,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.74-ai-gateway-runtime-auth-header',
+      buildFingerprint: 'v0.1.75-ai-gateway-hyphen-route-names',
       timestamp: new Date().toISOString(),
     });
   });

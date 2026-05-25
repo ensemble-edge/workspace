@@ -3,7 +3,14 @@
  *
  * Tiers are operator-named capability buckets (smart/good/simple by
  * default; unlimited custom). Each tier maps 1:1 to a dynamic route
- * (`ws/<name>`) in the configured Cloudflare AI Gateway.
+ * (`ws-<name>`) in the configured Cloudflare AI Gateway.
+ *
+ * v0.1.75: route names use HYPHENS not slashes. CF's compat endpoint
+ * (`/compat/chat/completions`) parses `dynamic/<route-name>` as the
+ * model field; multi-segment names like `ws/simple` confuse the
+ * dispatcher and produce a generic "code 2005 Failed to get response
+ * from provider" error even when the route is otherwise valid. Single-
+ * segment names like `ws-simple` dispatch correctly.
  *
  * - Default tiers (smart/good/simple) are seeded on the first AI
  *   Gateway save. Cannot be deleted; their `display_name` is renamable.
@@ -84,6 +91,25 @@ export const DEFAULT_TIERS: Array<{ name: string; display_name: string; descript
  *
  * Called when the operator first saves AI Gateway credentials.
  */
+/**
+ * v0.1.75: backfill any existing tier rows that have legacy
+ * gateway_route values like `ws/<name>` (with slash) to the new
+ * hyphenated form `ws-<name>`. Idempotent — does nothing on
+ * already-migrated rows. Runs once on every loadTiers() call so
+ * existing workspaces get migrated without needing a separate
+ * migration script.
+ */
+export async function migrateLegacyGatewayRoutes(
+  env: Env,
+  workspaceId: string,
+): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE workspace_ai_tiers
+        SET gateway_route = REPLACE(gateway_route, 'ws/', 'ws-')
+      WHERE workspace_id = ? AND gateway_route LIKE 'ws/%'`
+  ).bind(workspaceId).run();
+}
+
 export async function seedDefaultTiers(
   env: Env,
   workspaceId: string,
@@ -93,11 +119,12 @@ export async function seedDefaultTiers(
       `INSERT OR IGNORE INTO workspace_ai_tiers
          (workspace_id, name, display_name, description, icon, is_default, gateway_route, route_provisioned)
        VALUES (?, ?, ?, ?, ?, 1, ?, 0)`,
-    ).bind(workspaceId, t.name, t.display_name, t.description, t.icon, `ws/${t.name}`).run();
+    ).bind(workspaceId, t.name, t.display_name, t.description, t.icon, `ws-${t.name}`).run();
   }
 }
 
 export async function listTiers(env: Env, workspaceId: string): Promise<AiTier[]> {
+  await migrateLegacyGatewayRoutes(env, workspaceId);
   const result = await env.DB.prepare(
     `SELECT name, display_name, description, icon, is_default,
             gateway_route, route_provisioned, last_error, provider, created_at
@@ -109,6 +136,7 @@ export async function listTiers(env: Env, workspaceId: string): Promise<AiTier[]
 }
 
 export async function getTier(env: Env, workspaceId: string, name: string): Promise<AiTier | null> {
+  await migrateLegacyGatewayRoutes(env, workspaceId);
   const row = await env.DB.prepare(
     `SELECT name, display_name, description, icon, is_default,
             gateway_route, route_provisioned, last_error, provider, created_at
@@ -144,7 +172,7 @@ export async function createTier(
     input.display_name ?? input.name,
     input.description ?? null,
     input.icon ?? 'sparkles',
-    `ws/${input.name}`,
+    `ws-${input.name}`,
     provider,
   ).run();
   const created = await getTier(env, workspaceId, input.name);
@@ -231,7 +259,11 @@ function defaultElementsForProvider(provider: TierProvider): unknown[] {
   const modelPropsByProvider: Record<TierProvider, { provider: string; model: string } | null> = {
     'workers-ai':         { provider: 'workers-ai', model: '@cf/meta/llama-3.1-8b-instruct' },
     'openai-chat':        { provider: 'openai',     model: 'gpt-4o-mini' },
-    'anthropic-messages': { provider: 'anthropic',  model: 'claude-3-haiku-20240307' },
+    // v0.1.75: claude-3-haiku-20240307 was deprecated by Anthropic.
+    // claude-haiku-4-5 is the current entry-level instruct model.
+    // Operators can swap to claude-sonnet-4-5 (or any other current
+    // model) in the CF gateway dashboard.
+    'anthropic-messages': { provider: 'anthropic',  model: 'claude-haiku-4-5' },
     'custom':             null,
   };
   const modelProps = modelPropsByProvider[provider];
@@ -269,7 +301,7 @@ export async function provisionTierRoute(
   const manualUrl = `https://dash.cloudflare.com/${accountId}/ai/ai-gateway/configuration/${gatewayName}`;
 
   // CF AI Gateway dynamic routes API — POST creates a route.
-  // (Route name must match what we'll send at request time: 'ws/<name>'.
+  // (Route name must match what we'll send at request time: 'ws-<name>'.
   // CF stores routes inside the gateway under their dynamic-routing config.)
   const r = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai-gateway/gateways/${gatewayName}/routes`,
