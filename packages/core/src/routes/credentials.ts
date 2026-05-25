@@ -657,13 +657,20 @@ export function createCredentialsRoutes(): App {
    * fingerprint of this build so we can verify deployments without
    * guessing. Add this near the top of any triage session.
    */
-  app.get('/_ensemble/diagnostic/version', async (c) => {
-    return c.json({
-      package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.76-api-keys-audit-log-expanded',
-      timestamp: new Date().toISOString(),
-    });
+  // v0.1.77: GET /_ensemble/version — short canonical path, no auth.
+  // Returns package + version fingerprint so CI / monitoring / debug
+  // scripts can verify what's deployed without guessing. Public (no
+  // auth) because version info is public anyway; making it auth-
+  // required would just be friction for the use case.
+  // Old path kept as alias for back-compat with any operator scripts.
+  const versionPayload = () => ({
+    package: '@ensemble-edge/workspace',
+    version: '0.1.77',
+    buildFingerprint: 'v0.1.77-audit-consolidation-version-endpoint',
+    timestamp: new Date().toISOString(),
   });
+  app.get('/_ensemble/version', (c) => c.json(versionPayload()));
+  app.get('/_ensemble/diagnostic/version', (c) => c.json(versionPayload()));
 
   /**
    * GET /favicon.svg — modern-browser favicon served as SVG.

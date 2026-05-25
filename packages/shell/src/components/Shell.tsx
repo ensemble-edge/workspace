@@ -40,7 +40,6 @@ const pathLabels: Record<string, string> = {
   '/settings': 'Settings',
   '/apps': 'Apps',
   '/auth': 'Auth & Security',
-  '/audit': 'Audit Log',
   '/nav': 'Navigation',
   '/knowledge': 'Knowledge',
 };

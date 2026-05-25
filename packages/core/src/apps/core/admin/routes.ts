@@ -21,6 +21,36 @@ export function registerAdminRoutes(
 ): void {
   app.use('/_ensemble/api-keys', auth(), requireRole('admin'));
   app.use('/_ensemble/api-keys/*', auth(), requireRole('admin'));
+  // v0.1.77: audit log read route moved here from the (now removed)
+  // standalone audit app. Same path so the UI continues to work.
+  app.use('/_ensemble/core/audit/*', auth(), requireRole('admin'));
+
+  // GET /_ensemble/core/audit/events — list workspace audit events.
+  app.get('/_ensemble/core/audit/events', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const limit = Math.min(parseInt(c.req.query('limit') || '50', 10), 200);
+    const offset = parseInt(c.req.query('offset') || '0', 10);
+    const action = c.req.query('action');
+    try {
+      let query = `SELECT id, actor_id, actor_handle, app_id, action,
+                          resource_type, resource_id, details_json, ip_address, created_at
+                     FROM audit_log WHERE workspace_id = ?`;
+      const params: unknown[] = [workspace.id];
+      if (action) {
+        query += ' AND action LIKE ?';
+        params.push(`%${action}%`);
+      }
+      query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+      params.push(limit, offset);
+      const result = await c.env.DB.prepare(query).bind(...params).all();
+      return c.json({ data: result.results || [], meta: { limit, offset } });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to fetch audit events:', error);
+      return c.json({ error: 'Failed to fetch audit events' }, 500);
+    }
+  });
 
   // POST /_ensemble/api-keys
   app.post('/_ensemble/api-keys', async (c) => {

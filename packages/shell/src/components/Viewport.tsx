@@ -25,7 +25,9 @@ import '../apps/core/brand';
 import '../apps/core/people';
 import '../apps/core/admin';
 import '../apps/core/apps';
-import '../apps/core/audit';
+// v0.1.77: standalone audit app removed; viewer is now a tab in
+// Settings (Settings → Audit Log). The admin app's route registration
+// continues to serve /_ensemble/core/audit/events.
 import '../apps/core/auth';
 import '../apps/core/nav';
 import '../apps/core/knowledge';

@@ -13,7 +13,12 @@ import { brandApp } from './brand';
 import { adminApp } from './admin';
 import { peopleApp } from './people';
 import { appsApp } from './apps';
-import { auditApp } from './audit';
+
+// v0.1.77: auditApp removed from the core-app registry. The audit
+// log viewer is now a tab in Settings (Settings → Audit Log), not a
+// standalone app. The /_ensemble/core/audit/events read route still
+// exists and is now registered from admin's routes module — same
+// endpoint, one fewer sidebar entry, one canonical surface.
 
 /** All registered core apps */
 export const coreApps: CoreAppDefinition[] = [
@@ -21,7 +26,6 @@ export const coreApps: CoreAppDefinition[] = [
   adminApp,
   peopleApp,
   appsApp,
-  auditApp,
 ];
 
 /**
