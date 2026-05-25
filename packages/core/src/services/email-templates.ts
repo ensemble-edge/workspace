@@ -232,30 +232,43 @@ export interface RenderedEmail {
 export async function renderMagicLinkEmail(
   env: Env,
   workspaceId: string,
-  opts: { url: string; expires_in_minutes: number },
+  opts: { url: string; expires_in_minutes: number; code?: string },
 ): Promise<RenderedEmail> {
   const brand = await loadBrandContext(env, workspaceId);
   const subject = `Sign in to ${brand.workspace_name}`;
   const body =
-    `Click the button below to sign in to ${brand.workspace_name}. ` +
-    `This link expires in ${opts.expires_in_minutes} minutes and can be used once.`;
+    `Click the button below to sign in to ${brand.workspace_name}, ` +
+    (opts.code ? `or enter the 6-digit code on the sign-in page. ` : '') +
+    `This expires in ${opts.expires_in_minutes} minutes and can be used once.`;
   const footnote =
-    `If you didn't request this sign-in link, you can safely ignore this email — ` +
-    `no one can use the link without your inbox.`;
+    `If you didn't request this sign-in, you can safely ignore this email — ` +
+    `no one can use the link or code without your inbox.`;
+
+  // v0.1.79: render a copy-friendly code block in the HTML email,
+  // alongside the existing CTA button. Plain-text body includes the
+  // code on a line operators can copy from any text email client.
+  const codeHtml = opts.code
+    ? `<div style="margin:24px 0;text-align:center;">
+         <div style="display:inline-block;padding:14px 22px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:8px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:32px;font-weight:600;letter-spacing:0.18em;color:#111827;">${escapeHtml(opts.code)}</div>
+         <p style="margin:8px 0 0;font-size:12px;color:#6b7280;">Or enter this code on the sign-in page</p>
+       </div>`
+    : '';
 
   return {
     subject,
     text: plainText({
       workspace_name: brand.workspace_name,
       heading: subject,
-      body,
+      body: body + (opts.code ? `\n\nSign-in code: ${opts.code}` : ''),
       cta_label: 'Open workspace',
       cta_url: opts.url,
       footnote,
     }),
     html: renderEnvelope(brand, {
       heading: subject,
-      bodyHtml: `<p style="margin:0;font-size:15px;line-height:1.5;color:#374151;">${escapeHtml(body)}</p>`,
+      bodyHtml:
+        `<p style="margin:0;font-size:15px;line-height:1.5;color:#374151;">${escapeHtml(body)}</p>` +
+        codeHtml,
       cta: { url: opts.url, label: 'Open workspace' },
       footnote: escapeHtml(footnote),
     }),

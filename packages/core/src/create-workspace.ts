@@ -816,7 +816,11 @@ function generateLoginHtml(
       </button>
     </form>
 
-    <!-- Magic link (revealed only when email is configured) -->
+    <!-- Magic link (revealed only when email is configured)
+         v0.1.79: two-state flow — "Send" button → code-entry form.
+         The send creates BOTH a click-link AND a 6-digit code; the
+         operator can either click the link in the email OR type
+         the code here. -->
     <div id="magicLinkSection" hidden class="space-y-2">
       <div class="relative">
         <div class="absolute inset-0 flex items-center"><span class="w-full border-t"></span></div>
@@ -824,14 +828,54 @@ function generateLoginHtml(
           <span class="bg-card px-2 text-muted-foreground">or</span>
         </div>
       </div>
-      <button
-        type="button"
-        id="magicLinkBtn"
-        class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 w-full"
-      >
-        Email me a sign-in link
-      </button>
-      <p id="magicLinkStatus" class="hidden text-center text-xs text-muted-foreground"></p>
+
+      <!-- State 1: send button -->
+      <div id="magicLinkSendState">
+        <button
+          type="button"
+          id="magicLinkBtn"
+          class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 w-full"
+        >
+          Email me a sign-in code
+        </button>
+        <p id="magicLinkStatus" class="hidden text-center text-xs text-muted-foreground mt-2"></p>
+      </div>
+
+      <!-- State 2: code-entry form (revealed after send succeeds) -->
+      <div id="magicLinkCodeState" hidden class="space-y-3">
+        <p class="text-center text-xs text-muted-foreground" id="magicLinkSentMsg">
+          We sent a sign-in code to your email.
+        </p>
+        <form id="magicCodeForm" class="space-y-2" novalidate>
+          <label class="text-sm font-medium text-foreground" for="magicCode">Sign-in code</label>
+          <input
+            type="text"
+            id="magicCode"
+            name="magicCode"
+            inputmode="numeric"
+            pattern="\\d{6}"
+            maxlength="6"
+            autocomplete="one-time-code"
+            class="${inputClass} text-center text-lg tracking-widest font-mono"
+            placeholder="123456"
+          >
+          <p class="hidden text-xs text-destructive" id="magicCodeError"></p>
+          <button
+            type="submit"
+            id="magicCodeSubmit"
+            class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 w-full"
+          >
+            Verify code
+          </button>
+        </form>
+        <button
+          type="button"
+          id="magicLinkResendBtn"
+          class="text-center text-xs text-muted-foreground hover:text-foreground underline w-full"
+        >
+          Use a different email or resend
+        </button>
+      </div>
     </div>
 
     <!-- Footer -->
@@ -867,33 +911,105 @@ function generateLoginHtml(
       }
     })();
 
+    // v0.1.79: two-state magic-link flow.
+    //   1) operator clicks "Email me a sign-in code"
+    //   2) UI swaps to code-entry form with email-sent confirmation
+    //   3) operator types the 6-digit code from the email → verify
+    // The link in the email also works (one-shot, opens the workspace).
     const magicBtn = document.getElementById('magicLinkBtn');
     const magicStatus = document.getElementById('magicLinkStatus');
+    const magicSendState = document.getElementById('magicLinkSendState');
+    const magicCodeState = document.getElementById('magicLinkCodeState');
+    const magicSentMsg = document.getElementById('magicLinkSentMsg');
+    const magicCodeForm = document.getElementById('magicCodeForm');
+    const magicCodeInput = document.getElementById('magicCode');
+    const magicCodeError = document.getElementById('magicCodeError');
+    const magicCodeSubmit = document.getElementById('magicCodeSubmit');
+    const magicResendBtn = document.getElementById('magicLinkResendBtn');
+
+    function maskEmail(email) {
+      const [local, domain] = email.split('@');
+      if (!domain || !local) return email;
+      const visible = local.slice(0, 2);
+      return visible + '***@' + domain;
+    }
+
+    async function sendMagicLink(email) {
+      magicBtn.disabled = true;
+      magicBtn.textContent = 'Sending...';
+      try {
+        await fetch('/_ensemble/auth/magic-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+        // Generic success message regardless — don't leak email existence.
+        magicSentMsg.textContent = 'If ' + maskEmail(email) + ' is registered, we sent a sign-in code. Check your inbox + spam folder.';
+        magicSendState.hidden = true;
+        magicCodeState.hidden = false;
+        magicCodeInput.focus();
+      } catch (_) {
+        magicStatus.textContent = 'Could not send. Try again in a moment.';
+        magicStatus.classList.remove('hidden');
+      } finally {
+        magicBtn.disabled = false;
+        magicBtn.textContent = 'Email me a sign-in code';
+      }
+    }
+
     if (magicBtn) {
-      magicBtn.addEventListener('click', async () => {
+      magicBtn.addEventListener('click', () => {
         const email = emailInput.value.trim();
         if (!email) {
           showFieldError(emailInput, emailError, 'Enter your email first');
           return;
         }
-        magicBtn.disabled = true;
-        magicBtn.textContent = 'Sending...';
+        sendMagicLink(email);
+      });
+    }
+
+    if (magicResendBtn) {
+      magicResendBtn.addEventListener('click', () => {
+        magicCodeState.hidden = true;
+        magicSendState.hidden = false;
+        magicCodeInput.value = '';
+        magicCodeError.classList.add('hidden');
+        emailInput.focus();
+      });
+    }
+
+    if (magicCodeForm) {
+      magicCodeForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const code = (magicCodeInput.value || '').replace(/\\D/g, '');
+        magicCodeError.classList.add('hidden');
+        if (!/^\\d{6}$/.test(code)) {
+          magicCodeError.textContent = 'Enter the 6-digit code from your email';
+          magicCodeError.classList.remove('hidden');
+          return;
+        }
+        magicCodeSubmit.disabled = true;
+        magicCodeSubmit.textContent = 'Verifying...';
         try {
-          const r = await fetch('/_ensemble/auth/magic-link', {
+          const r = await fetch('/_ensemble/auth/magic-link/verify-code', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email }),
+            body: JSON.stringify({ code }),
           });
-          // Always show a generic success message — don't leak which
-          // emails exist in this workspace.
-          magicStatus.textContent = 'If that email is registered, a sign-in link is on its way.';
-          magicStatus.classList.remove('hidden');
-        } catch (_) {
-          magicStatus.textContent = 'Could not send link. Try again later.';
-          magicStatus.classList.remove('hidden');
+          if (r.ok) {
+            window.location.href = '/';
+            return;
+          }
+          const body = await r.json().catch(() => ({}));
+          const reason = body && body.error;
+          magicCodeError.textContent =
+            reason === 'too_many_attempts' ? 'Too many attempts. Wait 5 minutes and try again.' :
+            reason === 'invalid_code'      ? 'Code is invalid or expired. Request a new one.' :
+                                             'Could not verify code. Try again.';
+          magicCodeError.classList.remove('hidden');
         } finally {
-          magicBtn.disabled = false;
-          magicBtn.textContent = 'Email me a sign-in link';
+          magicCodeSubmit.disabled = false;
+          magicCodeSubmit.textContent = 'Verify code';
         }
       });
     }

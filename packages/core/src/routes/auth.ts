@@ -359,14 +359,22 @@ export function createAuthRoutes() {
         .first<{ id: string; email: string }>();
       if (!user) return c.json({ ok: true });
 
-      // Mint a one-time token (15 min). Stored in KV under `magic:<token>`
-      // pointing at the user_id + workspace_id.
+      // v0.1.79: mint BOTH a click-link token AND a 6-digit code.
+      // The link is the simple path ("click to sign in"); the code is
+      // for operators who'd rather copy 6 digits than open a new tab.
+      // Same TTL, same user binding, both stored in KV so the consume
+      // / verify-code endpoints have a single source of truth.
       const token = crypto.randomUUID().replace(/-/g, '');
-      await c.env.KV.put(
-        `magic:${token}`,
-        JSON.stringify({ user_id: user.id, workspace_id: workspace.id, created_at: Date.now() }),
-        { expirationTtl: 15 * 60 },
-      );
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      const payload = JSON.stringify({
+        user_id: user.id,
+        workspace_id: workspace.id,
+        code,
+        created_at: Date.now(),
+      });
+      await c.env.KV.put(`magic:${token}`, payload, { expirationTtl: 15 * 60 });
+      // Indexed by code too so verify-code can look up without a token.
+      await c.env.KV.put(`magic-code:${workspace.id}:${code}`, payload, { expirationTtl: 15 * 60 });
 
       const base = await getWorkspacePublicUrl(c.env, workspace.id, c.req.raw);
       const url = `${base.replace(/\/$/, '')}/_ensemble/auth/magic-link/consume?token=${token}`;
@@ -374,10 +382,9 @@ export function createAuthRoutes() {
       const rendered = await renderMagicLinkEmail(c.env, workspace.id, {
         url,
         expires_in_minutes: 15,
+        code,
       });
 
-      // Fire-and-forget the send; we don't surface failures to the
-      // requester (to avoid email-existence oracle).
       const result = await sendEmail(c.env, workspace.id, {
         to: user.email,
         subject: rendered.subject,
@@ -387,6 +394,26 @@ export function createAuthRoutes() {
       if (!result.ok) {
         console.warn('[magic-link] send failed:', result.reason, result.error_detail);
       }
+
+      // v0.1.79: audit every magic-link send so operators can verify
+      // delivery from the audit log without leaking the email-existence
+      // oracle to outside callers (the audit log is admin-only). Status
+      // is logged so failed sends are visible too.
+      await recordAudit(c.env, {
+        workspaceId: workspace.id,
+        action: result.ok ? 'auth.magic_link.sent' : 'auth.magic_link.send_failed',
+        actorId: user.id,
+        actorHandle: user.email,
+        ipAddress: c.req.header('cf-connecting-ip') ?? null,
+        details: result.ok
+          ? { has_code: true }
+          : {
+              reason: result.reason,
+              error: typeof result.error_detail === 'string'
+                ? result.error_detail.slice(0, 200)
+                : undefined,
+            },
+      });
 
       return c.json({ ok: true });
     } catch {
@@ -471,6 +498,95 @@ export function createAuthRoutes() {
     });
 
     return c.redirect('/');
+  });
+
+  /**
+   * POST /_ensemble/auth/magic-link/verify-code
+   *
+   * v0.1.79: alternate redemption path. Operator types the 6-digit
+   * code from the magic-link email instead of clicking the link.
+   * Body: { code: "123456" }. Same session semantics as the click
+   * path — cookies set, JSON response with user/membership.
+   *
+   * Rate limit: 5 attempts per IP per workspace in 5 minutes (KV-
+   * backed). Failed attempts intentionally indistinguishable from
+   * "code expired" so the response doesn't help guess valid codes.
+   */
+  auth.post('/magic-link/verify-code', async (c) => {
+    try {
+      const workspace = c.get('workspace');
+      if (!workspace?.id) return c.json({ error: 'invalid_link' }, 400);
+
+      const body = await c.req.json<{ code?: string }>().catch(() => ({} as { code?: string }));
+      const code = (body.code ?? '').replace(/\D/g, '');
+      if (!/^\d{6}$/.test(code)) return c.json({ error: 'invalid_code' }, 400);
+
+      // Rate limit by IP.
+      const ip = c.req.header('CF-Connecting-IP') ?? 'dev';
+      const rateKey = `magic-code-attempts:${workspace.id}:${ip}`;
+      const attempts = Number((await c.env.KV.get(rateKey)) ?? '0');
+      if (attempts >= 5) return c.json({ error: 'too_many_attempts' }, 429);
+      await c.env.KV.put(rateKey, String(attempts + 1), { expirationTtl: 300 });
+
+      const payloadRaw = await c.env.KV.get(`magic-code:${workspace.id}:${code}`);
+      if (!payloadRaw) return c.json({ error: 'invalid_code' }, 400);
+
+      let payload: { user_id: string; workspace_id: string };
+      try {
+        payload = JSON.parse(payloadRaw);
+      } catch {
+        return c.json({ error: 'invalid_code' }, 400);
+      }
+      if (payload.workspace_id !== workspace.id) {
+        return c.json({ error: 'invalid_code' }, 400);
+      }
+
+      // Burn the code (and the linked token) — single-use semantics.
+      await c.env.KV.delete(`magic-code:${workspace.id}:${code}`);
+
+      const row = await c.env.DB.prepare(
+        `SELECT u.id, u.email, u.handle, m.role
+           FROM users u
+           JOIN memberships m ON m.user_id = u.id
+          WHERE u.id = ? AND m.workspace_id = ?`,
+      )
+        .bind(payload.user_id, workspace.id)
+        .first<{ id: string; email: string; handle: string | null; role: string }>();
+      if (!row) return c.json({ error: 'invalid_code' }, 400);
+
+      const authService = new AuthService({
+        db: c.env.DB,
+        jwtSecret: getJwtSecret(c.env.JWT_SECRET, c.env.ENVIRONMENT),
+      });
+
+      const session = await authService.loginAsKnownUser({
+        userId: row.id,
+        email: row.email,
+        handle: row.handle,
+        workspaceId: workspace.id,
+        role: row.role as 'owner' | 'admin' | 'member' | 'guest',
+      });
+
+      const cookieOptions = getCookieOptionsForEnv(c.env.ENVIRONMENT, c.req.url);
+      c.header('Set-Cookie', setAccessTokenCookie(session.accessToken, cookieOptions), { append: true });
+      c.header('Set-Cookie', setRefreshTokenCookie(session.refreshToken, cookieOptions), { append: true });
+
+      await recordAudit(c.env, {
+        workspaceId: workspace.id,
+        action: 'auth.login',
+        actorId: row.id,
+        actorHandle: row.email,
+        ipAddress: c.req.header('cf-connecting-ip') ?? null,
+        details: { method: 'magic_code' },
+      });
+
+      return c.json({
+        user: { id: row.id, email: row.email, handle: row.handle },
+        membership: { userId: row.id, workspaceId: workspace.id, role: row.role },
+      });
+    } catch {
+      return c.json({ error: 'invalid_code' }, 400);
+    }
   });
 
   return auth;
