@@ -660,7 +660,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.69-email-verify-status-toast-fix',
+      buildFingerprint: 'v0.1.70-email-send-friendly-errors',
       timestamp: new Date().toISOString(),
     });
   });
@@ -1337,9 +1337,32 @@ export function createCredentialsRoutes(): App {
     });
 
     if (result.ok) return c.json({ ok: true, sent_to: user.email });
+    // v0.1.70: map opaque reason codes to operator-actionable messages.
+    // The most common failure on a freshly-deployed workspace is the
+    // missing [send_email] wrangler binding — operators saw
+    // "Send failed: not_configured" with no hint what to fix.
+    const friendly = (() => {
+      switch (result.reason) {
+        case 'not_configured':
+          return result.error_detail
+            ? `Email provider not fully configured: ${result.error_detail}`
+            : 'Email provider not fully configured. Check that the email_provider, email_from_address, and provider-specific credentials are all set.';
+        case 'unverified_domain':
+          return 'Provider rejected the from address — the sending domain isn\'t verified with this provider yet.';
+        case 'rate_limited':
+          return 'Provider rate-limited the send. Wait a moment and retry.';
+        case 'unknown_provider':
+          return `Unknown email_provider value. Set it to 'cloudflare' or 'resend'.`;
+        case 'provider_error':
+          return `Provider error: ${result.error_detail ?? 'see worker logs'}`;
+        default:
+          return `Send failed: ${result.reason ?? 'unknown'}`;
+      }
+    })();
     return c.json({
       ok: false,
-      message: `Send failed: ${result.reason ?? 'unknown'}`,
+      message: friendly,
+      reason: result.reason,
       detail: result.error_detail,
     });
   });

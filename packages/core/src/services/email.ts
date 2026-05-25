@@ -71,7 +71,13 @@ async function sendViaCloudflare(
     return {
       ok: false,
       reason: 'not_configured',
-      error_detail: 'Cloudflare Email Workers requires a [send_email] binding in wrangler.toml',
+      // v0.1.70: this is the most common deploy-side gotcha. Spell out
+      // the exact wrangler.toml fix so the operator can act on the
+      // error without digging through docs.
+      error_detail:
+        'Cloudflare Email Workers requires a [[send_email]] binding in your wrangler.toml. ' +
+        'Add: [[send_email]] name = "SEND_EMAIL" then redeploy. ' +
+        'You also need to verify the from-address as a destination in the Cloudflare Email Routing dashboard for your zone.',
     };
   }
   try {
