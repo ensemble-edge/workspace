@@ -660,7 +660,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.68-dns-scope-name-translation-chat-completion',
+      buildFingerprint: 'v0.1.69-email-verify-status-toast-fix',
       timestamp: new Date().toISOString(),
     });
   });

@@ -714,9 +714,25 @@ function NotificationsCard({
     setVerifying(true);
     try {
       const r = await authedFetch('/_ensemble/credentials/test/email', { method: 'POST' });
-      const body = (await r.json()) as { ok: boolean; status?: string; message?: string };
-      if (r.ok && body.ok) toast.success('Domain verified');
-      else toast.error('Verification failed', { description: body.message ?? body.status });
+      // v0.1.69: the verifier returns { status: 'verified'|'pending'|'failed',
+      // message? } — no top-level `ok` field. v0.1.68 and earlier checked
+      // body.ok (always undefined) and showed an error toast even when the
+      // verification succeeded. Now we map each status to the right toast:
+      //   verified → success
+      //   pending  → info-style success with the partial-config detail
+      //   failed   → error with the diagnostic message
+      const body = (await r.json()) as { status?: string; message?: string; error?: string };
+      if (body.status === 'verified') {
+        toast.success('Domain verified');
+      } else if (body.status === 'pending') {
+        toast.info('Verification pending', {
+          description: body.message ?? 'Some records are configured but verification is incomplete.',
+        });
+      } else {
+        toast.error('Verification failed', {
+          description: body.message ?? body.error ?? `Unexpected status: ${body.status ?? 'unknown'}`,
+        });
+      }
       onSaved();
     } catch (e) {
       toast.error('Verification failed', { description: errMsg(e) });
