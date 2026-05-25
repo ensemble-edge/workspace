@@ -323,9 +323,15 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
     const workspaceId = c.get('workspace')?.id || '';
     const css = await generateBrandCss(c.env.DB, workspaceId, resolvedConfig.brand.accent);
 
+    // v0.1.81: cache 5min fresh + 24h stale-while-revalidate. Pre-v0.1.81
+    // this was no-store, forcing every cross-origin consumer to refetch
+    // brand vars on every page load — a real performance + visual-race
+    // hazard on cellular (FOUC where var() fallbacks paint before the
+    // workspace CSS arrives). 5-min freshness keeps operator brand edits
+    // visible quickly; SWR keeps first paint painted-correctly.
     return c.text(css, 200, {
       'Content-Type': 'text/css',
-      'Cache-Control': 'no-store, must-revalidate',
+      'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
     });
   });
 

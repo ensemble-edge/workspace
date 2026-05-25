@@ -142,5 +142,20 @@ export function publicCors() {
     // header (e.g. caching layers that respect non-* policies later)
     // produces correct cache keys.
     c.header('Vary', 'Origin');
+
+    // v0.1.81: default cache policy for public brand assets.
+    // 5 min fresh + 24h stale-while-revalidate. Short freshness so
+    // operator edits propagate quickly; long SWR keeps cross-origin
+    // consumers (curalisto.com, marketing pages, future patient
+    // portals) painting brand colors at first paint from cache while
+    // a fresh fetch happens in the background.
+    //
+    // Only set if the downstream handler didn't already pick a more
+    // specific policy. render.ts sets its own no-store for editorial
+    // overrides + max-age=300 must-revalidate for saved renders; we
+    // don't want to clobber those.
+    if (!c.res.headers.get('Cache-Control')) {
+      c.header('Cache-Control', 'public, max-age=300, stale-while-revalidate=86400');
+    }
   });
 }

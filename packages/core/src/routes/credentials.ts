@@ -665,12 +665,21 @@ export function createCredentialsRoutes(): App {
   // Old path kept as alias for back-compat with any operator scripts.
   const versionPayload = () => ({
     package: '@ensemble-edge/workspace',
-    version: '0.1.80',
-    buildFingerprint: 'v0.1.80-public-cors-brand-assets',
+    version: '0.1.81',
+    buildFingerprint: 'v0.1.81-brand-asset-cache-swr',
     timestamp: new Date().toISOString(),
   });
-  app.get('/_ensemble/version', (c) => c.json(versionPayload()));
-  app.get('/_ensemble/diagnostic/version', (c) => c.json(versionPayload()));
+  // v0.1.81: version probe should never be stale — CI / monitoring /
+  // debug curl always want fresh state. publicCors's default would
+  // give 5min; override to no-store explicitly so the workspace's
+  // current deploy is always immediately observable.
+  const sendVersion = (c: { json: (v: unknown) => Response }) => {
+    const r = c.json(versionPayload());
+    r.headers.set('Cache-Control', 'no-store');
+    return r;
+  };
+  app.get('/_ensemble/version', sendVersion);
+  app.get('/_ensemble/diagnostic/version', sendVersion);
 
   /**
    * GET /favicon.svg — modern-browser favicon served as SVG.

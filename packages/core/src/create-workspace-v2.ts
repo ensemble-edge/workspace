@@ -499,16 +499,24 @@ function mountBrandRoutes(
         status: 304,
         headers: {
           'ETag': etag,
-          'Cache-Control': 'no-cache, must-revalidate',
+          // v0.1.81: same policy as the 200 path — browsers cache for
+          // 5min without revalidating, after which they re-issue with
+          // If-None-Match and hit this 304 fast path when nothing changed.
+          'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
         },
       });
     }
 
     const css = await generateBrandCss(c.env.DB, workspaceId, config.brand.accent);
 
+    // v0.1.81: 5min fresh + 24h SWR. ETag stays as a fast revalidation
+    // path after the freshness window. Cross-origin consumers paint
+    // brand colors at first paint from cache; admin edits bump
+    // brand_tokens.updated_at which invalidates the ETag and forces a
+    // fresh fetch on next visit past the freshness window.
     return c.text(css, 200, {
       'Content-Type': 'text/css',
-      'Cache-Control': 'no-cache, must-revalidate',
+      'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
       'ETag': etag,
     });
   });
