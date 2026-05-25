@@ -1,6 +1,6 @@
 {
   "name": "@ensemble-edge/ui",
-  "version": "0.1.0",
+  "version": "0.1.77",
   "type": "module",
   "description": "Ensemble UI component library built on shadcn/ui",
   "main": "./src/index.ts",
