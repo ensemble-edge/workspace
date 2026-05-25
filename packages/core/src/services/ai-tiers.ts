@@ -355,23 +355,25 @@ function rowToTier(row: DbTierRow): AiTier {
  * each provider's published API.
  */
 export function canaryForProvider(provider: TierProvider): unknown | null {
+  // v0.1.73: every chat-capable provider uses the chat-completion
+  // shape. Pre-v0.1.73 the workers-ai canary used {prompt} which is
+  // the legacy text-generation shape — modern chat/instruct models
+  // (the kind the default-provisioned llama-3.1-8b-instruct is)
+  // expect {messages: [{role, content}]} and 400 on {prompt} when
+  // routed via AI Gateway dynamic routes.
+  const userMessage = { role: 'user', content: 'Say hello in one short sentence.' };
   switch (provider) {
     case 'workers-ai':
-      // Most generation models accept {prompt}; translation models want
-      // {text, source_lang, target_lang}. We pick a prompt-style canary
-      // since it works for chat/instruct models; translation tiers
-      // operator-test in their actual guest app.
-      return { prompt: 'Say hello in one short sentence.', max_tokens: 32 };
     case 'openai-chat':
       return {
-        messages: [{ role: 'user', content: 'Say hello in one short sentence.' }],
+        messages: [userMessage],
         max_tokens: 32,
       };
     case 'anthropic-messages':
       return {
         model: 'claude-3-haiku-20240307',
         max_tokens: 32,
-        messages: [{ role: 'user', content: 'Say hello in one short sentence.' }],
+        messages: [userMessage],
       };
     case 'custom':
     default:

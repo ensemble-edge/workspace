@@ -660,7 +660,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.72-ai-tier-default-elements',
+      buildFingerprint: 'v0.1.73-ai-gateway-dynamic-route-compat-url',
       timestamp: new Date().toISOString(),
     });
   });
@@ -1479,15 +1479,36 @@ export function createCredentialsRoutes(): App {
       return c.json({ ok: false, message: 'AI Gateway not configured' }, 412);
     }
 
+    // v0.1.73: dynamic routes are called via the /compat/chat/completions
+    // OpenAI-compatible endpoint with `model: "dynamic/<route-name>"`
+    // in the body, NOT via a /v1/<acct>/<gw>/<route-name> path. The
+    // path-based pattern works for static provider-passthrough (e.g.
+    // /openai/v1/chat/completions) but dynamic routes are dispatched
+    // through the compat endpoint. All earlier tier tests + the AI
+    // call proxy at /_ensemble/ai/call/:tier were calling the wrong
+    // URL, which is why every test returned 400 even after routes
+    // were correctly configured with model elements.
+    const compatBody = (() => {
+      // The body our caller (canaryForProvider) sent already has
+      // {messages, max_tokens}. Inject model: "dynamic/<route>".
+      // Strip any provider-specific {model: "claude-..."} key the
+      // anthropic canary may have set, since dynamic routing uses
+      // the route's configured model, not a body-specified one.
+      const b = body as Record<string, unknown>;
+      return {
+        ...b,
+        model: `dynamic/${tier.gateway_route}`,
+      };
+    })();
     const r = await fetch(
-      `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayName}/${tier.gateway_route}`,
+      `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayName}/compat/chat/completions`,
       {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${cfToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(compatBody),
       },
     );
 
@@ -1602,8 +1623,19 @@ export function createCredentialsRoutes(): App {
 
   // ─── AI call proxy ─────────────────────────────────────────────────
   // POST /_ensemble/ai/call/:tier
-  // Forwards JSON body to https://gateway.ai.cloudflare.com/v1/<acct>/<gw>/ws/<tier>
-  // with the gateway token added. Guest apps never see the token.
+  //
+  // Guest-app entrypoint for AI calls. Guest apps pick a tier by name
+  // (smart / good / simple / etc) and post a chat-completion-style
+  // request body. Workspace injects the cf token + routes to the
+  // gateway's dynamic-route dispatcher via the OpenAI-compat endpoint.
+  // The guest never sees the token.
+  //
+  // v0.1.73: switched from the wrong /v1/<acct>/<gw>/<route-name> path
+  // to the correct /v1/<acct>/<gw>/compat/chat/completions with
+  // model:"dynamic/<route-name>" in the body. The path-based form
+  // works for static provider passthrough; dynamic routes dispatch
+  // through the compat endpoint.
+  //
   // Falls back to 'good' if requested tier doesn't exist.
 
   app.post('/_ensemble/ai/call/:tier', async (c) => {
@@ -1630,16 +1662,26 @@ export function createCredentialsRoutes(): App {
       return c.json({ error: 'AI Gateway not configured' }, 412);
     }
 
-    const body = await c.req.text();
+    // Inject model:"dynamic/<route>" into the incoming body. The
+    // route's configured model element overrides any model field the
+    // guest specified — that's the whole point of tier abstraction.
+    const incomingBody = await c.req.json<Record<string, unknown>>().catch(() => null);
+    if (!incomingBody || typeof incomingBody !== 'object') {
+      return c.json({ error: 'Request body must be valid JSON' }, 400);
+    }
+    const outgoingBody = {
+      ...incomingBody,
+      model: `dynamic/${tier.gateway_route}`,
+    };
     const r = await fetch(
-      `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayName}/${tier.gateway_route}`,
+      `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayName}/compat/chat/completions`,
       {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${cfToken}`,
-          'Content-Type': c.req.header('Content-Type') ?? 'application/json',
+          'Content-Type': 'application/json',
         },
-        body,
+        body: JSON.stringify(outgoingBody),
       },
     );
 
