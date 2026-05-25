@@ -210,6 +210,41 @@ export async function deleteTier(
  *   - 409: route already exists (we treat as success and mark provisioned)
  *   - 5xx / network: transient — operator can hit Retry
  */
+/**
+ * v0.1.72: build the elements array for a CF AI Gateway dynamic route
+ * given a provider. Returns a minimum-viable start → model → end flow
+ * so the route can dispatch the moment it's provisioned.
+ *
+ * Schema (reverse-engineered from CF's API since they don't publish it):
+ *   - Each element has { id, type, outputs, properties }
+ *   - start.outputs:    { next:    { elementId: "<id>" } }
+ *   - model.outputs:    { success: { elementId: "<id>" },
+ *                         fallback: { elementId: "<id>" } }
+ *   - end.outputs:      {}
+ *   - model.properties: { provider, model, timeout, retries }
+ *
+ * For provider='custom' we return empty elements — the operator will
+ * configure the route themselves in the CF dashboard, since we don't
+ * know what they're targeting.
+ */
+function defaultElementsForProvider(provider: TierProvider): unknown[] {
+  const modelPropsByProvider: Record<TierProvider, { provider: string; model: string } | null> = {
+    'workers-ai':         { provider: 'workers-ai', model: '@cf/meta/llama-3.1-8b-instruct' },
+    'openai-chat':        { provider: 'openai',     model: 'gpt-4o-mini' },
+    'anthropic-messages': { provider: 'anthropic',  model: 'claude-3-haiku-20240307' },
+    'custom':             null,
+  };
+  const modelProps = modelPropsByProvider[provider];
+  if (!modelProps) return [];
+  return [
+    { id: 's1', type: 'start', outputs: { next:    { elementId: 'm1' } }, properties: {} },
+    { id: 'm1', type: 'model', outputs: { success: { elementId: 'e1' },
+                                          fallback:{ elementId: 'e1' } },
+      properties: { ...modelProps, timeout: 30000, retries: 1 } },
+    { id: 'e1', type: 'end',   outputs: {},                              properties: {} },
+  ];
+}
+
 export async function provisionTierRoute(
   env: Env,
   workspaceId: string,
@@ -247,14 +282,20 @@ export async function provisionTierRoute(
       body: JSON.stringify({
         name: tier.gateway_route,
         enabled: true,
-        // v0.1.67: CF AI Gateway routes API requires an `elements`
-        // array (each element is a provider+model target). Empty is
-        // accepted at creation time — the operator wires the actual
-        // targets in the Cloudflare dashboard after provisioning.
-        // Without this field CF returns 400 code=7001 "Required"
-        // at body.elements, which was the silent failure operators
-        // hit on every "Provision" click.
-        elements: [],
+        // v0.1.72: provide a working default route flow (start → model
+        // → end) so the route can actually dispatch the moment it's
+        // provisioned. v0.1.67 shipped with elements:[] to satisfy
+        // CF's "required" check, but that left the route with no
+        // model target — every test/call returned 400 because CF
+        // had nothing to dispatch to. Operators had to manually
+        // configure the route in the CF dashboard before anything
+        // worked.
+        //
+        // Default model picks per provider are sensible / inexpensive
+        // baselines. Operators can edit them in the CF dashboard
+        // (Configuration → Dynamic Routing → <route>) to upgrade
+        // to a smarter / different model whenever they want.
+        elements: defaultElementsForProvider(tier.provider),
       }),
     },
   );

@@ -660,7 +660,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.71-cf-email-sending-new-product',
+      buildFingerprint: 'v0.1.72-ai-tier-default-elements',
       timestamp: new Date().toISOString(),
     });
   });
@@ -1498,12 +1498,49 @@ export function createCredentialsRoutes(): App {
       try { responseBody = await r.text(); } catch { /* ignore */ }
     }
 
+    // v0.1.72: when the gateway returns 400, the most common cause is a
+    // route with empty elements (pre-v0.1.72 provisioning shipped
+    // elements:[] which made routes that couldn't dispatch). Fetch
+    // the route's current config to detect this and emit an actionable
+    // message rather than the raw CF error.
+    let friendlyMessage: string | undefined;
+    if (!r.ok && r.status === 400) {
+      try {
+        const routesR = await fetch(
+          `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai-gateway/gateways/${gatewayName}/routes`,
+          { headers: { 'Authorization': `Bearer ${cfToken}` } },
+        );
+        if (routesR.ok) {
+          const routesBody = await routesR.json<{ data?: { routes?: Array<{ id: string; name: string }> } }>();
+          const routeMeta = routesBody.data?.routes?.find((x) => x.name === tier.gateway_route);
+          if (routeMeta) {
+            const detailR = await fetch(
+              `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai-gateway/gateways/${gatewayName}/routes/${routeMeta.id}`,
+              { headers: { 'Authorization': `Bearer ${cfToken}` } },
+            );
+            if (detailR.ok) {
+              const detail = await detailR.json<{ result?: { version?: { data?: unknown[] } } }>();
+              const elementsCount = detail.result?.version?.data?.length ?? 0;
+              if (elementsCount === 0) {
+                friendlyMessage =
+                  `Route "${tier.gateway_route}" has no model configured in Cloudflare AI Gateway. ` +
+                  `Re-provision the tier (provisioning will create a default model target), ` +
+                  `or open the gateway in the Cloudflare dashboard and add a model element manually.`;
+              }
+            }
+          }
+        }
+      } catch { /* ignore — fall through to raw response */ }
+    }
+
     return c.json({
       ok: r.ok,
       status: r.status,
       provider: tier.provider,
       request_sent: body,
       response: responseBody,
+      ...(friendlyMessage ? { message: friendlyMessage } : {}),
+      ...(r.ok ? {} : { manual_url: gatewayDashboardUrl(accountId, gatewayName) }),
     });
   });
 
