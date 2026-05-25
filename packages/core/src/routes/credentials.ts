@@ -660,7 +660,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.73-ai-gateway-dynamic-route-compat-url',
+      buildFingerprint: 'v0.1.74-ai-gateway-runtime-auth-header',
       timestamp: new Date().toISOString(),
     });
   });
@@ -1500,12 +1500,20 @@ export function createCredentialsRoutes(): App {
         model: `dynamic/${tier.gateway_route}`,
       };
     })();
+    // v0.1.74: gateway runtime calls (gateway.ai.cloudflare.com) with
+    // authentication: true require the `cf-aig-authorization` header,
+    // NOT the standard `Authorization` header. Pre-v0.1.74 we used
+    // `Authorization`, which the gateway accepted as valid for
+    // management calls (api.cloudflare.com) but ignored for runtime
+    // calls — producing "Failed to get response from provider"
+    // (code 2005) because the gateway treated the runtime call as
+    // unauthenticated and refused to dispatch.
     const r = await fetch(
       `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayName}/compat/chat/completions`,
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${cfToken}`,
+          'cf-aig-authorization': `Bearer ${cfToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(compatBody),
@@ -1519,39 +1527,56 @@ export function createCredentialsRoutes(): App {
       try { responseBody = await r.text(); } catch { /* ignore */ }
     }
 
-    // v0.1.72: when the gateway returns 400, the most common cause is a
-    // route with empty elements (pre-v0.1.72 provisioning shipped
-    // elements:[] which made routes that couldn't dispatch). Fetch
-    // the route's current config to detect this and emit an actionable
-    // message rather than the raw CF error.
+    // v0.1.72/74: translate gateway 400s into operator-actionable messages.
+    // Two common error codes the gateway returns:
+    //   • Empty route elements → route can't dispatch (pre-v0.1.72 issue)
+    //   • code 2005 "Failed to get response from provider" → either
+    //     gateway auth is wrong, or the provider (openai/anthropic)
+    //     isn't configured with BYOK keys at the gateway level.
     let friendlyMessage: string | undefined;
     if (!r.ok && r.status === 400) {
-      try {
-        const routesR = await fetch(
-          `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai-gateway/gateways/${gatewayName}/routes`,
-          { headers: { 'Authorization': `Bearer ${cfToken}` } },
-        );
-        if (routesR.ok) {
-          const routesBody = await routesR.json<{ data?: { routes?: Array<{ id: string; name: string }> } }>();
-          const routeMeta = routesBody.data?.routes?.find((x) => x.name === tier.gateway_route);
-          if (routeMeta) {
-            const detailR = await fetch(
-              `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai-gateway/gateways/${gatewayName}/routes/${routeMeta.id}`,
-              { headers: { 'Authorization': `Bearer ${cfToken}` } },
-            );
-            if (detailR.ok) {
-              const detail = await detailR.json<{ result?: { version?: { data?: unknown[] } } }>();
-              const elementsCount = detail.result?.version?.data?.length ?? 0;
-              if (elementsCount === 0) {
-                friendlyMessage =
-                  `Route "${tier.gateway_route}" has no model configured in Cloudflare AI Gateway. ` +
-                  `Re-provision the tier (provisioning will create a default model target), ` +
-                  `or open the gateway in the Cloudflare dashboard and add a model element manually.`;
+      // Detect code 2005 from the response body.
+      const respObj = responseBody as { internalCode?: number; error?: Array<{ code?: number; message?: string }>; message?: string } | null;
+      const internalCode = respObj?.internalCode ?? respObj?.error?.[0]?.code;
+      const gatewayMessage = respObj?.message ?? respObj?.error?.[0]?.message;
+      if (internalCode === 2005) {
+        const providerHints: Record<string, string> = {
+          'openai-chat':        'OpenAI provider — add your OpenAI API key in the Cloudflare AI Gateway dashboard under "Providers".',
+          'anthropic-messages': 'Anthropic provider — add your Anthropic API key in the Cloudflare AI Gateway dashboard under "Providers".',
+          'workers-ai':         'Workers AI provider — confirm Workers AI is enabled on this Cloudflare account and the model is available.',
+          'custom':             'Custom provider — operator must configure this provider in the Cloudflare AI Gateway dashboard.',
+        };
+        const providerHint = providerHints[tier.provider] ?? 'Configure the provider in the Cloudflare AI Gateway dashboard.';
+        friendlyMessage = `${gatewayMessage}. ${providerHint}`;
+      } else {
+        // Check for empty-elements route as a fallback diagnosis.
+        try {
+          const routesR = await fetch(
+            `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai-gateway/gateways/${gatewayName}/routes`,
+            { headers: { 'Authorization': `Bearer ${cfToken}` } },
+          );
+          if (routesR.ok) {
+            const routesBody = await routesR.json<{ data?: { routes?: Array<{ id: string; name: string }> } }>();
+            const routeMeta = routesBody.data?.routes?.find((x) => x.name === tier.gateway_route);
+            if (routeMeta) {
+              const detailR = await fetch(
+                `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai-gateway/gateways/${gatewayName}/routes/${routeMeta.id}`,
+                { headers: { 'Authorization': `Bearer ${cfToken}` } },
+              );
+              if (detailR.ok) {
+                const detail = await detailR.json<{ result?: { version?: { data?: unknown[] } } }>();
+                const elementsCount = detail.result?.version?.data?.length ?? 0;
+                if (elementsCount === 0) {
+                  friendlyMessage =
+                    `Route "${tier.gateway_route}" has no model configured in Cloudflare AI Gateway. ` +
+                    `Re-provision the tier (provisioning will create a default model target), ` +
+                    `or open the gateway in the Cloudflare dashboard and add a model element manually.`;
+                }
               }
             }
           }
-        }
-      } catch { /* ignore — fall through to raw response */ }
+        } catch { /* ignore — fall through to raw response */ }
+      }
     }
 
     return c.json({
@@ -1673,12 +1698,15 @@ export function createCredentialsRoutes(): App {
       ...incomingBody,
       model: `dynamic/${tier.gateway_route}`,
     };
+    // v0.1.74: gateway runtime uses cf-aig-authorization header.
+    // See the matching comment on /_ensemble/ai/tiers/:name/test above
+    // for why; same constraint applies to this guest-app proxy.
     const r = await fetch(
       `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayName}/compat/chat/completions`,
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${cfToken}`,
+          'cf-aig-authorization': `Bearer ${cfToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(outgoingBody),
