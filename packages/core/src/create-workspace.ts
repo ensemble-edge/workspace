@@ -445,7 +445,10 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
         label: 'Workspace',
         items: [
           { id: 'people', label: 'People', icon: 'users', path: '/people' },
-          { id: 'brand', label: 'Brand', icon: 'palette', path: '/brand' },
+          // v0.1.84: brand admin moved to /brand-app. /brand is now
+          // reserved for the public-facing brand guide (always-public,
+          // shareable, doesn't 302 admins into the admin UI).
+          { id: 'brand', label: 'Brand', icon: 'palette', path: '/brand-app' },
           { id: 'apps-manage', label: 'Apps', icon: 'grid-3x3', path: '/apps' },
           { id: 'knowledge', label: 'Knowledge', icon: 'book-open', path: '/knowledge' },
           // v0.1.78: audit log moved into Settings → Audit Log tab; no
@@ -538,26 +541,19 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   // from brand_tokens — designed to share with partners and designers.
   // ============================================================================
 
+  // v0.1.84: /brand always serves the PUBLIC brand guide regardless
+  // of auth state. Operators wanting to share /brand with their team
+  // or designers no longer need to worry about recipients hitting the
+  // admin UI instead. The admin UI moved to /brand-app.
+  //
+  // Gated on the public-guide toggle — if the operator hasn't enabled
+  // it, /brand 404s for everyone (the URL has no meaning yet).
+  // Admins reach the admin UI directly at /brand-app, which is auth-
+  // required and served via the SPA catchall.
   app.get('/brand', async (c) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
 
-    // Authenticated users get the SPA's admin Brand page (the existing
-    // experience). The public guide is for *external* visitors only.
-    const { getAuthCookies } = await import('./utils/cookies');
-    const { accessToken } = getAuthCookies(c.req.header('Cookie'));
-    if (accessToken) {
-      const themeMode = await getSavedThemeMode(c.env.DB, workspace.id);
-      return c.html(generateShellHtml(
-        workspace.name ?? resolvedConfig.workspace.name,
-        resolvedConfig.brand.accent,
-        themeMode,
-      ));
-    }
-
-    // Unauthenticated: gate on the public-guide toggle. If off, 404 —
-    // explicitly *not* a redirect to /login, because we don't want to
-    // leak that the URL has a meaning.
     const { getSetting } = await import('./services/workspace-settings');
     const enabled = (await getSetting(c.env, workspace.id, 'public_brand_guide_enabled')) === 'true';
     if (!enabled) return c.notFound();

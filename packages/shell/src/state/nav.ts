@@ -116,7 +116,8 @@ function getDefaultSections(): NavSection[] {
       label: 'Workspace',
       items: [
         { id: 'people', label: 'People', icon: 'users', path: '/people' },
-        { id: 'brand', label: 'Brand', icon: 'palette', path: '/brand' },
+        // v0.1.84: brand admin moved to /brand-app
+        { id: 'brand', label: 'Brand', icon: 'palette', path: '/brand-app' },
         { id: 'settings', label: 'Settings', icon: 'settings', path: '/settings' },
       ],
     },

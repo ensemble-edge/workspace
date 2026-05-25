@@ -35,7 +35,9 @@ import {
 // Map paths to breadcrumb labels
 const pathLabels: Record<string, string> = {
   '/': 'Home',
-  '/brand': 'Brand',
+  // v0.1.84: brand admin moved to /brand-app (/brand is now the
+  // always-public brand guide, not part of the SPA chrome).
+  '/brand-app': 'Brand',
   '/people': 'People',
   '/settings': 'Settings',
   '/apps': 'Apps',
