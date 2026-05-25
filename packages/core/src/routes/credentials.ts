@@ -660,7 +660,7 @@ export function createCredentialsRoutes(): App {
   app.get('/_ensemble/diagnostic/version', async (c) => {
     return c.json({
       package: '@ensemble-edge/workspace',
-      buildFingerprint: 'v0.1.70-email-send-friendly-errors',
+      buildFingerprint: 'v0.1.71-cf-email-sending-new-product',
       timestamp: new Date().toISOString(),
     });
   });

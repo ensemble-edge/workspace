@@ -71,19 +71,56 @@ async function sendViaCloudflare(
     return {
       ok: false,
       reason: 'not_configured',
-      // v0.1.70: this is the most common deploy-side gotcha. Spell out
-      // the exact wrangler.toml fix so the operator can act on the
-      // error without digging through docs.
       error_detail:
-        'Cloudflare Email Workers requires a [[send_email]] binding in your wrangler.toml. ' +
+        'Cloudflare Email Sending requires a [[send_email]] binding in your wrangler.toml. ' +
         'Add: [[send_email]] name = "SEND_EMAIL" then redeploy. ' +
-        'You also need to verify the from-address as a destination in the Cloudflare Email Routing dashboard for your zone.',
+        'Domain authorization (SPF, DKIM, DMARC + cf-bounce MX records) must be set on your sending domain.',
     };
   }
   try {
-    const raw = buildMimeMessage(fromAddress, msg);
-    await env.SEND_EMAIL.send({ from: fromAddress, to: msg.to, raw });
-    return { ok: true };
+    // v0.1.71: switched from the legacy Email Routing reply binding's
+    // {from, to, raw} MIME interface to Cloudflare Email Sending's
+    // object interface. Email Sending is the new transactional
+    // product (public beta April 2026) that sends to any recipient
+    // without per-address pre-verification — the legacy reply path's
+    // "recipient must be a verified Email Routing destination" rule
+    // does NOT apply here. The binding name (SEND_EMAIL) is unchanged;
+    // only the call shape differs.
+    //
+    // Required DNS records on the sending domain (which curalisto.com
+    // already has on the io. subdomain):
+    //   <domain>           TXT v=spf1 include:_spf.mx.cloudflare.net ~all
+    //   cf-bounce._domainkey.<domain> TXT v=DKIM1; ...
+    //   cf-bounce.<domain> MX route{1,2,3}.mx.cloudflare.net
+    //   _dmarc.<domain>    TXT v=DMARC1; ...
+    // Cast the binding to the new Email Sending interface. The
+    // legacy @cloudflare/workers-types declaration types .send()'s
+    // arg as { from, to, raw } returning void; the new product
+    // accepts a structured object and returns { messageId }. Once
+    // workers-types updates we can drop this cast.
+    type EmailSendingArg = {
+      from: string;
+      to: string | string[];
+      subject: string;
+      html?: string;
+      text?: string;
+    };
+    type EmailSendingResult = { messageId?: string } | void;
+    const binding = env.SEND_EMAIL as unknown as {
+      send(msg: EmailSendingArg): Promise<EmailSendingResult>;
+    };
+    const sendResult = await binding.send({
+      from: fromAddress,
+      to: msg.to,
+      subject: msg.subject,
+      html: msg.html,
+      text: msg.text,
+    });
+    const messageId =
+      sendResult && typeof sendResult === 'object' && 'messageId' in sendResult
+        ? sendResult.messageId
+        : undefined;
+    return { ok: true, message_id: messageId };
   } catch (err) {
     return { ok: false, reason: 'provider_error', error_detail: String(err) };
   }
@@ -253,32 +290,9 @@ async function verifyViaResend(env: Env, workspaceId: string): Promise<VerifyRes
   return { status: 'pending', message: `Resend status: ${match.status}` };
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────
-
-function buildMimeMessage(from: string, msg: EmailMessage): string {
-  const boundary = `==ensemble-${Math.random().toString(36).slice(2)}`;
-  const parts: string[] = [
-    `From: ${from}`,
-    `To: ${msg.to}`,
-    `Subject: ${msg.subject}`,
-    'MIME-Version: 1.0',
-  ];
-  if (msg.html) {
-    parts.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
-    parts.push('');
-    parts.push(`--${boundary}`);
-    parts.push('Content-Type: text/plain; charset=utf-8');
-    parts.push('');
-    parts.push(msg.text);
-    parts.push(`--${boundary}`);
-    parts.push('Content-Type: text/html; charset=utf-8');
-    parts.push('');
-    parts.push(msg.html);
-    parts.push(`--${boundary}--`);
-  } else {
-    parts.push('Content-Type: text/plain; charset=utf-8');
-    parts.push('');
-    parts.push(msg.text);
-  }
-  return parts.join('\r\n');
-}
+// v0.1.71: buildMimeMessage removed. The new Cloudflare Email Sending
+// product accepts a structured {to, from, subject, html, text} object
+// and constructs the MIME on its end. The legacy Email Routing reply
+// binding required hand-built MIME via {from, to, raw}, which is what
+// this helper produced. Resend's HTTP API also takes the structured
+// shape, so no caller needs hand-built MIME anymore.
