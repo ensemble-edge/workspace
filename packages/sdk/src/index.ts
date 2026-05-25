@@ -34,6 +34,21 @@ export type { UseAuthReturn } from './hooks/use-auth';
 // Events bus.
 export { useEvents } from './hooks/use-events';
 
+// AI tier access — guest apps call workspace-managed AI tiers
+// (smart / good / simple / etc) without seeing provider credentials.
+// v0.1.82.
+export { useAI } from './hooks/use-ai';
+export type { UseAIReturn } from './hooks/use-ai';
+export { aiClient, createAiClient } from './ai';
+export type {
+  AiTierName,
+  AiMessage,
+  AiCallOptions,
+  AiChatCompletion,
+  AiResult,
+  AiClient,
+} from './ai';
+
 // Public types.
 export type { WorkspaceContext, ThemeMode } from './types';
 

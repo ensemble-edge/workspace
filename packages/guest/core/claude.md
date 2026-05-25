@@ -122,6 +122,205 @@ getAuth() → { token, ... } | null
 
 For the React-app SDK (`@ensemble-edge/sdk`), see its own claude.md.
 
+## Using @ensemble-edge/ui in guest apps + public pages
+
+**Yes — guest apps and public-facing sites built around them can use
+the same shared UI component library as the workspace itself.** This is
+the design intent: visual consistency between the operator-facing
+admin (inside the workspace) and any public-facing pages the guest app
+serves (on consumer domains) should be automatic, not something each
+team rebuilds.
+
+`@ensemble-edge/ui` is a shadcn-derived component library exporting
+Card, Button, Dialog, Input, Select, Tabs, Badge, AlertDialog, Toast,
+and ~30 more primitives. The same components the workspace shell uses
+internally are available to anyone who installs the package.
+
+### Scenario 1 — Component-tier guest app (in-workspace UI)
+
+This is the modern primary tier (what `quiz-cms` and similar apps use).
+Your app's React component renders inside the workspace's React tree,
+so it inherits the workspace's Tailwind config + brand CSS variables
+automatically.
+
+```typescript
+import { Button, Card, CardHeader, CardTitle, CardContent } from '@ensemble-edge/ui';
+
+export function MyAppView() {
+  return (
+    <Card>
+      <CardHeader><CardTitle>Hello</CardTitle></CardHeader>
+      <CardContent>
+        <Button>Click me</Button>
+      </CardContent>
+    </Card>
+  );
+}
+```
+
+No setup needed — the workspace already loaded Tailwind, brand CSS, and
+shadcn primitives. Your component renders pixel-identical to a core app.
+
+### Scenario 2 — Public-facing pages (consumer domain)
+
+If your guest app also serves public pages on a different domain (e.g.
+`quiz.example.com` for end users while the CMS lives in the workspace),
+you can ALSO use `@ensemble-edge/ui` — but you need to bring in two
+things:
+
+1. **The Tailwind config + CSS** — `@ensemble-edge/ui` ships its components
+   as Tailwind-styled React (or framework-of-your-choice via shadcn
+   primitives). Your public site's Tailwind config needs to scan
+   `node_modules/@ensemble-edge/ui` for class names. Standard
+   `content: ['./node_modules/@ensemble-edge/ui/**/*.{js,ts,jsx,tsx}']`
+   entry handles it.
+
+2. **The workspace brand CSS** — load
+   `https://workspace.<your-domain>/_ensemble/brand/css` as a
+   `<link rel="stylesheet">` in `<head>`. This defines the CSS custom
+   properties (`--brand-primary-main`, `--brand-background-light`, etc)
+   that the components reference. Without it, components fall back to
+   shadcn defaults (gray buttons, etc).
+
+   v0.1.81+: the brand CSS endpoint is cross-origin-cached with
+   `public, max-age=300, stale-while-revalidate=86400`, so it loads
+   fast and doesn't block first paint after the first visit.
+
+   **Defensive tip**: in your own component-level CSS or inline styles,
+   hardcode hex fallbacks next to the `var()` reference for critical
+   above-the-fold colors. On a cold cache + slow cellular connection,
+   the cross-origin brand CSS can arrive AFTER your shell paints. Hex
+   fallback bridges that race:
+
+   ```css
+   .quiz-button {
+     /* Hex literal fallback for first-paint, var() takes over once CSS arrives */
+     background: var(--brand-secondary-main, #137774);
+     color: var(--brand-on-secondary, #ffffff);
+   }
+   ```
+
+### Standalone pages NOT using the workspace brand CSS
+
+If your public page genuinely doesn't want the workspace's brand styling
+(e.g. a marketing page that uses its own design system), you can still
+use `@ensemble-edge/ui` for the components but the styling will follow
+shadcn defaults — neutral gray palette, system fonts. You can override
+the CSS variables in your own stylesheet to match your design system
+without changing the components.
+
+### What `@ensemble-edge/ui` does NOT include
+
+- Routing primitives (use the host framework's router)
+- Data fetching (use the SDK's hooks for workspace-aware fetches)
+- Layout chrome (the workspace provides Sidebar/Toolbar/Viewport — guest
+  apps don't reimplement these for in-workspace use)
+- Form state management (use React Hook Form, Formik, or vanilla state)
+
+The component library is intentionally narrow: visual primitives only.
+That keeps it framework-agnostic and version-stable.
+
+## Calling AI from a guest app
+
+The workspace exposes an AI tier proxy at `/_ensemble/ai/call/<tier-name>`.
+Guest apps pick a tier by NAME (`smart` / `good` / `simple` / etc); the
+operator wires each tier name to a specific model in the workspace's
+Settings → Connections → AI Access tab.
+
+**Critical security boundary:** provider credentials (OpenAI key,
+Anthropic key, etc) live in the WORKSPACE, never in the guest app. Your
+guest app just picks a tier name; the workspace handles auth + dispatch.
+
+### Conventional tier semantics
+
+| Tier | Use for |
+|---|---|
+| `simple` | Fast & cheap. Classification, autocomplete, short responses. |
+| `good`   | Production default. Balanced quality and cost. The workhorse. |
+| `smart`  | Maximum capability. Slower, more expensive. Reasoning, long-form. |
+
+Operators can add custom tiers too (any name). Your guest app passes
+whatever tier name it wants.
+
+### React: useAI() hook (from @ensemble-edge/sdk)
+
+```typescript
+import { useAI } from '@ensemble-edge/sdk';
+
+function MyComponent() {
+  const ai = useAI('smart');
+
+  async function summarize(text: string) {
+    const result = await ai.run({
+      messages: [
+        { role: 'system', content: 'Summarize concisely.' },
+        { role: 'user', content: text },
+      ],
+      max_tokens: 256,
+    });
+    return result.text;  // Just the assistant's reply
+    // Full response also available: result.raw, result.model, result.usage
+  }
+}
+```
+
+### Non-React: aiClient directly
+
+```typescript
+import { aiClient } from '@ensemble-edge/sdk';
+
+const result = await aiClient.run('good', {
+  messages: [{ role: 'user', content: 'Hello' }],
+  max_tokens: 64,
+});
+console.log(result.text);
+```
+
+### Raw fetch (no SDK)
+
+If you can't bring the SDK in, hit the endpoint directly with the user's
+session cookie (which the browser sends automatically for same-origin
+embedded guests):
+
+```typescript
+const r = await fetch('/_ensemble/ai/call/smart', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  credentials: 'include',
+  body: JSON.stringify({
+    messages: [{ role: 'user', content: 'Hello' }],
+    max_tokens: 64,
+  }),
+});
+const body = await r.json();
+const text = body.choices[0].message.content;
+```
+
+### Tier fallback behavior
+
+If the operator hasn't configured the tier you requested, the workspace
+silently falls back to the `good` tier (if one exists). The
+`X-Ensemble-Tier-Fallback` response header carries the originally-
+requested tier name when a fallback occurred. The `useAI` hook surfaces
+this as `result.fallback_used` — useful for logging "guest asked for
+`smart` but we served `good`" but typically not user-facing.
+
+### Cost considerations
+
+Every AI tier call hits a real provider. Each provider has its own
+pricing (Cloudflare Workers AI is the cheapest, Anthropic Claude tends
+to be the most expensive). Guest apps should:
+
+  • Cache repeated requests where appropriate.
+  • Use the cheapest tier that gives acceptable quality.
+  • Prefer `simple` for high-volume short-response cases.
+  • Reserve `smart` for genuinely complex reasoning tasks.
+
+The workspace audit log records every credential-touching action but
+NOT every AI call (too noisy). The Cloudflare AI Gateway dashboard
+shows per-tier usage / cost / latency metrics — operators can grant
+themselves the gateway view to monitor guest-app AI consumption.
+
 ## Platform Adapters
 
 This package is platform-agnostic. Platform-specific adapters:

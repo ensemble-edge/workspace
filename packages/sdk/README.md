@@ -194,6 +194,128 @@ Returns `{ user, isAuthenticated, logout }`. Same `user` slice as
 Subscribe to workspace events (brand changes, sessions, etc.).
 Unchanged from earlier SDK versions.
 
+### `useAI(tier?)`
+
+Call workspace-managed AI tiers (`smart` / `good` / `simple` / custom)
+without seeing provider credentials. The operator wires each tier
+name to a specific model in the workspace's Settings → Connections →
+AI Access tab; your guest app picks a tier by name.
+
+```ts
+import { useAI } from '@ensemble-edge/sdk';
+
+function Summarize() {
+  const ai = useAI('smart');
+
+  async function go(text: string) {
+    const result = await ai.run({
+      messages: [
+        { role: 'system', content: 'Summarize concisely.' },
+        { role: 'user', content: text },
+      ],
+      max_tokens: 256,
+    });
+    return result.text;
+  }
+}
+```
+
+Result shape:
+- `text: string` — the assistant's reply (first choice's content)
+- `model: string` — which underlying model actually served the response
+- `usage?: { prompt_tokens, completion_tokens, total_tokens }` — provider-reported
+- `raw: AiChatCompletion` — the full response body
+- `fallback_used: string | null` — set if the workspace fell back to a
+  different tier than requested (header passthrough)
+
+Conventional tier semantics (operator-configurable, but typical):
+
+| Tier | Use for |
+|---|---|
+| `simple` | Fast & cheap. Classification, autocomplete, short responses. |
+| `good`   | Production default. Balanced quality and cost. |
+| `smart`  | Maximum capability. Reasoning, planning, long-form. |
+
+Two call signatures:
+
+```ts
+// 1. Bound tier (most common)
+const ai = useAI('smart');
+await ai.run({ messages: [...] });
+
+// 2. Unbound — pick tier per-call
+const ai = useAI();
+await ai.run('simple', { messages: [...] });
+```
+
+For non-React guest apps:
+
+```ts
+import { aiClient } from '@ensemble-edge/sdk';
+const result = await aiClient.run('good', { messages: [...] });
+```
+
+The workspace's session cookie is sent automatically (`credentials:
+'include'`), so embedded guest apps "just work." Standalone usage
+requires the workspace API key on the request.
+
+## Using @ensemble-edge/ui for guest-app interfaces
+
+Guest apps can — and should — use the same shared component library
+as the workspace shell. Visual consistency between operator-facing
+admin (in workspace) and public-facing pages (on consumer domains)
+becomes automatic.
+
+```ts
+import { Card, Button, Dialog, Input } from '@ensemble-edge/ui';
+
+export function MyView() {
+  return (
+    <Card>
+      <Button>Click me</Button>
+    </Card>
+  );
+}
+```
+
+The library exports ~30 shadcn-derived primitives (Card, Button,
+Dialog, AlertDialog, Tabs, Input, Select, Badge, Toast, …) — see
+`@ensemble-edge/ui`'s exports for the full list.
+
+### In-workspace component-tier apps
+
+Your app renders inside the workspace's React tree, so it inherits
+the workspace's Tailwind config + brand CSS variables automatically.
+Just `import { Button } from '@ensemble-edge/ui'` and ship — pixel-
+identical to core apps.
+
+### Standalone public pages (consumer domain)
+
+If your guest app also serves public pages on a different domain (e.g.
+the public quiz on `quiz.example.com` while the CMS lives in the
+workspace), use the same components but bring two things:
+
+1. **Tailwind scan path:**
+   `content: ['./node_modules/@ensemble-edge/ui/**/*.{js,ts,jsx,tsx}']`
+
+2. **Workspace brand CSS** — load
+   `https://workspace.<your-domain>/_ensemble/brand/css` as a
+   `<link rel="stylesheet">` in `<head>`. v0.1.81+ caches this
+   cross-origin with 5-min freshness + 24h SWR.
+
+**Defensive tip for first-paint races on cellular:** hardcode hex
+fallbacks next to `var()` references for above-the-fold colors:
+
+```css
+.cta {
+  /* var() takes over once workspace CSS arrives; hex is the safety net */
+  background: var(--brand-secondary-main, #137774);
+}
+```
+
+CSS variable fallback only fires when the variable is *undefined*, not
+when it's slow to load. Hex literal bridges the cold-cache window.
+
 ### `workspaceContextClient`
 
 Framework-agnostic client for non-React guest apps:
