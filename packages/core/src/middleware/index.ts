@@ -19,7 +19,7 @@
  */
 
 // Common middleware
-export { cors } from './cors';
+export { cors, publicCors } from './cors';
 export { workspaceResolver } from './workspace-resolver';
 
 // Standalone mode middleware

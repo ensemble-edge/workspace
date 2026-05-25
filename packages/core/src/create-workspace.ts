@@ -23,7 +23,7 @@ import type {
   WorkspaceConfig,
   ResolvedConfig,
 } from './types';
-import { cors, workspaceResolver, bootstrapCheck, auth } from './middleware';
+import { cors, publicCors, workspaceResolver, bootstrapCheck, auth } from './middleware';
 import { runMigrations, hasMigrations, migrations } from './db';
 import { createAuthRoutes, createBootstrapRoutes, createGuestGatewayRoutes, createWorkspaceContextRoutes } from './routes';
 import { registerCoreApps } from './apps';
@@ -86,6 +86,21 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   app.use('*', cors({
     additionalOrigins: resolvedConfig.cors.brandOrigins,
   }));
+
+  // 1b. Public CORS on brand-asset surfaces. v0.1.80: every public
+  // brand resource (favicon, manifest, css endpoint, spec/tokens JSON,
+  // render URLs) is CDN-style public — consumer sites + marketing
+  // pages embed them cross-origin. Origin: *, no credentials.
+  //
+  // Order matters: publicCors runs AFTER the credentialed cors() but
+  // its Origin: * header overwrites any tighter value set above.
+  // OPTIONS preflight short-circuits inside publicCors before reaching
+  // the GET handlers.
+  app.use('/_ensemble/brand/*', publicCors());
+  app.use('/_ensemble/version', publicCors());
+  app.use('/favicon.svg', publicCors());
+  app.use('/favicon.ico', publicCors());
+  app.use('/manifest.webmanifest', publicCors());
 
   // 2. Run migrations on first request (checks for new migrations each cold start).
   // Promise-based guard so concurrent first-requests share one run; if it

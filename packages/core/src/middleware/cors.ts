@@ -1,8 +1,19 @@
 /**
  * CORS Middleware
  *
- * Handles Cross-Origin Resource Sharing for the /_ensemble/* API routes.
- * Allows the web app (app.ensemble.ai) and configured brand origins.
+ * Two flavors:
+ *
+ *   • cors() — credentialed CORS for the authenticated /_ensemble/*
+ *     API surface. Whitelisted origins + Access-Control-Allow-
+ *     Credentials: true so the shell's session cookies traverse.
+ *
+ *   • publicCors() — public, credential-free CORS for brand assets
+ *     and other workspace-served public resources (favicon, manifest,
+ *     css endpoint, render URLs, version endpoint). Origin "*",
+ *     no credentials, no Authorization-via-cookies. These resources
+ *     are CDN-style public and consumed cross-origin by other sites
+ *     embedding the workspace's brand (consumer apps, marketing
+ *     pages, future patient portals). v0.1.80.
  */
 
 import { createMiddleware } from 'hono/factory';
@@ -77,5 +88,59 @@ export function cors(options?: { additionalOrigins?: string[] }) {
       c.header('Access-Control-Allow-Credentials', 'true');
       c.header('Vary', 'Origin');
     }
+  });
+}
+
+/**
+ * Public CORS middleware — opens a route to ANY origin without
+ * credentials. Use for public brand assets, public CSS, public
+ * manifest, favicon variants, render endpoints. Equivalent to a
+ * CDN-style asset endpoint.
+ *
+ * Key differences from cors():
+ *   • Origin: *  (anyone can fetch())
+ *   • No credentials (cookies / Authorization header NOT sent by browser)
+ *   • Allowed methods: GET, HEAD, OPTIONS (these are read-only public
+ *     resources; no writes from cross-origin)
+ *   • Handles OPTIONS preflight inline so callers get 204 instead
+ *     of route-not-found
+ *   • Vary: Origin set so caches don't poison responses across origins
+ *
+ * v0.1.80: introduced to fix the CORS gap on /_ensemble/brand/* and
+ * its /assets/brand/* alias. Operator reported curalisto.com couldn't
+ * fetch the workspace's manifest.webmanifest cross-origin.
+ */
+export function publicCors() {
+  return createMiddleware<{
+    Bindings: Env;
+    Variables: ContextVariables;
+  }>(async (c, next) => {
+    // OPTIONS preflight handling — return 204 with CORS headers so
+    // browsers proceed to the actual request. The actual GET / HEAD
+    // handler below adds the same headers to its response.
+    if (c.req.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Accept, Range',
+          'Access-Control-Max-Age': '86400',
+          'Vary': 'Origin',
+        },
+      });
+    }
+
+    await next();
+
+    // Decorate the downstream response with CORS headers.
+    c.header('Access-Control-Allow-Origin', '*');
+    c.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    c.header('Access-Control-Max-Age', '86400');
+    // Vary: Origin is technically optional for Origin:* responses,
+    // but recommended so any intermediary that ever swaps the origin
+    // header (e.g. caching layers that respect non-* policies later)
+    // produces correct cache keys.
+    c.header('Vary', 'Origin');
   });
 }
