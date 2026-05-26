@@ -665,8 +665,8 @@ export function createCredentialsRoutes(): App {
   // Old path kept as alias for back-compat with any operator scripts.
   const versionPayload = () => ({
     package: '@ensemble-edge/workspace',
-    version: '0.1.87',
-    buildFingerprint: 'v0.1.87-toast-hotfix-sonner',
+    version: '0.1.88',
+    buildFingerprint: 'v0.1.88-people-invite-email-resend',
     timestamp: new Date().toISOString(),
   });
   // v0.1.81: version probe should never be stale — CI / monitoring /

@@ -5,7 +5,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { useSignals } from '@preact/signals-react/runtime';
-import { Users, UserPlus, MoreHorizontal, Shield } from 'lucide-react';
+import { Users, UserPlus, MoreHorizontal, Shield, Mail } from 'lucide-react';
 
 import {
   Card,
@@ -48,6 +48,30 @@ interface Member {
   avatar_url: string | null;
   role: string;
   joined_at: string;
+  /** v0.1.88: 1 = invite sent but user hasn't completed magic-link sign-in yet. */
+  invite_pending?: number;
+  /** v0.1.88: ISO timestamp of most-recent invite send (initial or resend). */
+  invited_at?: string | null;
+  /** v0.1.88: display name of the admin who issued the most recent invite. */
+  invited_by_name?: string | null;
+}
+
+/**
+ * v0.1.88: short relative time formatter for the Pending tooltip
+ * ("Invited 3 days ago"). Pure utility — no i18n yet, English only.
+ * If a more general formatter is needed later, lift into shared utils.
+ */
+function relativeTimeAgo(iso: string | null | undefined): string {
+  if (!iso) return 'recently';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms) || ms < 0) return 'recently';
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
 }
 
 export function PeoplePage() {
@@ -85,6 +109,32 @@ export function PeoplePage() {
       fetchMembers();
     } catch (err) {
       toast.error('Failed to update role', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  };
+
+  const handleResend = async (userId: string, email: string) => {
+    try {
+      const res = await authedFetch(`/_ensemble/core/people/members/${userId}/resend-invite`, {
+        method: 'POST',
+      });
+      const data = await res.json() as { success?: boolean; error?: string; email_sent?: boolean; email_reason?: string };
+      if (!res.ok) throw new Error(data.error || 'Failed to resend');
+      if (data.email_sent) {
+        toast.success('Invite resent', { description: `New invitation emailed to ${email}.` });
+      } else {
+        toast.error('Invite not sent', {
+          description: data.email_reason === 'not_configured'
+            ? 'Email is not configured. Set it up under Settings → Connections → Email.'
+            : data.email_reason === 'unverified_domain'
+              ? 'Sending domain is not verified yet.'
+              : `Email provider error: ${data.email_reason ?? 'unknown'}.`,
+        });
+      }
+      fetchMembers();
+    } catch (err) {
+      toast.error('Failed to resend invite', {
         description: err instanceof Error ? err.message : 'Unknown error',
       });
     }
@@ -181,6 +231,17 @@ export function PeoplePage() {
                       {member.handle && (
                         <span className="text-sm text-muted-foreground">@{member.handle}</span>
                       )}
+                      {member.invite_pending ? (
+                        <Badge
+                          variant="outline"
+                          className="bg-amber-500/10 text-amber-600 border-amber-500/30"
+                          title={`Invited ${relativeTimeAgo(member.invited_at)}${
+                            member.invited_by_name ? ` by ${member.invited_by_name}` : ''
+                          }. Has not signed in yet.`}
+                        >
+                          Pending
+                        </Badge>
+                      ) : null}
                     </div>
                     <p className="text-sm text-muted-foreground truncate">{member.email}</p>
                   </div>
@@ -197,6 +258,14 @@ export function PeoplePage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        {member.invite_pending ? (
+                          <>
+                            <DropdownMenuItem onClick={() => handleResend(member.id, member.email)}>
+                              <Mail className="mr-2 h-4 w-4" /> Resend invite
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                          </>
+                        ) : null}
                         <DropdownMenuItem onClick={() => handleRoleChange(member.id, 'admin')}>
                           <Shield className="mr-2 h-4 w-4" /> Make Admin
                         </DropdownMenuItem>
@@ -243,13 +312,38 @@ function InviteForm({ onSuccess }: { onSuccess: () => void }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, displayName: displayName || undefined, role }),
       });
-      const data = await res.json() as { success?: boolean; error?: string; status?: string };
+      const data = await res.json() as {
+        success?: boolean;
+        error?: string;
+        status?: string;
+        email_sent?: boolean;
+        email_reason?: string;
+      };
       if (!res.ok) throw new Error(data.error || 'Failed to invite');
 
-      toast.success(
-        data.status === 'added' ? 'Member added' : 'Invite sent',
-        { description: `${email} has been ${data.status === 'added' ? 'added to' : 'invited to'} the workspace.` }
-      );
+      // v0.1.88: surface email-send result distinctly from the row-write
+      // result. The user row + membership were created either way; what
+      // matters to the admin is whether the magic-link email actually
+      // went out. If it didn't, the People list shows a Pending row
+      // with a Resend button — so they can recover after fixing the
+      // email config.
+      if (data.status === 'added') {
+        toast.success('Member added', {
+          description: `${email} was already a known account and has been added to the workspace.`,
+        });
+      } else if (data.email_sent) {
+        toast.success('Invite sent', {
+          description: `${email} has been emailed a magic-link invitation.`,
+        });
+      } else {
+        toast.error('Invited, but email failed', {
+          description: data.email_reason === 'not_configured'
+            ? `${email} was added but no email was sent — email is not configured. Set it up under Settings → Connections → Email, then resend from the People list.`
+            : data.email_reason === 'unverified_domain'
+              ? `${email} was added but no email was sent — sending domain is not verified yet.`
+              : `${email} was added but the email provider returned: ${data.email_reason ?? 'unknown error'}. Resend from the People list once resolved.`,
+        });
+      }
       onSuccess();
     } catch (err) {
       toast.error('Failed to invite', {

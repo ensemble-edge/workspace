@@ -444,7 +444,7 @@ export function createAuthRoutes() {
     // Burn the token immediately — single-use semantics.
     await c.env.KV.delete(`magic:${token}`);
 
-    let payload: { user_id: string; workspace_id: string };
+    let payload: { user_id: string; workspace_id: string; invite?: boolean };
     try {
       payload = JSON.parse(payloadRaw);
     } catch {
@@ -487,6 +487,30 @@ export function createAuthRoutes() {
     c.header('Set-Cookie', setAccessTokenCookie(session.accessToken, cookieOptions), { append: true });
     c.header('Set-Cookie', setRefreshTokenCookie(session.refreshToken, cookieOptions), { append: true });
 
+    // v0.1.88: if this was an invite acceptance (the issueInvite()
+    // service marked the KV payload with invite: true), flip
+    // users.invite_pending → 0 and clear invite_token so the People
+    // UI's "Pending" badge + Resend button disappear for this user.
+    // We also audit it as a distinct action so admins can confirm
+    // "did Alice ever accept her invite?" by searching the audit log.
+    const isInviteAcceptance = payload.invite === true;
+    if (isInviteAcceptance) {
+      await c.env.DB.prepare(
+        `UPDATE users
+            SET invite_pending = 0,
+                invite_token = NULL
+          WHERE id = ? AND invite_pending = 1`,
+      ).bind(row.id).run();
+      await recordAudit(c.env, {
+        workspaceId: workspace.id,
+        action: 'people.invite.accepted',
+        actorId: row.id,
+        actorHandle: row.email,
+        ipAddress: c.req.header('cf-connecting-ip') ?? null,
+        details: { method: 'magic_link' },
+      });
+    }
+
     // v0.1.76: audit magic-link login.
     await recordAudit(c.env, {
       workspaceId: workspace.id,
@@ -494,7 +518,7 @@ export function createAuthRoutes() {
       actorId: row.id,
       actorHandle: row.email,
       ipAddress: c.req.header('cf-connecting-ip') ?? null,
-      details: { method: 'magic_link' },
+      details: { method: 'magic_link', invite_acceptance: isInviteAcceptance },
     });
 
     return c.redirect('/');

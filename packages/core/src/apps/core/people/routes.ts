@@ -8,6 +8,8 @@
 import { Hono } from 'hono';
 import type { Env, ContextVariables } from '../../../types';
 import { auth, requireRole } from '../../../middleware';
+import { issueInvite } from '../../../services/invites';
+import { recordAudit } from '../../../services/audit-log';
 
 export function registerPeopleRoutes(
   app: Hono<{ Bindings: Env; Variables: ContextVariables }>
@@ -16,6 +18,11 @@ export function registerPeopleRoutes(
   app.use('/_ensemble/core/people/*', auth());
 
   // GET /_ensemble/core/people/members — List workspace members
+  //
+  // v0.1.88: surfaces invite_pending + invited_at + the inviter's
+  // display name so the UI can render the "Pending" badge and the
+  // tooltip "Invited N days ago by Alice". Pending members sort to
+  // the top so admins notice stalled invites first.
   app.get('/_ensemble/core/people/members', async (c) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
@@ -23,11 +30,14 @@ export function registerPeopleRoutes(
     try {
       const result = await c.env.DB.prepare(
         `SELECT u.id, u.email, u.handle, u.display_name, u.avatar_url, u.locale, u.created_at,
+                u.invite_pending, u.invited_at,
+                inviter.display_name AS invited_by_name,
                 m.role, m.created_at as joined_at
          FROM memberships m
          JOIN users u ON u.id = m.user_id
+         LEFT JOIN users inviter ON inviter.id = u.invited_by_user_id
          WHERE m.workspace_id = ?
-         ORDER BY m.role ASC, u.display_name ASC`
+         ORDER BY u.invite_pending DESC, m.role ASC, u.display_name ASC`
       ).bind(workspace.id).all();
 
       return c.json({ data: result.results || [] });
@@ -121,29 +131,135 @@ export function registerPeopleRoutes(
       return c.json({ success: true, userId: existing.id, status: 'added' });
     }
 
-    // Create new user + membership
+    // Create new user + membership.
+    //
+    // v0.1.88: the user logs in via magic-link, not a password — but
+    // users.password_hash is NOT NULL, so we still write an unguessable
+    // random hash. The user never sees this; if they want to set a
+    // real password they do it from account settings later.
     const userId = `user_${crypto.randomUUID().replace(/-/g, '')}`;
-
-    // Import password hashing
     const { hashPassword } = await import('../../../utils/password');
-    const tempPassword = crypto.randomUUID().slice(0, 16);
-    const passwordHash = await hashPassword(tempPassword);
+    const passwordHash = await hashPassword(crypto.randomUUID());
 
+    const currentUser = c.get('user');
     try {
       await c.env.DB.prepare(
-        `INSERT INTO users (id, email, password_hash, display_name, locale)
-         VALUES (?, ?, ?, ?, 'en')`
+        `INSERT INTO users (id, email, password_hash, display_name, locale, invite_pending)
+         VALUES (?, ?, ?, ?, 'en', 1)`
       ).bind(userId, body.email, passwordHash, body.displayName || body.email.split('@')[0]).run();
 
       await c.env.DB.prepare(
         `INSERT INTO memberships (user_id, workspace_id, role) VALUES (?, ?, ?)`
       ).bind(userId, workspace.id, role).run();
 
-      return c.json({ success: true, userId, status: 'invited' });
+      // Issue the magic-link invitation. issueInvite() handles KV +
+      // user-row metadata updates internally; we just need to send and
+      // record the audit entry.
+      const { emailResult } = await issueInvite(c.env, {
+        workspaceId: workspace.id,
+        userId,
+        email: body.email,
+        inviterUserId: currentUser?.id ?? null,
+        inviterDisplayName: currentUser?.displayName ?? currentUser?.email ?? null,
+        request: c.req.raw,
+        revokePrior: false,
+      });
+
+      await recordAudit(c.env, {
+        workspaceId: workspace.id,
+        action: emailResult.ok ? 'people.invite.sent' : 'people.invite.send_failed',
+        actorId: currentUser?.id ?? null,
+        actorHandle: currentUser?.email ?? null,
+        ipAddress: c.req.header('cf-connecting-ip') ?? null,
+        details: emailResult.ok
+          ? { invitee_email: body.email, invitee_user_id: userId, role }
+          : {
+              invitee_email: body.email,
+              invitee_user_id: userId,
+              role,
+              reason: emailResult.reason,
+              error: typeof emailResult.error_detail === 'string'
+                ? emailResult.error_detail.slice(0, 200)
+                : undefined,
+            },
+      });
+
+      return c.json({
+        success: true,
+        userId,
+        status: 'invited',
+        email_sent: emailResult.ok,
+        email_reason: emailResult.ok ? undefined : emailResult.reason,
+      });
     } catch (error) {
       console.error('Failed to invite member:', error);
       return c.json({ error: 'Failed to invite member' }, 500);
     }
+  });
+
+  // POST /_ensemble/core/people/members/:userId/resend-invite
+  //
+  // v0.1.88: re-issues a fresh magic-link invitation for a user who's
+  // still in invite_pending = 1 state. Admin-only. Revokes the prior
+  // token (deletes its KV entry) before minting the new one, so a
+  // stale token from a forwarded earlier email stops working.
+  app.post('/_ensemble/core/people/members/:userId/resend-invite', async (c) => {
+    const workspace = c.get('workspace');
+    const membership = c.get('membership');
+    const currentUser = c.get('user');
+    const targetUserId = c.req.param('userId');
+
+    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    if (!membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
+      return c.json({ error: 'Insufficient permissions' }, 403);
+    }
+
+    // Target must exist, be a member of this workspace, and still be pending.
+    const target = await c.env.DB.prepare(
+      `SELECT u.id, u.email, u.invite_pending
+         FROM users u
+         JOIN memberships m ON m.user_id = u.id
+        WHERE u.id = ? AND m.workspace_id = ?`,
+    ).bind(targetUserId, workspace.id).first<{ id: string; email: string; invite_pending: number }>();
+
+    if (!target) return c.json({ error: 'User not found in this workspace' }, 404);
+    if (!target.invite_pending) {
+      return c.json({ error: 'User has already accepted their invite' }, 400);
+    }
+
+    const { emailResult } = await issueInvite(c.env, {
+      workspaceId: workspace.id,
+      userId: target.id,
+      email: target.email,
+      inviterUserId: currentUser?.id ?? null,
+      inviterDisplayName: currentUser?.displayName ?? currentUser?.email ?? null,
+      request: c.req.raw,
+      revokePrior: true,
+    });
+
+    await recordAudit(c.env, {
+      workspaceId: workspace.id,
+      action: emailResult.ok ? 'people.invite.resent' : 'people.invite.resend_failed',
+      actorId: currentUser?.id ?? null,
+      actorHandle: currentUser?.email ?? null,
+      ipAddress: c.req.header('cf-connecting-ip') ?? null,
+      details: emailResult.ok
+        ? { invitee_email: target.email, invitee_user_id: target.id }
+        : {
+            invitee_email: target.email,
+            invitee_user_id: target.id,
+            reason: emailResult.reason,
+            error: typeof emailResult.error_detail === 'string'
+              ? emailResult.error_detail.slice(0, 200)
+              : undefined,
+          },
+    });
+
+    return c.json({
+      success: true,
+      email_sent: emailResult.ok,
+      email_reason: emailResult.ok ? undefined : emailResult.reason,
+    });
   });
 
   // DELETE /_ensemble/core/people/members/:userId — Remove member
