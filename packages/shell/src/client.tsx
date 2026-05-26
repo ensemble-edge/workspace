@@ -13,7 +13,7 @@ import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Shell } from './components/Shell';
 import * as EnsembleUI from '@ensemble-edge/ui';
-import { authedFetch, subscribeWorkspaceEvent, registerIframeForEvents } from './state';
+import { authedFetch, subscribeWorkspaceEvent, registerIframeForEvents, toast } from './state';
 import type { WorkspaceEvent, WorkspaceEventType } from './state';
 
 /**
@@ -375,6 +375,10 @@ function installEnsembleGlobal() {
     // Encrypted secret storage hook (v0.1.85). Component-tier signature
     // takes explicit appId (host pathname is the shell's, not the guest's).
     useSecret,
+    // Toast notifications (v0.1.86). Component-tier guests share the
+    // shell's React tree and can call the real toast() directly — no
+    // postMessage hop. Same `toast` instance powers core-app toasts.
+    toast,
   };
 }
 

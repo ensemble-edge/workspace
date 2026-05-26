@@ -461,6 +461,70 @@ NOT every AI call (too noisy). The Cloudflare AI Gateway dashboard
 shows per-tier usage / cost / latency metrics — operators can grant
 themselves the gateway view to monitor guest-app AI consumption.
 
+## Toast Notifications (v0.1.86)
+
+Guest apps can show workspace-styled toast notifications. The toast
+renders in the workspace's own toaster (bottom-right corner, same as
+core-app toasts) — so it stays consistent with the rest of the shell
+and survives iframe navigation.
+
+### Iframe-tier (window.Ensemble)
+
+```tsx
+function SaveButton() {
+  async function onSave() {
+    try {
+      await fetch('/api/save', { method: 'POST' });
+      window.Ensemble.toast.success('Saved');
+    } catch (e) {
+      window.Ensemble.toast.error('Save failed', { description: String(e) });
+    }
+  }
+  return <button onClick={onSave}>Save</button>;
+}
+```
+
+Four kinds — `success`, `error`, `warning`, `info`. Each accepts an
+optional `{ description, duration }` payload (`duration: 0` for a
+persistent toast that only dismisses when the user clicks it).
+
+### Component-tier + external React (via @ensemble-edge/sdk)
+
+```tsx
+import { useToast } from '@ensemble-edge/sdk';
+
+function ImportPanel() {
+  const toast = useToast();
+  // toast.success(...), toast.error(...), etc.
+}
+```
+
+Or call directly outside React:
+
+```ts
+import { toast } from '@ensemble-edge/sdk';
+toast.warning('Quota at 80%');
+```
+
+### Limitations (iframe-tier only)
+
+- **No action buttons.** Functions can't cross the postMessage boundary,
+  so the bridge supports `kind / message / description / duration`
+  only. If your toast needs an "Undo" or other inline button, use a
+  component-tier guest — those share the host React tree and can use
+  the full shell toast API with `action: { label, onClick }`.
+- **No programmatic dismiss.** The bridge currently fires-and-forgets;
+  toasts auto-dismiss after `duration` (or stay until clicked when
+  `duration: 0`).
+
+### When to use a toast vs an inline message
+
+Toasts are for *transient* signals — "Saved", "Imported 42 rows",
+"Quota approaching". For errors that block continuing the user's flow
+(form validation, missing required input), render an inline message
+near the relevant control instead — toasts disappear and a user who
+glanced away misses them.
+
 ## Encrypted Secret Storage (v0.1.85)
 
 Guest apps that need to hold secrets (downstream API keys, OAuth

@@ -426,6 +426,69 @@ const [tab, setTab] = useHashTab('overview', TABS);
 The hook is ~20 lines; the SDK may export it as `useHashTab` in a
 future release. For now: copy-paste into your guest app.
 
+## Toast notifications (`useToast` / `toast`, v0.1.86)
+
+Show workspace-styled toast notifications from inside a guest app. The
+SDK detects where it's running and delegates to the workspace shell's
+toaster — your toast looks identical to a core-app toast, lives in the
+same bottom-right corner, and survives if the user navigates away from
+your iframe page.
+
+```tsx
+import { useToast } from '@ensemble-edge/sdk';
+
+function SaveButton() {
+  const toast = useToast();
+
+  async function onSave() {
+    try {
+      await api.save();
+      toast.success('Saved');
+    } catch (e) {
+      toast.error('Save failed', { description: String(e) });
+    }
+  }
+
+  return <button onClick={onSave}>Save</button>;
+}
+```
+
+Outside React (event handlers, async flows, non-React UIs):
+
+```ts
+import { toast } from '@ensemble-edge/sdk';
+
+toast.success('Imported 42 rows');
+toast.warning('Quota at 80%', { duration: 0 }); // 0 = persistent
+toast.info('Connecting…', { description: 'This usually takes a few seconds' });
+toast.error('Failed', { description: err.message });
+```
+
+### Where the toast actually renders
+
+| Environment                   | Renders via                                           |
+|-------------------------------|-------------------------------------------------------|
+| Component-tier guest          | `window.Ensemble.toast` (shell's real toast, in-tree) |
+| Iframe-tier guest             | postMessage → shell renders in its own toaster        |
+| Standalone (your own domain)  | `console.log` fallback — bring your own toaster       |
+
+You don't need to detect the environment — the SDK does it for you.
+The same `toast.success(...)` call works in every tier.
+
+### Limitations
+
+- **No action buttons over the iframe bridge.** Functions can't survive
+  postMessage, so iframe-tier toasts support only kind / message /
+  description / duration. If you need an action button (e.g. an Undo
+  affordance), use a component-tier guest — component-tier guests
+  share the host React tree and call `toast()` directly with the full
+  shell API including `action: { label, onClick }`.
+
+- **Standalone fallback is console-only by default.** If your guest app
+  is deployed on a separate domain *without* the workspace shell
+  around it, the SDK can't reach into the shell's toaster — render
+  your own with `sonner` or similar.
+
 ## Encrypted secret storage (`useSecret`, v0.1.85)
 
 Guest apps frequently need to store API keys, OAuth refresh tokens, or

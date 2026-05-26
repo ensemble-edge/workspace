@@ -30,7 +30,7 @@ import {
   Button,
 } from '@ensemble-edge/ui';
 
-import { currentPath, navigate, registerIframeForEvents } from '../../../state';
+import { currentPath, navigate, registerIframeForEvents, toast } from '../../../state';
 import { authedFetch } from '../../../state';
 
 type Tier = 'component' | 'iframe' | 'sandboxed';
@@ -198,6 +198,27 @@ function IframeTierRenderer({ appInfo, path }: { appInfo: AppInfo; path: string 
             unregisterEvents = registerIframeForEvents(iframe.contentWindow);
           }
           break;
+        case 'ensemble:toast': {
+          // v0.1.86: iframe-tier guests ask the host to show a toast.
+          // Functions (action.onClick) don't survive postMessage, so the
+          // bridge supports kind/message/description/duration only. Action
+          // buttons are a UI feature of the in-tree shell toast surface
+          // and stay reserved for component-tier guests that call the
+          // host toast directly.
+          const p = (msg as unknown as { payload?: {
+            kind?: 'success' | 'error' | 'warning' | 'info';
+            message?: unknown;
+            description?: unknown;
+            duration?: unknown;
+          } }).payload;
+          if (!p || typeof p.message !== 'string') break;
+          const kind = p.kind === 'error' || p.kind === 'warning' || p.kind === 'info'
+            ? p.kind : 'success';
+          const description = typeof p.description === 'string' ? p.description : undefined;
+          const duration = typeof p.duration === 'number' ? p.duration : undefined;
+          toast[kind](p.message, { description, duration });
+          break;
+        }
       }
     }
     window.addEventListener('message', onMessage);

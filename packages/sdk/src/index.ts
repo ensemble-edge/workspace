@@ -42,6 +42,16 @@ export { useEvents } from './hooks/use-events';
 export { useAI } from './hooks/use-ai';
 export type { UseAIReturn, UseAIOptions, AiCallResult } from './hooks/use-ai';
 
+// Toast notifications (v0.1.86). Show workspace-styled toasts from a
+// guest app. Auto-detects environment: delegates to the shell's real
+// toast when running in-workspace (component-tier or iframe-tier),
+// falls back to console.log in standalone deployments. The SDK
+// intentionally doesn't bundle its own toaster — toasts inside the
+// workspace must come from the workspace's toaster so they survive
+// navigation, layer ordering, and a11y focus management consistently.
+export { useToast, toast } from './hooks/use-toast';
+export type { ToastApi, ToastOptions, ToastKind } from './hooks/use-toast';
+
 // Encrypted per-app secret storage (v0.1.85). Workspace owns the key;
 // the guest never sees plaintext at rest. Two scopes: 'app' (shared,
 // admin-write) and 'user' (private to the user, admins cannot read).

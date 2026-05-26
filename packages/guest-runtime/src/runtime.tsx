@@ -166,6 +166,21 @@ export interface EnsembleRuntime {
   useAI: typeof useAI;
 
   /**
+   * toast — show a toast notification in the workspace shell (v0.1.86).
+   *
+   * The iframe doesn't render the toast itself; it postMessages the host
+   * shell, which renders the toast in its own toaster (bottom-right of
+   * the workspace, same as core-app toasts). This means toasts stay
+   * visible even after the user navigates away from the iframe page.
+   *
+   * Functions (e.g. action.onClick) don't cross frames, so the bridge
+   * accepts kind/message/description/duration only. For action buttons,
+   * use a component-tier guest (your component runs in the host React
+   * tree and calls the host toast() directly).
+   */
+  toast: typeof toast;
+
+  /**
    * useSecret({ key, scope }) — read/write encrypted per-app secrets that
    * the workspace stores on the guest's behalf (v0.1.85).
    *
@@ -336,6 +351,51 @@ function extractAiText(data: unknown): string {
   if (typeof d.response === 'string') return d.response;
   return '';
 }
+
+/**
+ * Toast bridge — postMessage to the workspace shell so it renders the
+ * toast in its own toaster. Plain message envelope (functions can't
+ * cross the postMessage boundary), so `action` callbacks aren't
+ * supported on this surface — use a component-tier guest for that.
+ */
+export type ToastKind = 'success' | 'error' | 'warning' | 'info';
+export interface ToastBridgeOptions {
+  description?: string;
+  /** ms, default 5000. 0 = persistent until dismissed by the user. */
+  duration?: number;
+}
+
+function postToast(kind: ToastKind, message: string, opts: ToastBridgeOptions = {}): void {
+  try {
+    window.parent.postMessage({
+      type: 'ensemble:toast',
+      v: 1,
+      payload: { kind, message, description: opts.description, duration: opts.duration },
+    }, '*');
+  } catch {
+    // Same-origin same window (no parent). Fall back to console so the
+    // signal doesn't disappear silently during local dev.
+    console.log(`[ensemble:toast:${kind}]`, message, opts.description ?? '');
+  }
+}
+
+interface ToastApi {
+  (kind: ToastKind, message: string, options?: ToastBridgeOptions): void;
+  success: (message: string, options?: ToastBridgeOptions) => void;
+  error: (message: string, options?: ToastBridgeOptions) => void;
+  warning: (message: string, options?: ToastBridgeOptions) => void;
+  info: (message: string, options?: ToastBridgeOptions) => void;
+}
+
+const toast: ToastApi = Object.assign(
+  (kind: ToastKind, message: string, options?: ToastBridgeOptions) => postToast(kind, message, options),
+  {
+    success: (message: string, options?: ToastBridgeOptions) => postToast('success', message, options),
+    error: (message: string, options?: ToastBridgeOptions) => postToast('error', message, options),
+    warning: (message: string, options?: ToastBridgeOptions) => postToast('warning', message, options),
+    info: (message: string, options?: ToastBridgeOptions) => postToast('info', message, options),
+  },
+);
 
 /**
  * Iframe-tier guests are served under /_ensemble/apps/<appId>/... so we
@@ -715,6 +775,7 @@ const runtime: EnsembleRuntime = {
 
   useAI,
   useSecret,
+  toast,
 };
 
 // Attach to window so the guest's HTML shell can find it.
