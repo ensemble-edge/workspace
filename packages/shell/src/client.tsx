@@ -13,7 +13,15 @@ import * as React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Shell } from './components/Shell';
 import * as EnsembleUI from '@ensemble-edge/ui';
-import { authedFetch, subscribeWorkspaceEvent, registerIframeForEvents, toast } from './state';
+import { authedFetch, subscribeWorkspaceEvent, registerIframeForEvents } from './state';
+// v0.1.87 hotfix: use the same sonner-backed `toast` from @ensemble-edge/ui
+// that the shell's <Toaster> actually renders. Earlier v0.1.86 mistakenly
+// wired `window.Ensemble.toast` to the dead signal-based toast in
+// `state/toasts.ts` — that signal store has no renderer (Shell.tsx
+// mounts sonner's <Toaster>, not our own ToastList), so guest calls
+// silently went nowhere and the signal writes upset the @preact/signals
+// subscribers in the React tree (Maximum update depth exceeded).
+import { toast as sonnerToast } from '@ensemble-edge/ui';
 import type { WorkspaceEvent, WorkspaceEventType } from './state';
 
 /**
@@ -44,6 +52,34 @@ function extractAiText(data: unknown): string {
   if (typeof d.response === 'string') return d.response;
   return '';
 }
+
+/**
+ * Toast surface exposed to component-tier guest apps as
+ * `window.Ensemble.toast`. Backed by sonner (the shell's real toaster).
+ * Shape matches the iframe-tier bridge in `guest-runtime/runtime.tsx`
+ * and the SDK's `@ensemble-edge/sdk` toast — guests can lift code
+ * between tiers without rewrites. Only the kind/message/description/
+ * duration fields cross the iframe bridge; component-tier guests may
+ * pass any sonner ToastOptions (action buttons, custom JSX, etc.)
+ * directly via the raw sonnerToast import if they want.
+ */
+type ToastKind = 'success' | 'error' | 'warning' | 'info';
+interface ToastBridgeOptions {
+  description?: string;
+  /** ms, default 5000. 0 = persistent until dismissed by the user. */
+  duration?: number;
+}
+const ensembleToast = Object.assign(
+  (kind: ToastKind, message: string, options?: ToastBridgeOptions) => {
+    sonnerToast[kind](message, options);
+  },
+  {
+    success: (message: string, options?: ToastBridgeOptions) => sonnerToast.success(message, options),
+    error: (message: string, options?: ToastBridgeOptions) => sonnerToast.error(message, options),
+    warning: (message: string, options?: ToastBridgeOptions) => sonnerToast.warning(message, options),
+    info: (message: string, options?: ToastBridgeOptions) => sonnerToast.info(message, options),
+  },
+);
 
 /**
  * useSecret — see guest-runtime/runtime.tsx + @ensemble-edge/sdk for
@@ -375,10 +411,11 @@ function installEnsembleGlobal() {
     // Encrypted secret storage hook (v0.1.85). Component-tier signature
     // takes explicit appId (host pathname is the shell's, not the guest's).
     useSecret,
-    // Toast notifications (v0.1.86). Component-tier guests share the
-    // shell's React tree and can call the real toast() directly — no
-    // postMessage hop. Same `toast` instance powers core-app toasts.
-    toast,
+    // Toast notifications (v0.1.86, hotfixed v0.1.87). Component-tier
+    // guests share the shell's React tree, so they hit sonner directly
+    // (no postMessage hop). This is the same sonner `toast` instance
+    // the rest of @ensemble-edge/ui consumers use.
+    toast: ensembleToast,
   };
 }
 

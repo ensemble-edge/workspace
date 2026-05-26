@@ -30,8 +30,11 @@ import {
   Button,
 } from '@ensemble-edge/ui';
 
-import { currentPath, navigate, registerIframeForEvents, toast } from '../../../state';
+import { currentPath, navigate, registerIframeForEvents } from '../../../state';
 import { authedFetch } from '../../../state';
+// v0.1.87 hotfix: use sonner (the shell's real toaster), not the dead
+// signal-based toast in state/toasts.ts. See client.tsx for the rationale.
+import { toast as sonnerToast } from '@ensemble-edge/ui';
 
 type Tier = 'component' | 'iframe' | 'sandboxed';
 
@@ -216,7 +219,7 @@ function IframeTierRenderer({ appInfo, path }: { appInfo: AppInfo; path: string 
             ? p.kind : 'success';
           const description = typeof p.description === 'string' ? p.description : undefined;
           const duration = typeof p.duration === 'number' ? p.duration : undefined;
-          toast[kind](p.message, { description, duration });
+          sonnerToast[kind](p.message, { description, duration });
           break;
         }
       }

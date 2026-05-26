@@ -81,18 +81,6 @@ export {
 } from './events';
 export type { WorkspaceEvent, WorkspaceEventType } from './events';
 
-// Toast notifications
-export {
-  toast,
-  toasts,
-  pauseAutoDismiss,
-  resumeAutoDismiss,
-  dismissToast,
-  dismissAllToasts,
-  dismissMostRecent,
-} from './toasts';
-export type { Toast, ToastOptions, PartialToastOptions } from './toasts';
-
 // Overlay state (drawers, modals, dialogs)
 export {
   overlayStack,
