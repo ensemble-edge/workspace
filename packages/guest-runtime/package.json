@@ -1,6 +1,6 @@
 {
   "name": "@ensemble-edge/guest-runtime",
-  "version": "0.1.0",
+  "version": "0.1.86",
   "description": "Browser-side runtime for Ensemble guest apps — serves React, workspace UI, and layout primitives so guest workers ship as tiny bundles",
   "type": "module",
   "main": "./src/index.ts",
@@ -37,8 +37,12 @@
     "react-dom": "^18.0.0 || ^19.0.0"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": true },
-    "react-dom": { "optional": true }
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   },
   "license": "MIT"
 }
