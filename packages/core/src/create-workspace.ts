@@ -25,7 +25,7 @@ import type {
 } from './types';
 import { cors, publicCors, workspaceResolver, bootstrapCheck, auth } from './middleware';
 import { runMigrations, hasMigrations, migrations } from './db';
-import { createAuthRoutes, createBootstrapRoutes, createGuestGatewayRoutes, createWorkspaceContextRoutes } from './routes';
+import { createAuthRoutes, createBootstrapRoutes, createGuestGatewayRoutes, createGuestSecretsRoutes, createWorkspaceContextRoutes } from './routes';
 import { registerCoreApps } from './apps';
 import { generateBrandCss, getSavedThemeMode } from './apps/core/brand/css';
 // Shell assets are built by @ensemble-edge/shell and exported as strings
@@ -197,8 +197,13 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   // Auth routes (/_ensemble/auth/*)
   app.route('/_ensemble/auth', createAuthRoutes());
 
-  // Guest App Gateway (/_ensemble/apps/*) - requires authentication
+  // Guest App Gateway (/_ensemble/apps/*) - requires authentication.
+  // v0.1.85: guest-secrets routes (/_ensemble/apps/:appId/_secrets/*)
+  // are registered BEFORE the gateway forward so the workspace
+  // handles them directly. The `_secrets` underscore-prefix is the
+  // convention for "workspace-served, not forwarded to guest worker".
   app.use('/_ensemble/apps/*', auth());
+  app.route('/_ensemble/apps', createGuestSecretsRoutes());
   app.route('/_ensemble/apps', createGuestGatewayRoutes());
 
   // Credentials, AI tiers, setup/status, auth/methods, invite/reset

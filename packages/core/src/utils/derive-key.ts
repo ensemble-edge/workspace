@@ -21,7 +21,8 @@ const encoder = new TextEncoder();
 
 export type PurposeInfo =
   | 'ensemble:credentials:v1'
-  | 'ensemble:payload:v1';
+  | 'ensemble:payload:v1'
+  | 'ensemble:guest-secrets:v1';
 
 /**
  * Derive a 256-bit AES-GCM key from the workspace's JWT_SECRET for a

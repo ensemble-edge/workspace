@@ -45,6 +45,96 @@ function extractAiText(data: unknown): string {
   return '';
 }
 
+/**
+ * useSecret — see guest-runtime/runtime.tsx + @ensemble-edge/sdk for
+ * the canonical versions. Component-tier guests run inside the host
+ * React tree, so they can't derive appId from window.location like
+ * iframe-tier guests can — appId is required. Shape matches the SDK
+ * version exactly (v0.1.83 lesson: keep shapes identical across all
+ * runtimes so the same guest code lifts between tiers).
+ *
+ * Guest apps are NOT required to use the workspace secret store. They
+ * may keep secrets in their own storage; this is provided as a
+ * convenience for apps that don't want to manage encryption themselves.
+ */
+type SecretScope = 'app' | 'user';
+interface UseSecretOptions {
+  appId: string;
+  key: string;
+  scope?: SecretScope;
+}
+function useSecret({ appId, key, scope = 'app' }: UseSecretOptions) {
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const baseUrl = React.useMemo(
+    () => `/_ensemble/apps/${encodeURIComponent(appId)}/_secrets/${encodeURIComponent(key)}?scope=${scope}`,
+    [appId, key, scope],
+  );
+
+  const get = React.useCallback(async (): Promise<string | null> => {
+    setLoading(true); setError(null);
+    try {
+      const r = await authedFetch(baseUrl);
+      if (r.status === 404) return null;
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        throw new Error(`secret read failed (HTTP ${r.status}): ${detail.slice(0, 200)}`);
+      }
+      const body = await r.json() as { value: string };
+      return body.value;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'secret read failed';
+      setError(msg);
+      throw e;
+    } finally {
+      setLoading(false);
+    }
+  }, [baseUrl]);
+
+  const set = React.useCallback(async (value: string): Promise<void> => {
+    setLoading(true); setError(null);
+    try {
+      const r = await authedFetch(baseUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value }),
+      });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        throw new Error(`secret write failed (HTTP ${r.status}): ${detail.slice(0, 200)}`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'secret write failed';
+      setError(msg);
+      throw e;
+    } finally {
+      setLoading(false);
+    }
+  }, [baseUrl]);
+
+  const remove = React.useCallback(async (): Promise<boolean> => {
+    setLoading(true); setError(null);
+    try {
+      const r = await authedFetch(baseUrl, { method: 'DELETE' });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        throw new Error(`secret delete failed (HTTP ${r.status}): ${detail.slice(0, 200)}`);
+      }
+      const body = await r.json() as { ok: boolean };
+      return body.ok;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'secret delete failed';
+      setError(msg);
+      throw e;
+    } finally {
+      setLoading(false);
+    }
+  }, [baseUrl]);
+
+  return { get, set, remove, loading, error };
+}
+
 function useAI({ tier }: { tier: string }) {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -282,6 +372,9 @@ function installEnsembleGlobal() {
     useLocales,
     useWorkspaceEvent,
     useFonts,
+    // Encrypted secret storage hook (v0.1.85). Component-tier signature
+    // takes explicit appId (host pathname is the shell's, not the guest's).
+    useSecret,
   };
 }
 

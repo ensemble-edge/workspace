@@ -42,6 +42,19 @@ export { useEvents } from './hooks/use-events';
 export { useAI } from './hooks/use-ai';
 export type { UseAIReturn, UseAIOptions, AiCallResult } from './hooks/use-ai';
 
+// Encrypted per-app secret storage (v0.1.85). Workspace owns the key;
+// the guest never sees plaintext at rest. Two scopes: 'app' (shared,
+// admin-write) and 'user' (private to the user, admins cannot read).
+// Guest apps don't HAVE to use this — they can keep secrets in their
+// own worker storage — but using it means no key management on their
+// side and the workspace's encryption envelope.
+export { useSecret, createSecretsClient } from './hooks/use-secret';
+export type {
+  UseSecretOptions,
+  UseSecretReturn,
+  SecretScope,
+} from './hooks/use-secret';
+
 // Public types.
 export type { WorkspaceContext, ThemeMode } from './types';
 

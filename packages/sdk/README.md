@@ -340,6 +340,200 @@ fallbacks next to `var()` references for above-the-fold colors:
 CSS variable fallback only fires when the variable is *undefined*, not
 when it's slow to load. Hex literal bridges the cold-cache window.
 
+### Tabs — match the Brand/Settings pattern (auto-responsive)
+
+For multi-section guest-app pages, use the same Tabs primitive the
+built-in apps (Brand, Settings, Admin) use. Configure with
+`variant="line"` to match the underline-style look of workspace pages:
+
+```typescript
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@ensemble-edge/ui';
+
+export function MyAppPage() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">My App</h1>
+        <p className="text-muted-foreground">Section description</p>
+      </div>
+
+      <Tabs defaultValue="overview" className="w-full">
+        <TabsList variant="line" className="mb-6">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
+          <TabsTrigger value="advanced">Advanced</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview"><OverviewPanel /></TabsContent>
+        <TabsContent value="settings"><SettingsPanel /></TabsContent>
+        <TabsContent value="advanced"><AdvancedPanel /></TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+```
+
+**Responsive mobile collapse is automatic.** TabsList uses a
+ResizeObserver to watch its container — when narrower than 640px the
+strip silently swaps to a native `<select>` dropdown. No media
+queries, no breakpoints, width-based (not viewport-based) so even a
+tab strip inside a narrow sidebar collapses correctly. Brand/Settings
+get this behavior; guest apps get it for free.
+
+To DISABLE auto-collapse (rare — pass `noCollapse`):
+
+```typescript
+<TabsList variant="line" noCollapse>…</TabsList>
+```
+
+#### Hash-based tab routing (deep linking)
+
+Built-in apps sync the active tab with the URL hash so
+`/brand-app#colors` deep-links to the Colors tab. Same pattern is
+available to guest apps via a small hook — paste into your guest app:
+
+```typescript
+import { useState, useEffect, useCallback } from 'react';
+
+function useHashTab(defaultTab: string, validTabs: readonly string[]) {
+  const getTab = useCallback(() => {
+    const hash = window.location.hash.replace('#', '');
+    return validTabs.includes(hash) ? hash : defaultTab;
+  }, [defaultTab, validTabs]);
+
+  const [tab, setTabState] = useState(getTab);
+
+  useEffect(() => {
+    const onHashChange = () => setTabState(getTab());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, [getTab]);
+
+  const setTab = useCallback((value: string) => {
+    setTabState(value);
+    window.history.replaceState(null, '', `#${value}`);
+  }, []);
+
+  return [tab, setTab] as const;
+}
+
+// Usage:
+const TABS = ['overview', 'settings', 'advanced'] as const;
+const [tab, setTab] = useHashTab('overview', TABS);
+<Tabs value={tab} onValueChange={setTab}>…</Tabs>
+```
+
+The hook is ~20 lines; the SDK may export it as `useHashTab` in a
+future release. For now: copy-paste into your guest app.
+
+## Encrypted secret storage (`useSecret`, v0.1.85)
+
+Guest apps frequently need to store API keys, OAuth refresh tokens, or
+per-user credentials for downstream services (e.g. a user's Notion
+token, an admin-configured Stripe key). The workspace can hold these
+secrets for you — encrypted at rest with a key your app never sees —
+so you don't have to manage encryption yourself.
+
+> **You don't have to use this.** Guest apps are free to store
+> secrets in their own worker storage (KV, D1, Durable Objects,
+> Secrets Manager, whatever). The workspace secret store is an
+> *optional* convenience for apps that don't want to roll their own
+> encryption envelope.
+
+### React hook
+
+```ts
+import { useSecret } from '@ensemble-edge/sdk';
+
+function StripeConfigPanel({ appId }: { appId: string }) {
+  const stripeKey = useSecret({ appId, key: 'stripe_api_key' });
+
+  async function save(newValue: string) {
+    await stripeKey.set(newValue); // encrypts + writes
+  }
+
+  async function load() {
+    const v = await stripeKey.get(); // decrypts + returns
+    if (v === null) return 'not configured';
+    return v;
+  }
+
+  return (
+    <div>
+      {stripeKey.error && <p>Error: {stripeKey.error}</p>}
+      <button disabled={stripeKey.loading} onClick={() => save('sk_live_…')}>
+        Save Stripe key
+      </button>
+    </div>
+  );
+}
+```
+
+### Two scopes
+
+- **`scope: 'app'`** (default) — app-global. Shared across all users of
+  the app. Workspace admins can write; any authenticated member can
+  read. Use this for operator-configured provider keys (e.g. the
+  workspace's Stripe API key, an Anthropic API key the admin set up).
+- **`scope: 'user'`** — per-user. Private to the authenticated user.
+  Admins **cannot** read or write another user's secrets, by design.
+  Use this for tokens the user themselves authorized (e.g. a user's
+  Notion OAuth refresh token, their personal calendar credential).
+
+```ts
+const notionToken = useSecret({
+  appId: 'tasks-app',
+  key: 'notion_oauth_refresh',
+  scope: 'user', // per-user, private to the caller
+});
+```
+
+### Framework-agnostic client
+
+For Vue, Solid, vanilla, or non-React guest UIs:
+
+```ts
+import { createSecretsClient } from '@ensemble-edge/sdk';
+
+const secrets = createSecretsClient('your-app-id');
+
+await secrets.set('stripe_api_key', 'sk_live_…');          // app scope
+await secrets.set('notion_token', 'tok_…', 'user');        // user scope
+const k = await secrets.get('stripe_api_key');             // → string | null
+await secrets.remove('stripe_api_key');                    // → boolean
+const all = await secrets.list();                          // → metadata only, no values
+```
+
+### How it works
+
+The workspace mounts the secret routes at
+`/_ensemble/apps/<your-app-id>/_secrets/*` *before* forwarding to your
+worker — the `_secrets` underscore prefix is reserved for
+workspace-served paths. Each call:
+
+1. Goes to the workspace, authenticated by the user's session cookie
+   (browser) or a `wks_*` API key (script/CI).
+2. The workspace encrypts the plaintext with AES-256-GCM, key derived
+   via HKDF from a workspace-only secret. Your guest worker never
+   touches the encryption key and never sees the ciphertext at rest.
+3. On read, the workspace decrypts and returns plaintext over the wire
+   (HTTPS). Plaintext only exists in transit — the SDK does **not**
+   cache it in localStorage or sessionStorage by default.
+
+The encryption envelope is independent from the workspace's own
+credential store (different HKDF info string), so a compromise of one
+doesn't leak the other.
+
+### When NOT to use it
+
+- **You need the secret in your worker at request-time, not just from
+  the browser.** The workspace stores secrets; your worker reads them
+  by calling its own gateway path from inside (or by talking to the
+  workspace API with its app token). If you want zero round-trips,
+  keep secrets in your own KV.
+- **You're storing high-volume per-user data.** This is for *secrets*
+  (typically a handful of values per app), not arbitrary user state.
+
 ### `workspaceContextClient`
 
 Framework-agnostic client for non-React guest apps:
