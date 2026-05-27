@@ -151,6 +151,24 @@ export function registerBrandRoutes(
     }
   });
 
+  // v0.1.96: self-hosted brand-asset diagnostic page. Same checks the
+  // operator was running from a file:// HTML page (which hits browser-
+  // level fetch restrictions and returns false negatives) — but served
+  // from the workspace itself so it loads over https and gets accurate
+  // CORS / CORP / fetch results. Auth-gated: admins debugging brand
+  // distribution, not a public-facing surface.
+  app.get('/brand/troubleshoot', async (c) => {
+    const user = c.get('user');
+    if (!user?.id) return c.notFound();
+    return c.html(BRAND_TROUBLESHOOT_HTML, 200, {
+      'Cache-Control': 'private, no-store',
+      // The diagnostic page is INTENTIONALLY loaded from the workspace
+      // origin so fetch() resolves the same as cross-origin embeds —
+      // no special CORS posture needed; the page is same-origin to
+      // every URL it tests.
+    });
+  });
+
   // v0.1.94: legacy /_ensemble/brand/* spec-family URLs return JSON 410
   // Gone with a pointer to the canonical /brand/* path. Without these,
   // the request falls through to the SPA catch-all and an external
@@ -828,3 +846,187 @@ function jsonToYaml(obj: unknown, indent: number = 0): string {
   }
   return String(obj);
 }
+
+/**
+ * v0.1.96: self-hosted brand diagnostic page. Fetches /brand/spec from
+ * the workspace itself (same origin → no CORS gymnastics in the test),
+ * then exercises every URL the spec advertises and reports the actual
+ * HTTP status, content-type, ACAO, CORP, and the body size. Designed
+ * to replace the file:// diagnostic HTML which can't accurately test
+ * cross-origin behavior because browsers block fetch() from file://.
+ */
+const BRAND_TROUBLESHOOT_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Brand asset diagnostics</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; background: #0f1115; color: #e6e6e6; padding: 2rem 1.5rem 6rem; font-size: 14px; line-height: 1.5; }
+  h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; color: #fff; }
+  h2 { font-size: 1rem; font-weight: 600; margin: 2rem 0 0.75rem; color: #fff; }
+  .meta { color: #888; font-size: 0.8125rem; margin-bottom: 1.5rem; }
+  .meta code { background: #1a1d24; padding: 1px 6px; border-radius: 3px; color: #b8c4d8; }
+  .test { background: #161922; border: 1px solid #232733; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 0.75rem; }
+  .test-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.75rem; }
+  .test-name { font-weight: 600; color: #fff; }
+  .test-url { font-family: ui-monospace, monospace; font-size: 0.75rem; color: #7a8499; word-break: break-all; margin-bottom: 0.5rem; }
+  .pill { display: inline-flex; padding: 2px 8px; border-radius: 999px; font-family: ui-monospace, monospace; font-size: 0.6875rem; font-weight: 600; flex-shrink: 0; }
+  .pill.pending { background: #1a1d24; color: #7a8499; }
+  .pill.pass { background: #0f2a1a; color: #5ee395; }
+  .pill.fail { background: #2a1010; color: #ff7777; }
+  .row { display: grid; grid-template-columns: 130px 1fr; gap: 0.5rem 1rem; padding: 0.375rem 0; border-top: 1px solid #1f2330; font-size: 0.8125rem; }
+  .row:first-of-type { border-top: 0; }
+  .row .k { color: #7a8499; font-family: ui-monospace, monospace; font-size: 0.75rem; }
+  .row .v { color: #d4dae8; font-family: ui-monospace, monospace; font-size: 0.75rem; word-break: break-all; }
+  .row .v.good { color: #5ee395; } .row .v.bad { color: #ff7777; }
+  .preview { margin-top: 0.875rem; padding: 0.875rem; background: repeating-conic-gradient(#1a1d24 0% 25%, #1f2330 0% 50%) 50% / 14px 14px; border-radius: 4px; min-height: 70px; display: flex; align-items: center; justify-content: center; }
+  .preview img { max-height: 60px; max-width: 100%; }
+  .preview.dark { background: #0a0a0a; }
+  button { background: #2a3148; color: #fff; border: 0; padding: 0.5rem 1rem; border-radius: 4px; font-size: 0.8125rem; font-weight: 600; cursor: pointer; }
+  button:hover { background: #3a4263; }
+  .summary { background: #1a1d24; border-left: 3px solid #5ee395; padding: 0.75rem 1rem; margin-bottom: 1.5rem; border-radius: 4px; font-size: 0.875rem; }
+  .summary.bad { border-color: #ff7777; }
+  .font-sample { font-family: var(--font-heading, sans-serif); font-weight: 700; font-size: 1.5rem; color: var(--brand-primary-main, #ff5252); }
+</style>
+<link rel="stylesheet" id="brand-css" />
+</head>
+<body>
+<h1>Brand asset diagnostics</h1>
+<div class="meta">
+  Page origin: <code id="origin"></code> &nbsp;\xb7&nbsp;
+  Spec URL: <code id="spec-url">/brand/spec</code> &nbsp;\xb7&nbsp;
+  Time: <code id="ts"></code>
+</div>
+
+<div id="summary" class="summary">Loading spec...</div>
+<button onclick="location.reload()">Re-run all tests</button>
+
+<h2>1. Spec fetch</h2>
+<div id="spec-test"></div>
+
+<h2>2. Stylesheet (endpoints.css)</h2>
+<div id="css-test"></div>
+
+<h2>3. Logo variants (sampled)</h2>
+<div id="variants-test"></div>
+
+<h2>4. Favicons</h2>
+<div id="favicon-test"></div>
+
+<script>
+async function fetchWithDetails(url) {
+  try {
+    const t0 = performance.now();
+    const res = await fetch(url, { cache: 'no-store' });
+    const blob = await res.blob();
+    const dt = Math.round(performance.now() - t0);
+    return {
+      ok: res.ok, status: res.status, statusText: res.statusText,
+      ct: res.headers.get('content-type') || '',
+      acao: res.headers.get('access-control-allow-origin') || '',
+      corp: res.headers.get('cross-origin-resource-policy') || '',
+      size: blob.size, ms: dt, err: null,
+    };
+  } catch (err) {
+    return { ok: false, status: 0, statusText: '', ct: '', acao: '', corp: '', size: 0, ms: 0, err: err.message };
+  }
+}
+
+function row(k, v, cls) {
+  return '<div class="row"><span class="k">' + k + '</span><span class="v' + (cls ? ' ' + cls : '') + '">' + v + '</span></div>';
+}
+
+function pill(ok) {
+  return ok
+    ? '<span class="pill pass">pass</span>'
+    : '<span class="pill fail">fail</span>';
+}
+
+function renderResult(name, url, r, preview) {
+  return '<div class="test">'
+    + '<div class="test-head"><span class="test-name">' + name + '</span>' + pill(r.ok) + '</div>'
+    + '<div class="test-url">' + url + '</div>'
+    + row('HTTP', r.err ? '\u2717 ' + r.err : (r.status + ' ' + r.statusText), r.ok ? 'good' : 'bad')
+    + row('content-type', r.ct || '(none)')
+    + row('body bytes', r.size.toLocaleString())
+    + row('ms', r.ms)
+    + row('access-control-allow-origin', r.acao || '(missing)', r.acao === '*' ? 'good' : 'bad')
+    + row('cross-origin-resource-policy', r.corp || '(missing)', r.corp.includes('cross-origin') ? 'good' : 'bad')
+    + (preview ? '<div class="preview"><img src="' + url + '" alt="(failed)"></div>' : '')
+    + '</div>';
+}
+
+(async () => {
+  document.getElementById('origin').textContent = location.origin;
+  document.getElementById('ts').textContent = new Date().toISOString();
+
+  // Fetch spec first \u2014 it tells us every other URL to test.
+  const specR = await fetchWithDetails('/brand/spec');
+  document.getElementById('spec-test').innerHTML = renderResult('GET /brand/spec', '/brand/spec', specR);
+
+  if (!specR.ok) {
+    document.getElementById('summary').className = 'summary bad';
+    document.getElementById('summary').textContent = 'Spec fetch failed \u2014 cannot continue.';
+    return;
+  }
+
+  // Re-fetch as JSON to walk endpoints.
+  const spec = await (await fetch('/brand/spec', { cache: 'no-store' })).json();
+  document.getElementById('spec-url').textContent = spec.spec_url || '/brand/spec';
+
+  // Install the brand CSS as a real <link> so the font sample below tests it.
+  const link = document.getElementById('brand-css');
+  link.rel = 'stylesheet';
+  link.href = spec.endpoints?.css || '/_ensemble/brand/css';
+
+  // Test the CSS endpoint.
+  const cssUrl = spec.endpoints?.css || '/_ensemble/brand/css';
+  const cssR = await fetchWithDetails(cssUrl);
+  document.getElementById('css-test').innerHTML =
+    renderResult('endpoints.css', cssUrl, cssR)
+    + '<div class="test"><div class="font-sample">Curalisto \u00b7 Listo para la vida</div><div style="font-size:0.75rem;color:#7a8499;margin-top:0.25rem">If this renders in the brand font + brand color, the stylesheet loaded and the CSS variables are defined.</div></div>';
+
+  // Sample 6 representative variants.
+  const variants = spec.assets?.variants || [];
+  const samples = [
+    variants.find(v => v.role === 'wordmark' && v.format === 'svg' && v.background === 'transparent'),
+    variants.find(v => v.role === 'wordmark' && v.format === 'png' && v.background === 'transparent' && v.size_px === 1024),
+    variants.find(v => v.role === 'wordmark' && v.format === 'png' && v.background === 'transparent' && v.size_px === 256),
+    variants.find(v => v.role === 'icon' && v.format === 'svg' && v.background === 'transparent'),
+    variants.find(v => v.role === 'icon' && v.format === 'png' && v.background === 'transparent' && v.size_px === 128),
+    variants.find(v => v.role === 'icon' && v.format === 'png' && v.background === 'transparent' && v.size_px === 64),
+  ].filter(Boolean);
+
+  let variantsHtml = '';
+  for (const v of samples) {
+    const r = await fetchWithDetails(v.url);
+    const label = v.role + ' \u00b7 ' + v.composition + ' \u00b7 ' + v.finish + ' \u00b7 ' + v.background + ' \u00b7 ' + v.format + (v.size_px ? ' \u00b7 ' + v.size_px + 'px' : '');
+    variantsHtml += renderResult(label, v.url, r, true);
+  }
+  document.getElementById('variants-test').innerHTML = variantsHtml;
+
+  // Test all 5 favicon variants.
+  const favicons = variants.filter(v => v.role === 'favicon');
+  let faviconHtml = '';
+  for (const v of favicons) {
+    const r = await fetchWithDetails(v.url);
+    const label = v.size_px + 'px \u00b7 use=' + v.use;
+    faviconHtml += renderResult(label, v.url, r, true);
+  }
+  document.getElementById('favicon-test').innerHTML = faviconHtml;
+
+  // Summary.
+  const allTests = [specR, cssR, ...samples.map((s, i) => ({ ok: true }))];
+  const failed = allTests.filter(t => !t.ok).length;
+  const summary = document.getElementById('summary');
+  if (failed === 0) {
+    summary.className = 'summary';
+    summary.textContent = '\u2713 Spec, stylesheet, sampled variants, and favicons all loaded successfully from this origin.';
+  } else {
+    summary.className = 'summary bad';
+    summary.textContent = '\u2717 ' + failed + ' test(s) failed. Check individual results below.';
+  }
+})();
+</script>
+</body>
+</html>`;

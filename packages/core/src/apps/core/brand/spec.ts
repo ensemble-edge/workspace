@@ -615,7 +615,7 @@ export async function assembleBrandSpec(
   const v11Typography = await assembleTypographyV11(db, workspaceId, baseUrl);
 
   // ── v1.1: Logo masters + variants + clearspace ──
-  const v11Logos = await assembleLogosV11(db, workspaceId, logoSlotUrls, baseUrl, workspaceRow?.slug);
+  const v11Logos = await assembleLogosV11(db, workspaceId, logoSlotUrls, baseUrl, workspaceRow?.slug, assetAliasPath ?? '');
 
   // ── v1.1: Color palettes + modes ──
   const v11ColorsExtra = await assembleColorsV11(db, workspaceId);
@@ -724,26 +724,35 @@ export async function assembleBrandSpec(
     spatial: v11Spatial,
 
     ...(baseUrl ? {
-      endpoints: {
-        // v0.1.95: removed `tokens` from endpoints. The previous URL
-        // (/_ensemble/brand/tokens) only supports PUT for admin token
-        // writes — there is no public GET for token data. The token
-        // *content* is already in this spec response (colors.groups,
-        // colors.palettes, typography.roles, spatial.*), so a separate
-        // endpoint would only duplicate it. Removed rather than
-        // inventing a fake-handler endpoint.
-        spec:            `${baseUrl}/brand/spec`,
-        css:             `${baseUrl}/_ensemble/brand/css`,
-        context:         `${baseUrl}/brand/context`,
-        brand_guide:     `${baseUrl}/brand`,
-        variant_index:   `${baseUrl}/brand/variants`,
-        font_stylesheet: `${baseUrl}/_ensemble/brand/css`,
-        schema:          `${baseUrl}/brand/spec/schema.json`,
-        changelog:       `${baseUrl}/brand/changelog`,
-        preview_card: logoSlotUrls.og_image
-          ? logoSlotUrls.og_image
-          : `${baseUrl}/_ensemble/brand/og.png`,
-      },
+      endpoints: (() => {
+        // v0.1.96: alias the asset-distribution endpoints (css, font_stylesheet,
+        // preview_card) so the operator's configured /<alias>/brand/* path
+        // applies uniformly. The /brand/* spec-family endpoints stay
+        // unaliased — those are canonical short URLs for spec navigation,
+        // not asset distribution surfaces.
+        const aliasPath = assetAliasPath ?? '';
+        const aliasIfSet = (path: string): string => {
+          if (!aliasPath) return `${baseUrl}${path}`;
+          const m = /^\/(?:brand|_ensemble\/brand)\/(.+)$/.exec(path);
+          if (!m) return `${baseUrl}${path}`;
+          return `${baseUrl}/${aliasPath}/brand/${m[1]}`;
+        };
+        // logoSlotUrls.og_image already went through the alias transform
+        // when it was loaded from brand_tokens, so we use it as-is here.
+        return {
+          spec:            `${baseUrl}/brand/spec`,            // canonical
+          css:             aliasIfSet('/_ensemble/brand/css'),
+          context:         `${baseUrl}/brand/context`,         // canonical
+          brand_guide:     `${baseUrl}/brand`,                 // canonical
+          variant_index:   `${baseUrl}/brand/variants`,        // canonical
+          font_stylesheet: aliasIfSet('/_ensemble/brand/css'),
+          schema:          `${baseUrl}/brand/spec/schema.json`, // canonical
+          changelog:       `${baseUrl}/brand/changelog`,       // canonical
+          preview_card: logoSlotUrls.og_image
+            ? (logoSlotUrls.og_image.startsWith('http') ? logoSlotUrls.og_image : `${baseUrl}${logoSlotUrls.og_image}`)
+            : aliasIfSet('/_ensemble/brand/og.png'),
+        };
+      })(),
     } : {}),
   };
 
@@ -838,8 +847,29 @@ async function assembleLogosV11(
   logoSlotUrls: Record<string, string>,
   baseUrl: string | undefined,
   workspaceSlug: string | undefined,
+  // v0.1.96: pass the operator's asset alias path so variant + favicon
+  // URLs can be rewritten uniformly. Without this every variant URL
+  // emits as `/_ensemble/brand/render/...` even when the operator has
+  // configured `/<alias>/brand/...` for distribution — inconsistent
+  // with how `logos.*` URLs already get aliased.
+  assetAliasPath: string,
 ): Promise<NonNullable<EnsembleBrandSpec['assets']>> {
   const out: NonNullable<EnsembleBrandSpec['assets']> = {};
+
+  // Helper: rewrite an absolute brand URL to honor the configured alias.
+  // applyAssetAlias works on paths only, so strip baseUrl, apply, prepend.
+  const aliasUrl = (absUrl: string): string => {
+    if (!baseUrl || !assetAliasPath) return absUrl;
+    if (!absUrl.startsWith(baseUrl)) return absUrl;
+    const path = absUrl.slice(baseUrl.length);
+    // applyAssetAlias is imported lazily at the call site in
+    // assembleBrandSpec; reuse the inline regex here to keep this
+    // helper synchronous (avoids threading an async transform through
+    // every variant emit).
+    const m = /^\/(?:brand|_ensemble\/brand)\/(.+)$/.exec(path);
+    if (!m) return absUrl;
+    return `${baseUrl}/${assetAliasPath}/brand/${m[1]}`;
+  };
 
   // Masters — typed metadata around each slot URL.
   const masters: Record<string, LogoMasterSpec> = {};
@@ -972,7 +1002,7 @@ async function assembleLogosV11(
               background: bg.id,
               format: 'svg',
               size_px: null,
-              url: `${baseUrl}/_ensemble/brand/render/${baseName}.svg`,
+              url: aliasUrl(`${baseUrl}/_ensemble/brand/render/${baseName}.svg`),
               approved: true,
             }));
             // PNG — one entry per size in the matrix.
@@ -984,7 +1014,7 @@ async function assembleLogosV11(
                 background: bg.id,
                 format: 'png',
                 size_px: size,
-                url: `${baseUrl}/_ensemble/brand/render/${baseName}.png?size=${size}`,
+                url: aliasUrl(`${baseUrl}/_ensemble/brand/render/${baseName}.png?size=${size}`),
                 approved: true,
               }));
             }
@@ -1016,7 +1046,7 @@ async function assembleLogosV11(
             background: 'transparent',
             format: 'png',
             size_px: size,
-            url: `${baseUrl}/_ensemble/brand/favicon-${size}.png`,
+            url: aliasUrl(`${baseUrl}/_ensemble/brand/favicon-${size}.png`),
             approved: true,
             use,
           }));
