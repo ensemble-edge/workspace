@@ -1,0 +1,1 @@
+{"version":3,"file":"routes.d.ts","sourceRoot":"","sources":["../../../../src/apps/core/brand/routes.ts"],"names":[],"mappings":"AAAA;;;;;GAKG;AAEH,OAAO,KAAK,EAAE,IAAI,EAAE,MAAM,MAAM,CAAC;AACjC,OAAO,KAAK,EAAE,GAAG,EAAE,gBAAgB,EAAE,MAAM,gBAAgB,CAAC;AAI5D,wBAAgB,mBAAmB,CACjC,GAAG,EAAE,IAAI,CAAC;IAAE,QAAQ,EAAE,GAAG,CAAC;IAAC,SAAS,EAAE,gBAAgB,CAAA;CAAE,CAAC,GACxD,IAAI,CA+mBN"}
