@@ -739,6 +739,19 @@ export async function assembleBrandSpec(
         };
         // logoSlotUrls.og_image already went through the alias transform
         // when it was loaded from brand_tokens, so we use it as-is here.
+        // v0.1.97: preview_card is OMITTED when there's no real source.
+        // Pre-v0.1.97 it fell back to /_ensemble/brand/og.png — a URL
+        // with NO handler that returned the SPA HTML shell. Spec
+        // consumers following the URL got HTML instead of an image,
+        // worse than the field being absent. New rule: if the operator
+        // hasn't uploaded an og_image asset, we omit the field. The
+        // instructions block already tells consumers to treat absent
+        // fields as "not set" rather than to invent a fallback.
+        const previewCard = logoSlotUrls.og_image
+          ? (logoSlotUrls.og_image.startsWith('http')
+              ? logoSlotUrls.og_image
+              : `${baseUrl}${logoSlotUrls.og_image}`)
+          : undefined;
         return {
           spec:            `${baseUrl}/brand/spec`,            // canonical
           css:             aliasIfSet('/_ensemble/brand/css'),
@@ -748,9 +761,7 @@ export async function assembleBrandSpec(
           font_stylesheet: aliasIfSet('/_ensemble/brand/css'),
           schema:          `${baseUrl}/brand/spec/schema.json`, // canonical
           changelog:       `${baseUrl}/brand/changelog`,       // canonical
-          preview_card: logoSlotUrls.og_image
-            ? (logoSlotUrls.og_image.startsWith('http') ? logoSlotUrls.og_image : `${baseUrl}${logoSlotUrls.og_image}`)
-            : aliasIfSet('/_ensemble/brand/og.png'),
+          ...(previewCard ? { preview_card: previewCard } : {}),
         };
       })(),
     } : {}),

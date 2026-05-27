@@ -691,8 +691,8 @@ export function createCredentialsRoutes(): App {
   // Old path kept as alias for back-compat with any operator scripts.
   const versionPayload = () => ({
     package: '@ensemble-edge/workspace',
-    version: '0.1.96',
-    buildFingerprint: 'v0.1.96-uniform-alias-and-self-hosted-troubleshoot',
+    version: '0.1.97',
+    buildFingerprint: 'v0.1.97-troubleshoot-public-preview-card-honest',
     timestamp: new Date().toISOString(),
   });
   // v0.1.81: version probe should never be stale — CI / monitoring /
@@ -799,6 +799,17 @@ export function createCredentialsRoutes(): App {
 
   // v0.1.95: 16px added for completeness — the brand spec surfaces it
   // and an external favicon-generator script would expect to find it.
+  // v0.1.97: explicit /_ensemble/brand/og.png JSON 404. The path used
+  // to fall through to the SPA catch-all, which returned HTML — an
+  // external consumer following endpoints.preview_card got the
+  // workspace login screen instead of an image. The spec now omits
+  // preview_card when no og_image is uploaded; this handler exists
+  // so a direct URL probe gets a useful JSON 404 instead of HTML.
+  app.get('/_ensemble/brand/og.png', (c) => c.json({
+    error: 'no_og_image',
+    message: 'No og_image asset is configured for this workspace. Upload one under Brand → Logos → Open Graph image, or set logos.og_image in your brand spec.',
+  }, 404));
+
   app.get('/_ensemble/brand/favicon-16.png',  (c) => renderFaviconPng(c, 16));
   app.get('/_ensemble/brand/favicon-32.png',  (c) => renderFaviconPng(c, 32));
   app.get('/_ensemble/brand/favicon-180.png', (c) => renderFaviconPng(c, 180));

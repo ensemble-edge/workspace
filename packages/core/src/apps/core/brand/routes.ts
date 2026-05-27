@@ -155,18 +155,15 @@ export function registerBrandRoutes(
   // operator was running from a file:// HTML page (which hits browser-
   // level fetch restrictions and returns false negatives) — but served
   // from the workspace itself so it loads over https and gets accurate
-  // CORS / CORP / fetch results. Auth-gated: admins debugging brand
-  // distribution, not a public-facing surface.
+  // CORS / CORP / fetch results.
+  //
+  // v0.1.97: same public gate as the rest of the brand-spec family
+  // (public_brand_guide_enabled). The page only fetches data that's
+  // already public; auth-walling it just prevented external partners
+  // and AI-agent operators from debugging brand distribution problems.
   app.get('/brand/troubleshoot', async (c) => {
-    const user = c.get('user');
-    if (!user?.id) return c.notFound();
-    return c.html(BRAND_TROUBLESHOOT_HTML, 200, {
-      'Cache-Control': 'private, no-store',
-      // The diagnostic page is INTENTIONALLY loaded from the workspace
-      // origin so fetch() resolves the same as cross-origin embeds —
-      // no special CORS posture needed; the page is same-origin to
-      // every URL it tests.
-    });
+    if (!(await canReadBrand(c))) return c.notFound();
+    return c.html(BRAND_TROUBLESHOOT_HTML, 200, brandCacheHeaders(c));
   });
 
   // v0.1.94: legacy /_ensemble/brand/* spec-family URLs return JSON 410
