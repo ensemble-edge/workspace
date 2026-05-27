@@ -580,9 +580,13 @@ export async function assembleBrandSpec(
   const toneAvoid = msgMap.tone_avoid?.value.split(',').map((s) => s.trim()).filter(Boolean);
 
   // ── v1.1: Workspace meta ──
+  // v0.1.91 hotfix: workspaces.display_name does NOT exist — the column
+  // is `name`. The bad SELECT in v0.1.89 threw on every call, which
+  // crashed /brand/css (every assembleBrandSpec consumer) and left the
+  // entire shell unstyled. Curl-first next time.
   const workspaceRow = await db.prepare(
-    `SELECT id, slug, display_name FROM workspaces WHERE id = ?`,
-  ).bind(workspaceId).first<{ id: string; slug: string; display_name: string }>();
+    `SELECT id, slug, name FROM workspaces WHERE id = ?`,
+  ).bind(workspaceId).first<{ id: string; slug: string; name: string }>();
 
   // ── v1.1: Typography roles + font sources ──
   const v11Typography = await assembleTypographyV11(db, workspaceId, baseUrl);
@@ -619,7 +623,7 @@ export async function assembleBrandSpec(
     workspace: workspaceRow ? {
       id: workspaceRow.id,
       slug: workspaceRow.slug,
-      display_name: workspaceRow.display_name,
+      display_name: workspaceRow.name,
       public_url: baseUrl ?? '',
     } : undefined,
     updated_at: generatedAt,
