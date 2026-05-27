@@ -21,8 +21,13 @@ const BOOTSTRAP_COMPLETE_KEY = 'ensemble:bootstrap_complete';
  */
 const BOOTSTRAP_ALLOWED_PATHS = [
   '/_ensemble/bootstrap',
-  '/_ensemble/brand/css',
-  '/_ensemble/brand/theme',
+  // Brand chrome — shell needs these at all times (login page rendering)
+  // so allow before any users exist. v0.1.98 added canonical /brand/*
+  // paths alongside the legacy /_ensemble/brand/* paths.
+  '/brand/css',
+  '/brand/theme',
+  '/_ensemble/brand/css',      // back-compat
+  '/_ensemble/brand/theme',    // back-compat
   '/_ensemble/shell/',     // Shell assets must be served for the bootstrap UI
   '/_ensemble/runtime/',   // Guest-runtime assets (workspace-agnostic, public)
   '/_ensemble/version',    // Diagnostic endpoint (workspace-agnostic, public)

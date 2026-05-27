@@ -752,15 +752,20 @@ export async function assembleBrandSpec(
               ? logoSlotUrls.og_image
               : `${baseUrl}${logoSlotUrls.og_image}`)
           : undefined;
+        // v0.1.98: every endpoint path emits the canonical /brand/* form.
+        // The aliasIfSet helper still rewrites to /<alias>/brand/* if the
+        // operator has set asset_public_alias_path. The endpoints object
+        // is the consumer-facing surface; we never want a /_ensemble/
+        // path here — that prefix is internal-API plumbing.
         return {
-          spec:            `${baseUrl}/brand/spec`,            // canonical
-          css:             aliasIfSet('/_ensemble/brand/css'),
-          context:         `${baseUrl}/brand/context`,         // canonical
-          brand_guide:     `${baseUrl}/brand`,                 // canonical
-          variant_index:   `${baseUrl}/brand/variants`,        // canonical
-          font_stylesheet: aliasIfSet('/_ensemble/brand/css'),
-          schema:          `${baseUrl}/brand/spec/schema.json`, // canonical
-          changelog:       `${baseUrl}/brand/changelog`,       // canonical
+          spec:            `${baseUrl}/brand/spec`,
+          css:             aliasIfSet('/brand/css'),
+          context:         `${baseUrl}/brand/context`,
+          brand_guide:     `${baseUrl}/brand`,
+          variant_index:   `${baseUrl}/brand/variants`,
+          font_stylesheet: aliasIfSet('/brand/css'),
+          schema:          `${baseUrl}/brand/spec/schema.json`,
+          changelog:       `${baseUrl}/brand/changelog`,
           ...(previewCard ? { preview_card: previewCard } : {}),
         };
       })(),
@@ -1013,7 +1018,7 @@ async function assembleLogosV11(
               background: bg.id,
               format: 'svg',
               size_px: null,
-              url: aliasUrl(`${baseUrl}/_ensemble/brand/render/${baseName}.svg`),
+              url: aliasUrl(`${baseUrl}/brand/render/${baseName}.svg`),
               approved: true,
             }));
             // PNG — one entry per size in the matrix.
@@ -1025,7 +1030,7 @@ async function assembleLogosV11(
                 background: bg.id,
                 format: 'png',
                 size_px: size,
-                url: aliasUrl(`${baseUrl}/_ensemble/brand/render/${baseName}.png?size=${size}`),
+                url: aliasUrl(`${baseUrl}/brand/render/${baseName}.png?size=${size}`),
                 approved: true,
               }));
             }
@@ -1057,7 +1062,7 @@ async function assembleLogosV11(
             background: 'transparent',
             format: 'png',
             size_px: size,
-            url: aliasUrl(`${baseUrl}/_ensemble/brand/favicon-${size}.png`),
+            url: aliasUrl(`${baseUrl}/brand/favicon-${size}.png`),
             approved: true,
             use,
           }));

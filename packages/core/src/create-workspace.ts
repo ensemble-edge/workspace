@@ -328,10 +328,13 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
     });
   });
 
-  app.get('/_ensemble/brand/css', async (c) => {
+  // v0.1.98: brand CSS — canonical /brand/css; legacy /_ensemble/brand/css
+  // kept registered for back-compat (consumer sites have hot-linked it
+  // for releases). Same handler body, two paths. Going forward, new
+  // consumers should reference `/brand/css` per the spec response.
+  const brandCssHandler: import('hono').Handler = async (c) => {
     const workspaceId = c.get('workspace')?.id || '';
     const css = await generateBrandCss(c.env.DB, workspaceId, resolvedConfig.brand.accent);
-
     // v0.1.81: cache 5min fresh + 24h stale-while-revalidate. Pre-v0.1.81
     // this was no-store, forcing every cross-origin consumer to refetch
     // brand vars on every page load — a real performance + visual-race
@@ -342,7 +345,9 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
       'Content-Type': 'text/css',
       'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
     });
-  });
+  };
+  app.get('/brand/css', brandCssHandler);
+  app.get('/_ensemble/brand/css', brandCssHandler);
 
   // PUT endpoint to save brand tokens
   app.put('/_ensemble/brand/tokens', async (c) => {

@@ -691,8 +691,8 @@ export function createCredentialsRoutes(): App {
   // Old path kept as alias for back-compat with any operator scripts.
   const versionPayload = () => ({
     package: '@ensemble-edge/workspace',
-    version: '0.1.97',
-    buildFingerprint: 'v0.1.97-troubleshoot-public-preview-card-honest',
+    version: '0.1.98',
+    buildFingerprint: 'v0.1.98-brand-url-namespace-canonical-/brand-and-/admin/brand',
     timestamp: new Date().toISOString(),
   });
   // v0.1.81: version probe should never be stale — CI / monitoring /
@@ -2239,6 +2239,97 @@ export function createCredentialsRoutes(): App {
       return c.json({ error: String(err) }, 409);
     }
   });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // v0.1.98 — Canonical /brand/* public surface
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // Every public brand asset is reachable under the short `/brand/*`
+  // namespace going forward. The existing `/_ensemble/brand/*` paths
+  // stay registered for back-compat — consumer sites that hot-linked
+  // them in earlier releases continue to work. New consumers should
+  // follow the URLs the spec response advertises, which all live under
+  // `/brand/*` now.
+  //
+  // Implementation: each canonical path is a thin alias that internally
+  // re-dispatches to the original `/_ensemble/brand/*` handler. Same
+  // approach as the operator alias-path rewrite in create-workspace.ts
+  // (SPA catch-all). No handler-body duplication; one source of truth
+  // for the actual logic.
+  //
+  // Path scheme going forward:
+  //   /brand/*                       — public, canonical
+  //   /_ensemble/brand/*             — public, back-compat alias
+  //   /_ensemble/admin/brand/*       — admin, canonical (auth required)
+  //   /_ensemble/brand/tokens (PUT)  — admin, back-compat alias for /admin/brand/tokens
+  //   /_ensemble/brand/upload (POST) — admin, back-compat alias for /admin/brand/upload
+  //   /<alias>/brand/*               — operator-configured pretty alias
+  //                                    (rewrites to /brand/* via SPA catch-all)
+  function aliasTo(canonicalPath: string): import('hono').Handler {
+    return (c) => app.fetch(
+      new Request(`${new URL(c.req.url).origin}${canonicalPath}${new URL(c.req.url).search}`, c.req.raw),
+      c.env,
+      c.executionCtx,
+    );
+  }
+  // Render with optional ?size= — the canonical handler reads filename
+  // from the path param, so the alias must preserve it.
+  app.get('/brand/render/:filename{.+}', (c) => {
+    const filename = c.req.param('filename');
+    const search = new URL(c.req.url).search;
+    return app.fetch(
+      new Request(`${new URL(c.req.url).origin}/_ensemble/brand/render/${filename}${search}`, c.req.raw),
+      c.env,
+      c.executionCtx,
+    );
+  });
+  // R2 asset reads — same handler, short path.
+  app.get('/brand/asset/:key{.+}', (c) => {
+    const key = c.req.param('key');
+    return app.fetch(
+      new Request(`${new URL(c.req.url).origin}/_ensemble/brand/asset/${key}`, c.req.raw),
+      c.env,
+      c.executionCtx,
+    );
+  });
+  app.get('/brand/theme',         aliasTo('/_ensemble/brand/theme'));
+  app.get('/brand/favicon.svg',   aliasTo('/_ensemble/brand/favicon.svg'));
+  app.get('/brand/favicon.ico',   aliasTo('/_ensemble/brand/favicon.ico'));
+  app.get('/brand/favicon-16.png',  aliasTo('/_ensemble/brand/favicon-16.png'));
+  app.get('/brand/favicon-32.png',  aliasTo('/_ensemble/brand/favicon-32.png'));
+  app.get('/brand/favicon-180.png', aliasTo('/_ensemble/brand/favicon-180.png'));
+  app.get('/brand/favicon-192.png', aliasTo('/_ensemble/brand/favicon-192.png'));
+  app.get('/brand/favicon-512.png', aliasTo('/_ensemble/brand/favicon-512.png'));
+  app.get('/brand/og.png',        aliasTo('/_ensemble/brand/og.png'));
+
+  // ═══════════════════════════════════════════════════════════════════
+  // v0.1.98 — Canonical /_ensemble/admin/brand/* admin surface
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // Admin token/upload endpoints now have a canonical home under
+  // /_ensemble/admin/brand/*. Old paths (/_ensemble/brand/tokens PUT,
+  // /_ensemble/brand/upload POST) stay registered as aliases so shell
+  // code can migrate at its own pace — no big-bang rename needed.
+  app.put('/_ensemble/admin/brand/tokens', (c) => app.fetch(
+    new Request(`${new URL(c.req.url).origin}/_ensemble/brand/tokens`, c.req.raw),
+    c.env,
+    c.executionCtx,
+  ));
+  app.post('/_ensemble/admin/brand/upload', (c) => app.fetch(
+    new Request(`${new URL(c.req.url).origin}/_ensemble/brand/upload`, c.req.raw),
+    c.env,
+    c.executionCtx,
+  ));
+  // GET /_ensemble/brand/tokens — pre-v0.1.98 fell through to SPA HTML.
+  // It only ever had a PUT handler; the bare GET now returns an honest
+  // 405 with a pointer to /brand/spec (where the token data actually
+  // lives, inline).
+  app.get('/_ensemble/brand/tokens', (c) => c.json({
+    error: 'method_not_allowed',
+    message: 'This endpoint accepts PUT only (admin token writes). To READ brand tokens, fetch /brand/spec — the token values are inline under colors.*, typography.*, spatial.*.',
+    allowed_methods: ['PUT'],
+    canonical_admin_url: `${new URL(c.req.url).origin}/_ensemble/admin/brand/tokens`,
+  }, 405));
 
   return app;
 }
