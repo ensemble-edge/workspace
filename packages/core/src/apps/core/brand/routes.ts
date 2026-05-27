@@ -15,7 +15,21 @@ export function registerBrandRoutes(
 ): void {
   // ── Brand Spec (the canonical format) ──
 
+  // Helper: every public-brand surface (spec, variants, context, changelog)
+  // is gated on the SAME `public_brand_guide_enabled` setting that
+  // controls /brand (the human HTML guide). They're all just different
+  // renderings of the same brand. Toggle on → all four publish; toggle
+  // off → all four 404. Operator has one switch, not four.
+  async function isPublicBrandEnabled(env: Env, workspaceId: string): Promise<boolean> {
+    const { getSetting } = await import('../../../services/workspace-settings');
+    return (await getSetting(env, workspaceId, 'public_brand_guide_enabled')) === 'true';
+  }
+
   // GET /_ensemble/brand/spec — Full brand spec (JSON)
+  //
+  // The machine-readable sibling of /brand. Same trust model: gated on
+  // the operator's "publish brand guide" toggle. If the guide is
+  // disabled, the spec 404s — symmetric with the HTML view.
   //
   // v0.1.89 (spec v1.1): supports two narrowing knobs so a low-bandwidth
   // consumer can fetch just what it needs:
@@ -27,7 +41,8 @@ export function registerBrandRoutes(
   // so the response stays self-describing.
   app.get('/_ensemble/brand/spec', async (c) => {
     const workspace = c.get('workspace');
-    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    if (!workspace?.id) return c.notFound();
+    if (!(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
 
     try {
       const baseUrl = new URL(c.req.url).origin;
@@ -46,7 +61,9 @@ export function registerBrandRoutes(
       const includeParam = c.req.query('include');
       const filtered = await applySpecFilters(spec, forParam, includeParam);
 
-      return c.json(filtered);
+      return c.json(filtered, 200, {
+        'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
+      });
     } catch (error) {
       console.error('Failed to generate brand spec:', error);
       return c.json({ error: 'Failed to generate brand spec' }, 500);
@@ -54,8 +71,16 @@ export function registerBrandRoutes(
   });
 
   // GET /_ensemble/brand/spec/schema.json — JSON Schema (Draft 2020-12)
-  // describing the v1.1 spec response. Public, cacheable.
+  // describing the v1.1 spec response. Same public-guide gate as the
+  // rest of the brand-spec family: one operator switch, consistent
+  // effect. Exceptions like /brand/css and /brand/theme stay public
+  // because the shell needs them at all times (login page chrome,
+  // themed admin); the schema is purely a consumer convenience and
+  // follows the toggle.
   app.get('/_ensemble/brand/spec/schema.json', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.notFound();
+    if (!(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
     const { BRAND_SPEC_SCHEMA } = await import('../../../services/brand-spec-extras');
     return c.json(BRAND_SPEC_SCHEMA, 200, {
       'Cache-Control': 'public, max-age=3600',
@@ -63,21 +88,22 @@ export function registerBrandRoutes(
   });
 
   // GET /_ensemble/brand/variants — JSON enumeration of every approved
-  // logo render. Same data as spec.logos.variants[], surfaced as a
+  // logo render. Same data as spec.assets.variants[], surfaced as a
   // standalone endpoint so agents that only want the variant matrix
-  // can skip the full spec.
+  // can skip the full spec. Same public-guide gate as /brand/spec.
   app.get('/_ensemble/brand/variants', async (c) => {
     const workspace = c.get('workspace');
-    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    if (!workspace?.id) return c.notFound();
+    if (!(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
     try {
       const baseUrl = new URL(c.req.url).origin;
       const { getSetting } = await import('../../../services/workspace-settings');
       const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
       const spec = await assembleBrandSpec(c.env.DB, workspace.id, baseUrl, aliasPath);
       return c.json({
-        variants: spec.logos.variants ?? [],
-        banned: spec.logos.banned ?? [],
-        clearspace: spec.logos.clearspace ?? {},
+        variants: spec.assets?.variants ?? [],
+        banned: spec.assets?.banned ?? [],
+        clearspace: spec.assets?.clearspace ?? {},
       }, 200, { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400' });
     } catch (error) {
       console.error('Failed to generate brand variants:', error);
@@ -86,13 +112,11 @@ export function registerBrandRoutes(
   });
 
   // GET /_ensemble/brand/changelog — recent brand-* audit log entries.
-  // Lets an external consumer see when each token last changed.
-  // Admin/auth-protected? No — the audit log is normally admin-only, but
-  // this endpoint exposes only the *what changed when* shape (no actor
-  // PII), so it can stay public. Future v0.1.90 could gate it.
+  // What-changed-when (no actor PII). Same public-guide gate.
   app.get('/_ensemble/brand/changelog', async (c) => {
     const workspace = c.get('workspace');
-    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    if (!workspace?.id) return c.notFound();
+    if (!(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
     try {
       const rows = await c.env.DB.prepare(
         `SELECT action, created_at, details
@@ -106,7 +130,7 @@ export function registerBrandRoutes(
         at: r.created_at,
         details: (() => { try { return r.details ? JSON.parse(r.details) : null; } catch { return null; } })(),
       }));
-      return c.json({ entries }, 200, { 'Cache-Control': 'private, no-store' });
+      return c.json({ entries }, 200, { 'Cache-Control': 'public, max-age=60' });
     } catch (error) {
       console.error('Failed to fetch brand changelog:', error);
       return c.json({ error: 'Failed to fetch brand changelog' }, 500);
@@ -122,16 +146,22 @@ export function registerBrandRoutes(
   // the @import line, we'd revisit this.
 
   // GET /_ensemble/brand/context — AI-readable markdown
+  // Same public-guide gate as /brand/spec — it's just the markdown
+  // rendering of the same data the HTML guide and JSON spec emit.
   app.get('/_ensemble/brand/context', async (c) => {
     const workspace = c.get('workspace');
-    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    if (!workspace?.id) return c.notFound();
+    if (!(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
 
     try {
       const { getSetting } = await import('../../../services/workspace-settings');
       const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
       const spec = await assembleBrandSpec(c.env.DB, workspace.id, undefined, aliasPath);
       const markdown = generateContextFromSpec(spec);
-      return c.text(markdown, 200, { 'Content-Type': 'text/markdown' });
+      return c.text(markdown, 200, {
+        'Content-Type': 'text/markdown',
+        'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
+      });
     } catch (error) {
       console.error('Failed to generate brand context:', error);
       return c.text('Failed to generate brand context', 500);

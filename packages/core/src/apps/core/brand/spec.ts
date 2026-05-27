@@ -133,11 +133,13 @@ export interface EnsembleBrandSpec {
     roles?: Record<string, FontRoleSpec>;
   };
 
-  /** Logo assets */
+  /**
+   * Logo assets — v1.0 shape unchanged. Values are URLs (or undefined).
+   * Shell admin UI reads from this and assumes every value is a string,
+   * so v1.1 additions (masters, variants, banned, clearspace) live in
+   * `assets` as a sibling top-level field instead.
+   */
   logos: {
-    // v1.0 fields — bare URLs to the canonical master files. Kept
-    // for back-compat; v1.1 consumers should prefer `masters` (typed)
-    // and `variants` (rendered matrix).
     wordmark?: string;
     wordmark_dark?: string;
     icon_mark?: string;
@@ -145,21 +147,24 @@ export interface EnsembleBrandSpec {
     favicon?: string;
     social_avatar?: string;
     og_image?: string;
+  };
 
-    // v1.1 additions:
+  /**
+   * v1.1: typed asset metadata (masters + rendered variants + banned +
+   * clearspace). Sibling to `logos` so v1.0 consumers iterating over
+   * `Object.entries(spec.logos)` still see only string-valued URLs.
+   */
+  assets?: {
     /** Master files keyed by slot, each with role + format metadata. */
     masters?: Record<string, LogoMasterSpec>;
-
     /**
      * Every approved logo render. Each entry has an absolute URL plus
      * its composition × finish × background × format × size_px so an
      * external agent picks the right one by context, not by URL pattern.
      */
     variants?: LogoVariantSpec[];
-
     /** Combinations the brand policy explicitly disallows. */
     banned?: LogoBannedSpec[];
-
     /** Minimum padding around each lockup, in role-specific units. */
     clearspace?: Record<string, ClearspaceSpec>;
   };
@@ -660,11 +665,9 @@ export async function assembleBrandSpec(
       ...v11Typography,
     },
 
-    logos: {
-      ...logos,
-      // v1.1 — typed masters + variant matrix + banned + clearspace
-      ...v11Logos,
-    },
+    logos,
+    // v1.1 — sibling to logos so the v1.0 shape stays string-only.
+    assets: v11Logos,
 
     messaging: {
       tagline: msgMap.tagline?.value || undefined,
@@ -799,8 +802,8 @@ async function assembleLogosV11(
   logoSlotUrls: Record<string, string>,
   baseUrl: string | undefined,
   workspaceSlug: string | undefined,
-): Promise<Partial<EnsembleBrandSpec['logos']>> {
-  const out: Partial<EnsembleBrandSpec['logos']> = {};
+): Promise<NonNullable<EnsembleBrandSpec['assets']>> {
+  const out: NonNullable<EnsembleBrandSpec['assets']> = {};
 
   // Masters — typed metadata around each slot URL.
   const masters: Record<string, LogoMasterSpec> = {};
@@ -1004,12 +1007,30 @@ async function assembleSpatialV11(
   db: D1Database,
   workspaceId: string,
 ): Promise<EnsembleBrandSpec['spatial']> {
-  const { DEFAULT_RADIUS, DEFAULT_SHADOW, COMPONENT_DEFAULTS } =
-    await import('../../../services/brand-spec-extras');
+  // v0.1.88-EXACT behavior: spec.spatial is undefined unless the operator
+  // has actually set a v1.0 spatial token (radius / radius_lg /
+  // spacing_unit) in brand_tokens. generateCssFromSpec then emits zero
+  // --brand-radius / --brand-spacing lines — byte-identical to the
+  // v0.1.88 CSS output for workspaces with no spatial overrides. The
+  // earlier v0.1.89 version of this function unconditionally populated
+  // those fields from defaults, which caused the CSS endpoint to start
+  // emitting --brand-radius / --brand-spacing values that overrode the
+  // shell's bundled CSS and visibly shifted every rounded corner in
+  // the workspace.
   const spatialTokens = await db.prepare(
     `SELECT key, value FROM brand_tokens WHERE workspace_id = ? AND category = 'spatial' AND locale = ''`,
   ).bind(workspaceId).all<{ key: string; value: string }>();
   const tokens = Object.fromEntries((spatialTokens.results ?? []).map((r) => [r.key, r.value]));
+
+  const hasV10Spatial =
+    tokens['radius'] !== undefined ||
+    tokens['radius_lg'] !== undefined ||
+    tokens['spacing_unit'] !== undefined;
+
+  if (!hasV10Spatial) return undefined;
+
+  const { DEFAULT_RADIUS, DEFAULT_SHADOW, COMPONENT_DEFAULTS } =
+    await import('../../../services/brand-spec-extras');
 
   const radiusScale = {
     sm: tokens['radius_sm'] ?? DEFAULT_RADIUS.sm,
@@ -1020,11 +1041,11 @@ async function assembleSpatialV11(
   };
 
   return {
-    // v1.0 — keep
-    radius: radiusScale.md,
-    radius_lg: radiusScale.lg,
-    spacing_unit: tokens['spacing_unit'] ?? '0.25rem',
-    // v1.1
+    // v1.0 — emit ONLY when the operator explicitly set the token.
+    radius: tokens['radius'] ?? undefined,
+    radius_lg: tokens['radius_lg'] ?? undefined,
+    spacing_unit: tokens['spacing_unit'] ?? undefined,
+    // v1.1 — generateCssFromSpec doesn't read these, so they're safe.
     radius_scale: radiusScale,
     spacing: {
       unit: tokens['spacing_unit'] ?? '0.25rem',
@@ -1351,15 +1372,10 @@ export async function importBrandSpec(
   if (spec.typography.body) await upsertToken('typography', 'body_font', spec.typography.body.family, 'font');
   if (spec.typography.mono) await upsertToken('typography', 'mono_font', spec.typography.mono.family, 'font');
 
-  // Logos — only v1.0 string slots are persisted; v1.1 fields
-  // (masters/variants/banned/clearspace) are *derived on emit* and not
-  // imported back into brand_tokens.
-  const v11LogoKeys = new Set(['masters', 'variants', 'banned', 'clearspace']);
-  for (const [key, value] of Object.entries(spec.logos)) {
-    if (v11LogoKeys.has(key)) continue;
-    if (typeof value === 'string' && value) {
-      await upsertToken('identity', `logo_${key}`, value, 'url');
-    }
+  // Logos — v1.0 string URLs. v1.1 typed asset data lives in
+  // spec.assets (sibling), is derived on emit, and is not imported back.
+  for (const [key, url] of Object.entries(spec.logos)) {
+    if (url) await upsertToken('identity', `logo_${key}`, url, 'url');
   }
 
   // Messaging
