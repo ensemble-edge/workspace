@@ -16,6 +16,15 @@ export function registerBrandRoutes(
   // ── Brand Spec (the canonical format) ──
 
   // GET /_ensemble/brand/spec — Full brand spec (JSON)
+  //
+  // v0.1.89 (spec v1.1): supports two narrowing knobs so a low-bandwidth
+  // consumer can fetch just what it needs:
+  //   ?for=marketing-site|ai-prompt|admin-import — curated preset
+  //   ?include=logos,colors.palettes.primary,...  — explicit allowlist of
+  //                                                 dotted paths
+  // Default (no params) returns the full payload. The meta block
+  // (ensemble_brand, workspace, etag, endpoints, ...) is ALWAYS retained
+  // so the response stays self-describing.
   app.get('/_ensemble/brand/spec', async (c) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
@@ -32,12 +41,85 @@ export function registerBrandRoutes(
         return c.text(jsonToYaml(spec), 200, { 'Content-Type': 'text/yaml' });
       }
 
-      return c.json(spec);
+      // v1.1: apply `?for=` preset + `?include=` allowlist if provided.
+      const forParam = c.req.query('for');
+      const includeParam = c.req.query('include');
+      const filtered = await applySpecFilters(spec, forParam, includeParam);
+
+      return c.json(filtered);
     } catch (error) {
       console.error('Failed to generate brand spec:', error);
       return c.json({ error: 'Failed to generate brand spec' }, 500);
     }
   });
+
+  // GET /_ensemble/brand/spec/schema.json — JSON Schema (Draft 2020-12)
+  // describing the v1.1 spec response. Public, cacheable.
+  app.get('/_ensemble/brand/spec/schema.json', async (c) => {
+    const { BRAND_SPEC_SCHEMA } = await import('../../../services/brand-spec-extras');
+    return c.json(BRAND_SPEC_SCHEMA, 200, {
+      'Cache-Control': 'public, max-age=3600',
+    });
+  });
+
+  // GET /_ensemble/brand/variants — JSON enumeration of every approved
+  // logo render. Same data as spec.logos.variants[], surfaced as a
+  // standalone endpoint so agents that only want the variant matrix
+  // can skip the full spec.
+  app.get('/_ensemble/brand/variants', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    try {
+      const baseUrl = new URL(c.req.url).origin;
+      const { getSetting } = await import('../../../services/workspace-settings');
+      const aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
+      const spec = await assembleBrandSpec(c.env.DB, workspace.id, baseUrl, aliasPath);
+      return c.json({
+        variants: spec.logos.variants ?? [],
+        banned: spec.logos.banned ?? [],
+        clearspace: spec.logos.clearspace ?? {},
+      }, 200, { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400' });
+    } catch (error) {
+      console.error('Failed to generate brand variants:', error);
+      return c.json({ error: 'Failed to generate brand variants' }, 500);
+    }
+  });
+
+  // GET /_ensemble/brand/changelog — recent brand-* audit log entries.
+  // Lets an external consumer see when each token last changed.
+  // Admin/auth-protected? No — the audit log is normally admin-only, but
+  // this endpoint exposes only the *what changed when* shape (no actor
+  // PII), so it can stay public. Future v0.1.90 could gate it.
+  app.get('/_ensemble/brand/changelog', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+    try {
+      const rows = await c.env.DB.prepare(
+        `SELECT action, created_at, details
+           FROM audit_log
+          WHERE workspace_id = ? AND action LIKE 'brand.%'
+          ORDER BY created_at DESC
+          LIMIT 100`,
+      ).bind(workspace.id).all<{ action: string; created_at: string; details: string | null }>();
+      const entries = (rows.results ?? []).map((r) => ({
+        action: r.action,
+        at: r.created_at,
+        details: (() => { try { return r.details ? JSON.parse(r.details) : null; } catch { return null; } })(),
+      }));
+      return c.json({ entries }, 200, { 'Cache-Control': 'private, no-store' });
+    } catch (error) {
+      console.error('Failed to fetch brand changelog:', error);
+      return c.json({ error: 'Failed to fetch brand changelog' }, 500);
+    }
+  });
+
+  // NOTE: no separate /brand/fonts.css endpoint. The full /brand/css
+  // already includes the Google Fonts @import at the top alongside all
+  // CSS variables, so a second fonts-only endpoint would be redundant.
+  // endpoints.font_stylesheet (in the spec response) points at /brand/css
+  // for that reason — agents that only want fonts get the same stylesheet
+  // that drives the full theme. If a future need emerges to fetch *just*
+  // the @import line, we'd revisit this.
 
   // GET /_ensemble/brand/context — AI-readable markdown
   app.get('/_ensemble/brand/context', async (c) => {
@@ -565,6 +647,95 @@ async function fetchGoogleFontsMetadata(): Promise<GoogleFontEntry[]> {
       popularity: f.popularity,
     };
   });
+}
+
+/**
+ * v0.1.89: narrow a brand spec response by preset (`?for=`) or by an
+ * explicit dotted-path allowlist (`?include=`). Meta fields (the
+ * top-level identity-of-the-response keys) are ALWAYS retained so the
+ * response stays self-describing — an agent that gets a filtered spec
+ * still finds endpoints, etag, schema_version, etc.
+ *
+ * Filtering applies only to the top-level domain blocks (identity,
+ * colors, typography, logos, messaging, spatial, gradients). Sub-tree
+ * paths in ?include like 'colors.palettes.primary' are supported.
+ */
+async function applySpecFilters(
+  spec: EnsembleBrandSpec,
+  forParam: string | undefined,
+  includeParam: string | undefined,
+): Promise<EnsembleBrandSpec> {
+  // No filtering requested — return as-is.
+  if (!forParam && !includeParam) return spec;
+
+  // Always-retained meta keys. Adding etag/endpoints/schema_version
+  // here keeps the filtered response usefully self-describing.
+  const META_KEYS = new Set([
+    'ensemble_brand', 'schema_version', 'spec_url', 'workspace',
+    'updated_at', 'generated_at', 'etag', 'license', 'endpoints',
+  ]);
+
+  // Build the set of top-level domain keys to retain.
+  let retainTop: Set<string>;
+  if (includeParam) {
+    // Take the top-level segment of each dotted path.
+    const paths = includeParam.split(',').map((s) => s.trim()).filter(Boolean);
+    retainTop = new Set(paths.map((p) => p.split('.')[0]));
+  } else if (forParam) {
+    // Preset lookup — fall back to "everything" if the preset is unknown.
+    const { SPEC_PRESETS } = await import('../../../services/brand-spec-extras');
+    const preset = SPEC_PRESETS[forParam];
+    retainTop = preset ? new Set(preset) : new Set(Object.keys(spec));
+  } else {
+    retainTop = new Set(Object.keys(spec));
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(spec)) {
+    if (META_KEYS.has(key) || retainTop.has(key)) {
+      out[key] = value;
+    }
+  }
+
+  // If ?include= specified sub-tree paths, narrow within retained subtrees.
+  if (includeParam) {
+    const paths = includeParam.split(',').map((s) => s.trim()).filter(Boolean);
+    const byTop = new Map<string, string[]>();
+    for (const p of paths) {
+      const [top, ...rest] = p.split('.');
+      if (!top) continue;
+      if (rest.length === 0) continue; // top-level only — already retained
+      const subs = byTop.get(top) ?? [];
+      subs.push(rest.join('.'));
+      byTop.set(top, subs);
+    }
+    for (const [top, subs] of byTop.entries()) {
+      const node = out[top];
+      if (!node || typeof node !== 'object') continue;
+      out[top] = narrowSubtree(node as Record<string, unknown>, subs);
+    }
+  }
+
+  return out as unknown as EnsembleBrandSpec;
+}
+
+/** Narrow a subtree object to only the keys named by dotted paths. */
+function narrowSubtree(node: Record<string, unknown>, paths: string[]): Record<string, unknown> {
+  const keep = new Set(paths.map((p) => p.split('.')[0]));
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node)) {
+    if (!keep.has(k)) continue;
+    // Recurse only if there are deeper paths AND the value is an object.
+    const deeperPaths = paths
+      .filter((p) => p.startsWith(`${k}.`))
+      .map((p) => p.slice(k.length + 1));
+    if (deeperPaths.length > 0 && v && typeof v === 'object' && !Array.isArray(v)) {
+      out[k] = narrowSubtree(v as Record<string, unknown>, deeperPaths);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 /** Simple JSON to YAML-ish conversion (no external deps). */

@@ -15,11 +15,43 @@
 // ============================================================================
 
 export interface EnsembleBrandSpec {
-  /** Format version — tools check this to know how to parse */
-  ensemble_brand: '1.0';
+  /**
+   * Format version — tools check this to know how to parse.
+   * v1.1 (v0.1.89): adds typography.roles (9 roles), logos.variants,
+   * colors.palettes, colors.modes, spatial.components, expanded
+   * endpoints. All additions are non-breaking — v1.0 consumers see
+   * the new fields as `unknown` and continue working.
+   */
+  ensemble_brand: '1.0' | '1.1';
+
+  /** v1.1: machine-readable schema version (semver). */
+  schema_version?: string;
+
+  /** v1.1: self-reference URL — the canonical address of THIS spec. */
+  spec_url?: string;
+
+  /** v1.1: workspace identity block — separate from the brand identity. */
+  workspace?: {
+    id: string;
+    slug: string;
+    display_name: string;
+    public_url: string;
+  };
 
   /** When this spec was last modified */
   updated_at: string;
+
+  /** v1.1: when this RESPONSE was assembled (≠ updated_at). */
+  generated_at?: string;
+
+  /** v1.1: opaque hash for client cache validation. */
+  etag?: string;
+
+  /** v1.1: brand asset license info — does the external agent have permission to use these marks? */
+  license?: {
+    type: string | null;
+    usage_restrictions?: string;
+  };
 
   /** Company identity */
   identity: {
@@ -35,9 +67,9 @@ export interface EnsembleBrandSpec {
 
   /** Color system */
   colors: {
-    /** Named color groups (e.g., "Slate", "Gold", "Vermillion") */
+    /** Named color groups (e.g., "Slate", "Gold", "Vermillion") — v1.0 */
     groups: ColorGroup[];
-    /** Semantic colors for UI states */
+    /** Semantic colors for UI states — v1.0 */
     semantic: {
       success: string;
       'success-light'?: string;
@@ -48,20 +80,64 @@ export interface EnsembleBrandSpec {
       error: string;
       'error-light'?: string;
     };
+
+    // v1.1 additions:
+    /**
+     * Brand palettes (primary/secondary/accent/neutral) with full rung
+     * metadata: `on` foreground for accessibility, `css_vars` for
+     * stylesheet references, `usage` prose, and concrete `examples`.
+     */
+    palettes?: Record<string, ColorPaletteSpec>;
+
+    /** Semantic colors with `on` + `usage` for v1.1 consumers. */
+    semantic_v2?: Record<string, SemanticColorSpec>;
+
+    /** Light/dark mode chrome colors (background, foreground, surface, border). */
+    modes?: {
+      light: ColorModeSpec;
+      dark: ColorModeSpec;
+    };
   };
 
   /** Typography system */
   typography: {
+    // v1.0 fields — retained for back-compat.
     display?: FontSpec;
     heading?: FontSpec;
     body?: FontSpec;
     mono?: FontSpec;
     /** Custom font URLs (Google Fonts, etc.) */
     font_urls?: string[];
+
+    // v1.1 additions:
+    /** External font stylesheets (Google Fonts URL, or uploaded WOFF URLs). */
+    font_sources?: Array<{
+      family: string;
+      source: 'google' | 'upload' | 'system';
+      url?: string;
+      weights?: number[];
+      has_italic?: boolean;
+    }>;
+
+    /**
+     * One-stop CSS @import URL that loads every weight/style this brand
+     * uses. The easiest way for a consumer to install the fonts.
+     */
+    stylesheet_url?: string;
+
+    /**
+     * All nine typographic roles with usage prose, CSS variable names,
+     * resolved family stacks, and concrete examples of where each
+     * role applies.
+     */
+    roles?: Record<string, FontRoleSpec>;
   };
 
   /** Logo assets */
   logos: {
+    // v1.0 fields — bare URLs to the canonical master files. Kept
+    // for back-compat; v1.1 consumers should prefer `masters` (typed)
+    // and `variants` (rendered matrix).
     wordmark?: string;
     wordmark_dark?: string;
     icon_mark?: string;
@@ -69,6 +145,23 @@ export interface EnsembleBrandSpec {
     favicon?: string;
     social_avatar?: string;
     og_image?: string;
+
+    // v1.1 additions:
+    /** Master files keyed by slot, each with role + format metadata. */
+    masters?: Record<string, LogoMasterSpec>;
+
+    /**
+     * Every approved logo render. Each entry has an absolute URL plus
+     * its composition × finish × background × format × size_px so an
+     * external agent picks the right one by context, not by URL pattern.
+     */
+    variants?: LogoVariantSpec[];
+
+    /** Combinations the brand policy explicitly disallows. */
+    banned?: LogoBannedSpec[];
+
+    /** Minimum padding around each lockup, in role-specific units. */
+    clearspace?: Record<string, ClearspaceSpec>;
   };
 
   /** Brand messaging and voice */
@@ -86,25 +179,163 @@ export interface EnsembleBrandSpec {
     };
     /** User-defined custom fields */
     custom?: Record<string, CustomField>;
+
+    // v1.1 additions (schema-slots; operator populates via JSON spec import):
+    /** Concrete do/avoid voice examples per context. */
+    voice_examples?: Array<{
+      context: string;
+      do: string;
+      avoid: string;
+      reason?: string;
+    }>;
+    /** Audience personas the brand voice targets. */
+    audiences?: Array<{
+      name: string;
+      description: string;
+    }>;
   };
 
   /** Spatial/layout tokens */
   spatial?: {
+    // v1.0 fields — retained.
     radius?: string;
     radius_lg?: string;
     spacing_unit?: string;
+
+    // v1.1 additions:
+    /** Full radius scale with CSS variable references. */
+    radius_scale?: Record<string, string>;
+    /** Spacing scale with unit + scale array. */
+    spacing?: {
+      unit: string;
+      scale: number[];
+      css_vars?: Record<string, string>;
+    };
+    /** Shadow scale. */
+    shadow?: Record<string, string>;
+    /** Per-component spatial recommendations. */
+    components?: Record<string, ComponentSpatialSpec>;
   };
 
   /** Gradient definitions */
   gradients?: Record<string, string>;
 
-  /** URLs for consuming this brand */
+  /**
+   * URLs for consuming this brand. v1.1 makes this the central
+   * discovery surface — every consumable resource is reachable from
+   * here as an absolute URL, so an external agent given only the
+   * spec response can find everything else.
+   */
   endpoints?: {
     spec?: string;
     css?: string;
     context?: string;
     tokens?: string;
+    // v1.1 additions:
+    brand_guide?: string;
+    variant_index?: string;
+    font_stylesheet?: string;
+    schema?: string;
+    changelog?: string;
+    preview_card?: string;
   };
+}
+
+// ─────────────────────────────────────────────────────────────
+// v1.1 supporting types
+// ─────────────────────────────────────────────────────────────
+
+export interface FontRoleSpec {
+  family: string;
+  weight: string;
+  style: 'normal' | 'italic';
+  letter_spacing: string;
+  text_transform: string;
+  font_size: string;
+  /** Resolved CSS font-family stack including system fallbacks. */
+  stack: string;
+  /** The CSS variable name consumers reference (e.g. '--font-heading'). */
+  css_var: string;
+  /** Human-readable role label ('Heading (H1–H3)'). */
+  label: string;
+  /** Where to use this role — full prose. */
+  usage: string;
+  /** Concrete examples ('button labels', 'form fields'). */
+  examples: string[];
+  /** True if this role uses a system font stack (no external load). */
+  is_system: boolean;
+}
+
+export interface LogoMasterSpec {
+  url: string;
+  role: 'wordmark' | 'icon' | 'favicon' | 'avatar' | 'og';
+  format: 'svg' | 'png' | 'ico';
+  size_px?: number;
+  minimum_size_px?: number;
+}
+
+export interface LogoVariantSpec {
+  role: 'wordmark' | 'icon' | 'favicon' | 'avatar' | 'og';
+  composition: 'wordmark-only' | 'icon-only' | 'stacked' | 'horizontal';
+  finish: 'full-color' | 'mono-black' | 'mono-white' | 'mono-brand';
+  background: 'transparent' | 'light' | 'dark' | string;
+  format: 'svg' | 'png' | 'ico';
+  size_px: number | null;
+  url: string;
+  approved: boolean;
+  /** Optional hint about where this variant is most useful. */
+  use?: string;
+}
+
+export interface LogoBannedSpec {
+  composition?: string;
+  finish?: string;
+  background?: string;
+  reason: string;
+  example_url?: string;
+}
+
+export interface ClearspaceSpec {
+  unit: 'x-height' | 'icon-width' | 'px' | 'em';
+  multiplier: number;
+}
+
+export interface ColorPaletteSpec {
+  name: string;
+  dark: string;
+  main: string;
+  bright: string;
+  pastel: string;
+  faded: string;
+  /** Foreground color when text sits on this palette. */
+  on?: string;
+  css_vars: Record<string, string>;
+  usage: string;
+  examples: string[];
+}
+
+export interface SemanticColorSpec {
+  main: string;
+  light?: string;
+  on?: string;
+  css_var: string;
+  usage: string;
+}
+
+export interface ColorModeSpec {
+  background: string;
+  foreground: string;
+  surface: string;
+  border: string;
+}
+
+export interface ComponentSpatialSpec {
+  radius_ref?: string;
+  padding_ref?: number;
+  padding_x_ref?: number;
+  padding_y_ref?: number;
+  gap_ref?: number;
+  shadow_ref?: string;
 }
 
 export interface ColorGroup {
@@ -301,11 +532,17 @@ export async function assembleBrandSpec(
   // consumers see the chosen path style.
   const { applyAssetAlias } = await import('../../../services/workspace-settings');
   const logos: EnsembleBrandSpec['logos'] = {};
+  // Track the original (unaliased) values so the v1.1 masters block
+  // can carry typed metadata while the v1.0 flat URLs stay aliased.
+  const logoSlotUrls: Record<string, string> = {};
   for (const t of identityTokens) {
     if (t.key.startsWith('logo_')) {
       const logoKey = t.key.replace('logo_', '') as keyof typeof logos;
       const aliased = applyAssetAlias(t.value, assetAliasPath ?? '');
-      if (aliased) (logos as Record<string, string>)[logoKey] = aliased;
+      if (aliased) {
+        (logos as Record<string, string>)[logoKey] = aliased;
+        logoSlotUrls[logoKey] = aliased;
+      }
     }
   }
 
@@ -337,10 +574,55 @@ export async function assembleBrandSpec(
   const toneDescriptors = msgMap.tone_descriptors?.value.split(',').map((s) => s.trim()).filter(Boolean);
   const toneAvoid = msgMap.tone_avoid?.value.split(',').map((s) => s.trim()).filter(Boolean);
 
+  // ── v1.1: Workspace meta ──
+  const workspaceRow = await db.prepare(
+    `SELECT id, slug, display_name FROM workspaces WHERE id = ?`,
+  ).bind(workspaceId).first<{ id: string; slug: string; display_name: string }>();
+
+  // ── v1.1: Typography roles + font sources ──
+  const v11Typography = await assembleTypographyV11(db, workspaceId, baseUrl);
+
+  // ── v1.1: Logo masters + variants + clearspace ──
+  const v11Logos = await assembleLogosV11(db, workspaceId, logoSlotUrls, baseUrl, workspaceRow?.slug);
+
+  // ── v1.1: Color palettes + modes ──
+  const v11ColorsExtra = await assembleColorsV11(db, workspaceId);
+
+  // ── v1.1: Spatial v2 ──
+  const v11Spatial = await assembleSpatialV11(db, workspaceId);
+
+  // ── v1.1: Messaging extras (operator-populated via JSON import) ──
+  let voiceExamples: NonNullable<EnsembleBrandSpec['messaging']['voice_examples']> | undefined;
+  try {
+    if (msgMap.voice_examples) voiceExamples = JSON.parse(msgMap.voice_examples.value);
+  } catch { /* ignore */ }
+  let audiences: NonNullable<EnsembleBrandSpec['messaging']['audiences']> | undefined;
+  try {
+    if (msgMap.audiences) audiences = JSON.parse(msgMap.audiences.value);
+  } catch { /* ignore */ }
+
+  // ── v1.1: License ──
+  const licenseType = idMap.brand_license_type?.value ?? null;
+  const licenseRestrictions = idMap.brand_license_restrictions?.value ?? undefined;
+
   // ── Assemble ──
+  const generatedAt = new Date().toISOString();
   const spec: EnsembleBrandSpec = {
-    ensemble_brand: '1.0',
-    updated_at: new Date().toISOString(),
+    ensemble_brand: '1.1',
+    schema_version: '1.1.0',
+    spec_url: baseUrl ? `${baseUrl}/_ensemble/brand/spec` : undefined,
+    workspace: workspaceRow ? {
+      id: workspaceRow.id,
+      slug: workspaceRow.slug,
+      display_name: workspaceRow.display_name,
+      public_url: baseUrl ?? '',
+    } : undefined,
+    updated_at: generatedAt,
+    generated_at: generatedAt,
+    license: licenseType || licenseRestrictions ? {
+      type: licenseType,
+      usage_restrictions: licenseRestrictions,
+    } : undefined,
 
     identity: {
       display_name: idMap.display_name?.value || '',
@@ -364,16 +646,25 @@ export async function assembleBrandSpec(
         error: semanticColors['error'] || '#C62828',
         'error-light': semanticColors['error-light'],
       },
+      // v1.1 additions
+      ...v11ColorsExtra,
     },
 
     typography: {
+      // v1.0 — keep for back-compat
       display: makeFontSpec('display_font'),
       heading: makeFontSpec('heading_font'),
       body: makeFontSpec('body_font'),
       mono: makeFontSpec('mono_font'),
+      // v1.1 — full 9 roles + sources + stylesheet URL
+      ...v11Typography,
     },
 
-    logos,
+    logos: {
+      ...logos,
+      // v1.1 — typed masters + variant matrix + banned + clearspace
+      ...v11Logos,
+    },
 
     messaging: {
       tagline: msgMap.tagline?.value || undefined,
@@ -387,8 +678,13 @@ export async function assembleBrandSpec(
         avoid: toneAvoid,
         voice_guidelines: msgMap.voice_guidelines?.value || undefined,
       } : undefined,
+      // v1.1: schema slots — operator may populate via JSON spec import
+      ...(voiceExamples && voiceExamples.length > 0 ? { voice_examples: voiceExamples } : {}),
+      ...(audiences && audiences.length > 0 ? { audiences } : {}),
       ...(Object.keys(msgCustom).length > 0 ? { custom: msgCustom } : {}),
     },
+
+    spatial: v11Spatial,
 
     ...(baseUrl ? {
       endpoints: {
@@ -396,11 +692,364 @@ export async function assembleBrandSpec(
         css: `${baseUrl}/_ensemble/brand/css`,
         context: `${baseUrl}/_ensemble/brand/context`,
         tokens: `${baseUrl}/_ensemble/brand/tokens`,
+        // v1.1 — everything an external agent might want, as absolute URLs.
+        brand_guide: `${baseUrl}/brand`,
+        variant_index: `${baseUrl}/_ensemble/brand/variants`,
+        // font_stylesheet points at /brand/css — there is no separate
+        // fonts-only endpoint. /brand/css already includes the Google
+        // Fonts @import alongside the CSS variable block.
+        font_stylesheet: `${baseUrl}/_ensemble/brand/css`,
+        schema: `${baseUrl}/_ensemble/brand/spec/schema.json`,
+        changelog: `${baseUrl}/_ensemble/brand/changelog`,
+        preview_card: logoSlotUrls.og_image
+          ? logoSlotUrls.og_image
+          : `${baseUrl}/_ensemble/brand/og.png`,
       },
     } : {}),
   };
 
+  // v1.1: compute etag last so it reflects the final payload.
+  if (spec.workspace) {
+    spec.etag = await computeEtag(spec);
+  }
+
   return spec;
+}
+
+// ─────────────────────────────────────────────────────────────
+// v1.1 sub-assemblers — kept inline in this file rather than split
+// out so the full spec-shape is readable in one place.
+// ─────────────────────────────────────────────────────────────
+
+async function assembleTypographyV11(
+  db: D1Database,
+  workspaceId: string,
+  baseUrl: string | undefined,
+): Promise<Partial<EnsembleBrandSpec['typography']>> {
+  try {
+    const { loadAndResolveRoles, familyStack, buildGoogleFontsHref, isSystem: isSystemFamily } =
+      await import('../../../services/font-roles');
+    const { ROLE_USAGE } = await import('../../../services/font-roles');
+    const { ROLE_EXAMPLES } = await import('../../../services/brand-spec-extras');
+    const roles = await loadAndResolveRoles(db, workspaceId);
+
+    const rolesOut: Record<string, FontRoleSpec> = {};
+    for (const [roleName, r] of Object.entries(roles)) {
+      const meta = ROLE_USAGE[roleName as keyof typeof ROLE_USAGE];
+      rolesOut[roleName] = {
+        family: r.family,
+        weight: r.weight,
+        style: r.style,
+        letter_spacing: r.letterSpacing,
+        text_transform: r.textTransform,
+        font_size: r.fontSize,
+        stack: familyStack(r.family),
+        css_var: `--font-${roleName}`,
+        label: meta?.label ?? roleName,
+        usage: meta?.usage ?? '',
+        examples: ROLE_EXAMPLES[roleName as keyof typeof ROLE_EXAMPLES] ?? [],
+        is_system: r.isSystem,
+      };
+    }
+
+    // Build font_sources — one entry per unique family.
+    const sourcesByFamily = new Map<string, {
+      family: string;
+      source: 'google' | 'upload' | 'system';
+      url?: string;
+      weights: Set<string>;
+      hasItalic: boolean;
+    }>();
+    for (const r of Object.values(roles)) {
+      let entry = sourcesByFamily.get(r.family);
+      if (!entry) {
+        entry = {
+          family: r.family,
+          source: isSystemFamily(r.family) ? 'system' : 'google',
+          weights: new Set(),
+          hasItalic: false,
+        };
+        sourcesByFamily.set(r.family, entry);
+      }
+      entry.weights.add(r.weight);
+      if (r.style === 'italic') entry.hasItalic = true;
+    }
+    const googleHref = buildGoogleFontsHref(roles);
+    const fontSources = Array.from(sourcesByFamily.values()).map((e) => ({
+      family: e.family,
+      source: e.source,
+      url: e.source === 'google' && googleHref ? googleHref : undefined,
+      weights: Array.from(e.weights).map((w) => Number(w)).filter((n) => !Number.isNaN(n)).sort((a, b) => a - b),
+      has_italic: e.hasItalic,
+    }));
+
+    return {
+      font_sources: fontSources,
+      stylesheet_url: baseUrl ? `${baseUrl}/_ensemble/brand/css` : undefined,
+      roles: rolesOut,
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function assembleLogosV11(
+  db: D1Database,
+  workspaceId: string,
+  logoSlotUrls: Record<string, string>,
+  baseUrl: string | undefined,
+  workspaceSlug: string | undefined,
+): Promise<Partial<EnsembleBrandSpec['logos']>> {
+  const out: Partial<EnsembleBrandSpec['logos']> = {};
+
+  // Masters — typed metadata around each slot URL.
+  const masters: Record<string, LogoMasterSpec> = {};
+  const slotRoles: Record<string, LogoMasterSpec['role']> = {
+    wordmark: 'wordmark', wordmark_dark: 'wordmark',
+    icon_mark: 'icon', icon_mark_dark: 'icon',
+    favicon: 'favicon', social_avatar: 'avatar', og_image: 'og',
+  };
+  for (const [slot, url] of Object.entries(logoSlotUrls)) {
+    const role = slotRoles[slot] ?? 'wordmark';
+    const ext = url.split('.').pop()?.toLowerCase();
+    const format = (ext === 'svg' || ext === 'png' || ext === 'ico')
+      ? (ext as 'svg' | 'png' | 'ico')
+      : 'svg';
+    masters[slot] = {
+      url,
+      role,
+      format,
+      minimum_size_px: role === 'wordmark' ? 120 : role === 'icon' ? 24 : undefined,
+    };
+  }
+  if (Object.keys(masters).length > 0) out.masters = masters;
+
+  // Variants — enumerate from the brand policy.
+  if (workspaceSlug && baseUrl) {
+    try {
+      const { loadEffectivePolicy, effectiveBannedPairs } = await import('../../../services/brand-policy');
+      const policy = await loadEffectivePolicy(db, workspaceId);
+      // effectiveBannedPairs takes policy + chrome colors so it can
+      // compute contrast-based auto-bans. Pull the chrome colors from
+      // brand_tokens with sensible defaults.
+      const chromeRes = await db.prepare(
+        `SELECT key, value FROM brand_tokens
+          WHERE workspace_id = ? AND category = 'colors' AND locale = ''
+            AND key IN ('brand-background-light','brand-background-dark','brand-primary-main')`,
+      ).bind(workspaceId).all<{ key: string; value: string }>();
+      const chromeMap = Object.fromEntries((chromeRes.results ?? []).map((r) => [r.key, r.value]));
+      const banned = effectiveBannedPairs(policy, {
+        bgLight: chromeMap['brand-background-light'] ?? '#ffffff',
+        bgDark: chromeMap['brand-background-dark'] ?? '#0a0a0a',
+        primary: chromeMap['brand-primary-main'] ?? '#3b82f6',
+      });
+
+      const variants: LogoVariantSpec[] = [];
+      const compEntries = Object.entries(policy.compositions) as Array<[string, { allowed: boolean }]>;
+      const allowedComps = compEntries.filter(([, c]) => c.allowed).map(([id]) => id);
+      const allowedFinishes = policy.finishes.filter((f) => f.allowed);
+      const allowedBgs = policy.backgrounds.filter((b) => b.allowed);
+      const banSet = new Set(banned.map((b) => `${b.finishId}|${b.backgroundId}`));
+
+      const compShortMap: Record<string, string> = {
+        'wordmark-only': 'wordmark',
+        'icon-only': 'icon',
+        'stacked': 'stacked',
+        'horizontal': 'horizontal',
+      };
+
+      for (const comp of allowedComps) {
+        const compShort = compShortMap[comp] ?? comp;
+        const roleForComp: LogoVariantSpec['role'] = comp === 'icon-only' ? 'icon' : 'wordmark';
+        for (const finish of allowedFinishes) {
+          for (const bg of allowedBgs) {
+            const approved = !banSet.has(`${finish.id}|${bg.id}`);
+            if (!approved) continue;
+            const baseName = `${workspaceSlug}-${compShort}-${finish.id}-${bg.id}`;
+            variants.push({
+              role: roleForComp,
+              composition: comp as LogoVariantSpec['composition'],
+              finish: finish.id as LogoVariantSpec['finish'],
+              background: bg.id,
+              format: 'svg',
+              size_px: null,
+              url: `${baseUrl}/_ensemble/brand/render/${baseName}.svg`,
+              approved: true,
+            });
+            variants.push({
+              role: roleForComp,
+              composition: comp as LogoVariantSpec['composition'],
+              finish: finish.id as LogoVariantSpec['finish'],
+              background: bg.id,
+              format: 'png',
+              size_px: 1024,
+              url: `${baseUrl}/_ensemble/brand/render/${baseName}.png`,
+              approved: true,
+            });
+          }
+        }
+      }
+
+      // Favicons — list the canonical favicon if set, plus standard sizes
+      // the render endpoint can produce on demand from the icon master.
+      if (logoSlotUrls.favicon) {
+        for (const size of [16, 32, 192, 512] as const) {
+          variants.push({
+            role: 'favicon',
+            composition: 'icon-only',
+            finish: 'full-color',
+            background: 'transparent',
+            format: 'png',
+            size_px: size,
+            url: `${baseUrl}/_ensemble/brand/render/${workspaceSlug}-favicon-${size}.png`,
+            approved: true,
+            use: size === 192 ? 'android-chrome' : size === 512 ? 'android-chrome-maskable' : 'favicon',
+          });
+        }
+      }
+
+      if (variants.length > 0) out.variants = variants;
+
+      // Banned — surface the contrast-failing combinations.
+      const bannedOut: LogoBannedSpec[] = banned.map((b) => ({
+        finish: b.finishId,
+        background: b.backgroundId,
+        reason: b.reason ?? 'Disallowed by brand policy.',
+      }));
+      if (bannedOut.length > 0) out.banned = bannedOut;
+    } catch {
+      // Policy loader failed — skip variants gracefully.
+    }
+  }
+
+  // Clearspace — sensible defaults; future operator override.
+  const { DEFAULT_CLEARSPACE } = await import('../../../services/brand-spec-extras');
+  out.clearspace = DEFAULT_CLEARSPACE;
+
+  return out;
+}
+
+async function assembleColorsV11(
+  db: D1Database,
+  workspaceId: string,
+): Promise<{ palettes?: Record<string, ColorPaletteSpec>; semantic_v2?: Record<string, SemanticColorSpec>; modes?: { light: ColorModeSpec; dark: ColorModeSpec } }> {
+  try {
+    const { loadBrandColors } = await import('../../../services/brand-colors/load');
+    const { resolvePalettes } = await import('../../../services/brand-colors/resolver');
+    const { PALETTE_USAGE, SEMANTIC_USAGE, DEFAULT_MODES } = await import('../../../services/brand-spec-extras');
+    const doc = await loadBrandColors(db, workspaceId);
+    const palettes = resolvePalettes(doc);
+
+    const palettesOut: Record<string, ColorPaletteSpec> = {};
+    const roles = ['primary', 'secondary', 'accent', 'neutral'] as const;
+    for (const role of roles) {
+      const p = palettes[role];
+      const meta = PALETTE_USAGE[role];
+      palettesOut[role] = {
+        name: doc.palettes[role].name,
+        dark: p.dark, main: p.main, bright: p.bright, pastel: p.pastel, faded: p.faded,
+        on: '#ffffff', // Sensible default — a future v0.1.90 can derive from contrast.
+        css_vars: {
+          dark: `--brand-${role}-dark`,
+          main: `--brand-${role}-main`,
+          bright: `--brand-${role}-bright`,
+          pastel: `--brand-${role}-pastel`,
+          faded: `--brand-${role}-faded`,
+        },
+        usage: meta.usage,
+        examples: meta.examples,
+      };
+    }
+
+    const semanticV2: Record<string, SemanticColorSpec> = {};
+    const semRoles = ['success', 'info', 'warning', 'error'] as const;
+    for (const sr of semRoles) {
+      const s = doc.semantic[sr];
+      semanticV2[sr] = {
+        main: s.main,
+        light: s.light,
+        on: '#ffffff',
+        css_var: `--brand-semantic-${sr}`,
+        usage: SEMANTIC_USAGE[sr],
+      };
+    }
+
+    // Modes — pull from brand_tokens chrome colors if set, else defaults.
+    const tokensRes = await db.prepare(
+      `SELECT key, value FROM brand_tokens WHERE workspace_id = ? AND category = 'colors' AND key LIKE 'brand-%' AND locale = ''`,
+    ).bind(workspaceId).all<{ key: string; value: string }>();
+    const tokenMap = Object.fromEntries((tokensRes.results ?? []).map((r) => [r.key, r.value]));
+    const modes = {
+      light: {
+        background: tokenMap['brand-background-light'] ?? DEFAULT_MODES.light.background,
+        foreground: tokenMap['brand-foreground-light'] ?? DEFAULT_MODES.light.foreground,
+        surface:    tokenMap['brand-surface-light']    ?? DEFAULT_MODES.light.surface,
+        border:     tokenMap['brand-border-light']     ?? DEFAULT_MODES.light.border,
+      },
+      dark: {
+        background: tokenMap['brand-background-dark'] ?? DEFAULT_MODES.dark.background,
+        foreground: tokenMap['brand-foreground-dark'] ?? DEFAULT_MODES.dark.foreground,
+        surface:    tokenMap['brand-surface-dark']    ?? DEFAULT_MODES.dark.surface,
+        border:     tokenMap['brand-border-dark']     ?? DEFAULT_MODES.dark.border,
+      },
+    };
+
+    return { palettes: palettesOut, semantic_v2: semanticV2, modes };
+  } catch {
+    return {};
+  }
+}
+
+async function assembleSpatialV11(
+  db: D1Database,
+  workspaceId: string,
+): Promise<EnsembleBrandSpec['spatial']> {
+  const { DEFAULT_RADIUS, DEFAULT_SHADOW, COMPONENT_DEFAULTS } =
+    await import('../../../services/brand-spec-extras');
+  const spatialTokens = await db.prepare(
+    `SELECT key, value FROM brand_tokens WHERE workspace_id = ? AND category = 'spatial' AND locale = ''`,
+  ).bind(workspaceId).all<{ key: string; value: string }>();
+  const tokens = Object.fromEntries((spatialTokens.results ?? []).map((r) => [r.key, r.value]));
+
+  const radiusScale = {
+    sm: tokens['radius_sm'] ?? DEFAULT_RADIUS.sm,
+    md: tokens['radius_md'] ?? DEFAULT_RADIUS.md,
+    lg: tokens['radius_lg'] ?? DEFAULT_RADIUS.lg,
+    xl: tokens['radius_xl'] ?? DEFAULT_RADIUS.xl,
+    full: tokens['radius_full'] ?? DEFAULT_RADIUS.full,
+  };
+
+  return {
+    // v1.0 — keep
+    radius: radiusScale.md,
+    radius_lg: radiusScale.lg,
+    spacing_unit: tokens['spacing_unit'] ?? '0.25rem',
+    // v1.1
+    radius_scale: radiusScale,
+    spacing: {
+      unit: tokens['spacing_unit'] ?? '0.25rem',
+      scale: [0, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64],
+    },
+    shadow: {
+      sm: tokens['shadow_sm'] ?? DEFAULT_SHADOW.sm,
+      md: tokens['shadow_md'] ?? DEFAULT_SHADOW.md,
+      lg: tokens['shadow_lg'] ?? DEFAULT_SHADOW.lg,
+      xl: tokens['shadow_xl'] ?? DEFAULT_SHADOW.xl,
+    },
+    components: COMPONENT_DEFAULTS,
+  };
+}
+
+async function computeEtag(spec: EnsembleBrandSpec): Promise<string> {
+  // Cheap content hash — SHA-256 over a stable serialization, first 16 hex chars.
+  // We exclude generated_at from the hash so identical content yields the
+  // same etag across re-renders.
+  const stable = { ...spec, generated_at: undefined, etag: undefined };
+  const enc = new TextEncoder().encode(JSON.stringify(stable));
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  const arr = Array.from(new Uint8Array(buf));
+  const hex = arr.slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `W/"${hex}"`;
 }
 
 // ============================================================================
@@ -702,9 +1351,15 @@ export async function importBrandSpec(
   if (spec.typography.body) await upsertToken('typography', 'body_font', spec.typography.body.family, 'font');
   if (spec.typography.mono) await upsertToken('typography', 'mono_font', spec.typography.mono.family, 'font');
 
-  // Logos
-  for (const [key, url] of Object.entries(spec.logos)) {
-    if (url) await upsertToken('identity', `logo_${key}`, url, 'url');
+  // Logos — only v1.0 string slots are persisted; v1.1 fields
+  // (masters/variants/banned/clearspace) are *derived on emit* and not
+  // imported back into brand_tokens.
+  const v11LogoKeys = new Set(['masters', 'variants', 'banned', 'clearspace']);
+  for (const [key, value] of Object.entries(spec.logos)) {
+    if (v11LogoKeys.has(key)) continue;
+    if (typeof value === 'string' && value) {
+      await upsertToken('identity', `logo_${key}`, value, 'url');
+    }
   }
 
   // Messaging
