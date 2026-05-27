@@ -58,26 +58,34 @@ export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
 
 /**
  * Rewrite a canonical brand URL into the operator's configured
- * "pretty" alias form, when one is set. Unified URL model (v0.1.46+):
- * EVERY brand resource lives under /_ensemble/brand/* canonically;
- * the alias rewrites the prefix to /<alias>/brand/* for all of them.
- * One transform, applied uniformly to:
- *   - /_ensemble/brand/asset/<r2-key>      → /<alias>/brand/asset/<r2-key>
- *   - /_ensemble/brand/render/<filename>   → /<alias>/brand/render/<filename>
- *   - /_ensemble/brand/spec                → /<alias>/brand/spec
- *   - /_ensemble/brand/css                 → /<alias>/brand/css
- *   - /_ensemble/brand/favicon.svg         → /<alias>/brand/favicon.svg
- *   - /_ensemble/brand/<future>            → /<alias>/brand/<future>
+ * "pretty" alias form, when one is set.
+ *
+ * v0.1.93: canonical brand URLs live at `/brand/*` (no `/_ensemble/`
+ * prefix). The alias transform rewrites either the legacy
+ * `/_ensemble/brand/...` form OR the canonical `/brand/...` form into
+ * `/<alias>/brand/...`. One transform, applied uniformly across the
+ * full brand surface:
+ *
+ *   /brand/asset/<r2-key>      → /<alias>/brand/asset/<r2-key>
+ *   /brand/render/<filename>   → /<alias>/brand/render/<filename>
+ *   /brand/spec                → /<alias>/brand/spec
+ *   /brand/css                 → /<alias>/brand/css
+ *   /brand/favicon.svg         → /<alias>/brand/favicon.svg
+ *   /brand/<future>            → /<alias>/brand/<future>
+ *
+ * The legacy `/_ensemble/brand/...` form is still matched so any
+ * stored token values from earlier releases still alias correctly on
+ * read.
  *
  * Stored brand_token values stay canonical — changing the alias path
  * never breaks stored data. This helper transforms on read.
  *
  * Inputs that pass through unchanged:
  *   - Empty / null URLs
- *   - Already-aliased URLs (don't start with /_ensemble/brand/)
+ *   - Already-aliased URLs (don't start with /brand/ or /_ensemble/brand/)
  *   - Absolute URLs (https://...)
- *   - Non-brand /_ensemble paths (auth, runtime, etc. — those are
- *     system-internal and never operator-distributed)
+ *   - Non-brand /_ensemble paths (auth, runtime, etc. — system-internal,
+ *     not operator-distributed)
  */
 export function applyAssetAlias(
   url: string | null | undefined,
@@ -85,13 +93,15 @@ export function applyAssetAlias(
 ): string | null {
   if (!url) return null;
   if (!aliasPath) return url;
-  // Rewrite the entire /_ensemble/brand/ prefix → /<alias>/brand/.
-  // Note: we keep the `brand/` segment after the alias so URLs
-  // self-describe (`/assets/brand/spec` is obviously a brand resource;
-  // `/assets/spec` is ambiguous).
-  const m = /^\/_ensemble\/brand\/(.+)$/.exec(url);
-  if (!m) return url;
-  return `/${aliasPath}/brand/${m[1]}`;
+  // Try canonical `/brand/...` first, then legacy `/_ensemble/brand/...`.
+  // We keep the `brand/` segment after the alias so URLs self-describe
+  // (`/assets/brand/spec` reads as a brand resource; `/assets/spec` is
+  // ambiguous about origin).
+  const canonical = /^\/brand\/(.+)$/.exec(url);
+  if (canonical) return `/${aliasPath}/brand/${canonical[1]}`;
+  const legacy = /^\/_ensemble\/brand\/(.+)$/.exec(url);
+  if (legacy) return `/${aliasPath}/brand/${legacy[1]}`;
+  return url;
 }
 
 /**

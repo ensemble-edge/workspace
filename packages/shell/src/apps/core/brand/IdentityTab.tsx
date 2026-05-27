@@ -202,7 +202,7 @@ export function IdentityTab() {
             </CardHeader>
             <CardContent className="space-y-3">
               <Button variant="outline" className="w-full justify-start" onClick={() => {
-                authedFetch('/_ensemble/brand/spec')
+                authedFetch('/brand/spec')
                   .then((r) => r.json())
                   .then((spec) => {
                     const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
@@ -362,7 +362,7 @@ function ImportForm({ onSuccess }: { onSuccess: () => void }) {
           <div className="space-y-2">
             <Label>Spec URL</Label>
             <Input
-              placeholder="https://other-workspace.com/_ensemble/brand/spec"
+              placeholder="https://other-workspace.com/brand/spec"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />

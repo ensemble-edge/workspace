@@ -626,7 +626,7 @@ export async function renderBrandGuide(env: Env, workspaceId: string): Promise<s
             },
             {
               label: 'Brand spec (JSON)',
-              path: '/_ensemble/brand/spec',
+              path: '/brand/spec',
               note: 'Full machine-readable brand definition — palettes, themes, gradients, semantic, typography',
             },
             {

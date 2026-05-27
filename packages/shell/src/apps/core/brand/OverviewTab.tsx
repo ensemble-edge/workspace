@@ -112,7 +112,7 @@ export function OverviewTab() {
   useEffect(() => {
     // Spec + wordmark_text + resolved-fonts-with-sizes in parallel.
     Promise.all([
-      authedFetch('/_ensemble/brand/spec').then((r) => r.json() as Promise<BrandSpec>),
+      authedFetch('/brand/spec').then((r) => r.json() as Promise<BrandSpec>),
       authedFetch('/_ensemble/core/brand/tokens/identity')
         .then((r) => r.json() as Promise<{ data?: Array<{ key: string; value: string }> }>)
         .then((res) => {
@@ -156,7 +156,7 @@ export function OverviewTab() {
   const name = spec.identity.display_name || 'Workspace';
   const hasColors = spec.colors.groups.length > 0;
   const hasMessaging = !!(spec.messaging.tagline || spec.messaging.mission);
-  const specUrl = spec.endpoints?.spec || `${window.location.origin}/_ensemble/brand/spec`;
+  const specUrl = spec.endpoints?.spec || `${window.location.origin}/brand/spec`;
   const cssUrl = spec.endpoints?.css || `${window.location.origin}/_ensemble/brand/css`;
 
   return (

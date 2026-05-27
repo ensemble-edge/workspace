@@ -53,6 +53,22 @@ export interface EnsembleBrandSpec {
     usage_restrictions?: string;
   };
 
+  /**
+   * v0.1.93: usage instructions for consumers (especially AI agents)
+   * reading this spec. Tells them HOW to use the data, not just the
+   * structure. Read this first; treat as part of your system prompt.
+   *
+   * Structured as { summary, rules[], anti_patterns[], for_ai_agents }
+   * so individual rules can be referenced by stable id and so tools
+   * can enumerate / surface specific rules in a UI.
+   */
+  instructions?: {
+    summary: string;
+    rules: Array<{ id: string; rule: string; why: string }>;
+    anti_patterns: string[];
+    for_ai_agents: string;
+  };
+
   /** Company identity */
   identity: {
     display_name: string;
@@ -163,8 +179,6 @@ export interface EnsembleBrandSpec {
      * external agent picks the right one by context, not by URL pattern.
      */
     variants?: LogoVariantSpec[];
-    /** Combinations the brand policy explicitly disallows. */
-    banned?: LogoBannedSpec[];
     /** Minimum padding around each lockup, in role-specific units. */
     clearspace?: Record<string, ClearspaceSpec>;
   };
@@ -290,14 +304,15 @@ export interface LogoVariantSpec {
   approved: boolean;
   /** Optional hint about where this variant is most useful. */
   use?: string;
-}
 
-export interface LogoBannedSpec {
-  composition?: string;
-  finish?: string;
-  background?: string;
-  reason: string;
-  example_url?: string;
+  // v0.1.93: per-variant context so an agent picking a logo gets
+  // guidance, not just an inventory entry.
+  /** Combined usage prose — when to reach for this specific variant. */
+  usage?: string;
+  /** Concrete examples ("dark hero banner", "Android home-screen icon"). */
+  examples?: string[];
+  /** Render contexts this variant is sized + tuned for. */
+  recommended_for?: string[];
 }
 
 export interface ClearspaceSpec {
@@ -540,8 +555,15 @@ export async function assembleBrandSpec(
   // Track the original (unaliased) values so the v1.1 masters block
   // can carry typed metadata while the v1.0 flat URLs stay aliased.
   const logoSlotUrls: Record<string, string> = {};
+  // v0.1.93: logo_policy is a JSON blob storing the brand-policy config,
+  // NOT a logo asset URL. It happens to share the `logo_` prefix so the
+  // naive startsWith filter picked it up and emitted the JSON string as
+  // a fake logo (visible as `masters.policy` in v0.1.92 spec responses).
+  // Hard-code the skip here; if more meta keys join the logo_ namespace,
+  // we move to an allowlist of known logo slots instead.
+  const NON_LOGO_KEYS = new Set(['logo_policy']);
   for (const t of identityTokens) {
-    if (t.key.startsWith('logo_')) {
+    if (t.key.startsWith('logo_') && !NON_LOGO_KEYS.has(t.key)) {
       const logoKey = t.key.replace('logo_', '') as keyof typeof logos;
       const aliased = applyAssetAlias(t.value, assetAliasPath ?? '');
       if (aliased) {
@@ -614,12 +636,19 @@ export async function assembleBrandSpec(
   const licenseType = idMap.brand_license_type?.value ?? null;
   const licenseRestrictions = idMap.brand_license_restrictions?.value ?? undefined;
 
+  // ── v0.1.93: Instructions block for AI/tool consumers ──
+  const { BRAND_SPEC_INSTRUCTIONS } = await import('../../../services/brand-spec-extras');
+
   // ── Assemble ──
   const generatedAt = new Date().toISOString();
   const spec: EnsembleBrandSpec = {
     ensemble_brand: '1.1',
     schema_version: '1.1.0',
     spec_url: baseUrl ? `${baseUrl}/brand/spec` : undefined,
+    // Instructions sit at the TOP so an LLM reading the first ~500
+    // tokens of the response immediately encounters the contract
+    // before parsing any data.
+    instructions: BRAND_SPEC_INSTRUCTIONS,
     workspace: workspaceRow ? {
       id: workspaceRow.id,
       slug: workspaceRow.slug,
@@ -849,6 +878,11 @@ async function assembleLogosV11(
             AND key IN ('brand-background-light','brand-background-dark','brand-primary-main')`,
       ).bind(workspaceId).all<{ key: string; value: string }>();
       const chromeMap = Object.fromEntries((chromeRes.results ?? []).map((r) => [r.key, r.value]));
+      // Contrast check still runs internally to EXCLUDE unreadable
+      // combos from the variant matrix. v0.1.93: we no longer surface
+      // a `banned` array publicly — banned uses were removed from the
+      // operator-facing brand model. The contrast filter is a quality
+      // gate on what we expose, not a thing for agents to read.
       const banned = effectiveBannedPairs(policy, {
         bgLight: chromeMap['brand-background-light'] ?? '#ffffff',
         bgDark: chromeMap['brand-background-dark'] ?? '#0a0a0a',
@@ -869,6 +903,47 @@ async function assembleLogosV11(
         'horizontal': 'horizontal',
       };
 
+      // v0.1.93: enrich each variant with usage prose. Composes guidance
+      // from the composition (where the lockup goes), the finish (what
+      // visual treatment), and the background (what surface it sits on)
+      // into a per-variant usage paragraph + concrete recommended_for hints.
+      const {
+        COMPOSITION_USAGE,
+        FINISH_USAGE,
+        BACKGROUND_USAGE,
+        FORMAT_USAGE,
+        USE_HINT_GUIDANCE,
+      } = await import('../../../services/brand-spec-extras');
+
+      function enrichVariant(
+        v: Omit<LogoVariantSpec, 'usage' | 'examples' | 'recommended_for'>,
+      ): LogoVariantSpec {
+        const comp = COMPOSITION_USAGE[v.composition as keyof typeof COMPOSITION_USAGE];
+        const fin = FINISH_USAGE[v.finish as keyof typeof FINISH_USAGE];
+        const bg = BACKGROUND_USAGE[v.background as keyof typeof BACKGROUND_USAGE];
+        const fmt = FORMAT_USAGE[v.format];
+        const useHint = v.use ? USE_HINT_GUIDANCE[v.use] : undefined;
+
+        // Combine the three guidance sentences into a single usage block.
+        const parts = [comp?.usage, fin?.usage, bg?.usage].filter(Boolean);
+        const usage = parts.length > 0
+          ? parts.join(' ')
+          : 'Use as appropriate for your brand context.';
+
+        // recommended_for blends composition + background + format hints.
+        const recommended_for = [
+          ...(comp?.examples ?? []),
+          ...(bg?.examples ?? []),
+          ...(useHint ? [useHint] : []),
+          ...(fmt ? [fmt] : []),
+        ];
+
+        // examples is the tighter list — composition examples primarily.
+        const examples = comp?.examples ?? [];
+
+        return { ...v, usage, examples, recommended_for };
+      }
+
       for (const comp of allowedComps) {
         const compShort = compShortMap[comp] ?? comp;
         const roleForComp: LogoVariantSpec['role'] = comp === 'icon-only' ? 'icon' : 'wordmark';
@@ -877,7 +952,7 @@ async function assembleLogosV11(
             const approved = !banSet.has(`${finish.id}|${bg.id}`);
             if (!approved) continue;
             const baseName = `${workspaceSlug}-${compShort}-${finish.id}-${bg.id}`;
-            variants.push({
+            variants.push(enrichVariant({
               role: roleForComp,
               composition: comp as LogoVariantSpec['composition'],
               finish: finish.id as LogoVariantSpec['finish'],
@@ -886,8 +961,8 @@ async function assembleLogosV11(
               size_px: null,
               url: `${baseUrl}/_ensemble/brand/render/${baseName}.svg`,
               approved: true,
-            });
-            variants.push({
+            }));
+            variants.push(enrichVariant({
               role: roleForComp,
               composition: comp as LogoVariantSpec['composition'],
               finish: finish.id as LogoVariantSpec['finish'],
@@ -896,7 +971,7 @@ async function assembleLogosV11(
               size_px: 1024,
               url: `${baseUrl}/_ensemble/brand/render/${baseName}.png`,
               approved: true,
-            });
+            }));
           }
         }
       }
@@ -905,7 +980,7 @@ async function assembleLogosV11(
       // the render endpoint can produce on demand from the icon master.
       if (logoSlotUrls.favicon) {
         for (const size of [16, 32, 192, 512] as const) {
-          variants.push({
+          variants.push(enrichVariant({
             role: 'favicon',
             composition: 'icon-only',
             finish: 'full-color',
@@ -915,19 +990,16 @@ async function assembleLogosV11(
             url: `${baseUrl}/_ensemble/brand/render/${workspaceSlug}-favicon-${size}.png`,
             approved: true,
             use: size === 192 ? 'android-chrome' : size === 512 ? 'android-chrome-maskable' : 'favicon',
-          });
+          }));
         }
       }
 
       if (variants.length > 0) out.variants = variants;
 
-      // Banned — surface the contrast-failing combinations.
-      const bannedOut: LogoBannedSpec[] = banned.map((b) => ({
-        finish: b.finishId,
-        background: b.backgroundId,
-        reason: b.reason ?? 'Disallowed by brand policy.',
-      }));
-      if (bannedOut.length > 0) out.banned = bannedOut;
+      // v0.1.93: banned uses dropped from spec output (removed from
+      // operator-facing brand model). The contrast check above still
+      // filters bad combos out of `variants`, which is the actual
+      // guarantee consumers need.
     } catch {
       // Policy loader failed — skip variants gracefully.
     }
@@ -1015,27 +1087,24 @@ async function assembleSpatialV11(
   db: D1Database,
   workspaceId: string,
 ): Promise<EnsembleBrandSpec['spatial']> {
-  // v0.1.88-EXACT behavior: spec.spatial is undefined unless the operator
-  // has actually set a v1.0 spatial token (radius / radius_lg /
-  // spacing_unit) in brand_tokens. generateCssFromSpec then emits zero
-  // --brand-radius / --brand-spacing lines — byte-identical to the
-  // v0.1.88 CSS output for workspaces with no spatial overrides. The
-  // earlier v0.1.89 version of this function unconditionally populated
-  // those fields from defaults, which caused the CSS endpoint to start
-  // emitting --brand-radius / --brand-spacing values that overrode the
-  // shell's bundled CSS and visibly shifted every rounded corner in
-  // the workspace.
+  // Split into two halves with different rules:
+  //
+  //   v1.0 fields (radius, radius_lg, spacing_unit) feed into
+  //   generateCssFromSpec → /brand/css. If we fill them from defaults,
+  //   the CSS endpoint emits --brand-radius overrides that shift the
+  //   live shell visuals. So: ONLY emit these when the operator has
+  //   explicitly set the corresponding brand_token. Matches v0.1.88
+  //   behavior byte-for-byte.
+  //
+  //   v1.1 fields (radius_scale, spacing, shadow, components) are
+  //   agent-facing METADATA. generateCssFromSpec ignores them, so they
+  //   have zero CSS side-effect. Emit them ALWAYS, populated from
+  //   defaults, so an external builder always knows the spacing
+  //   system — even on workspaces that haven't customised it.
   const spatialTokens = await db.prepare(
     `SELECT key, value FROM brand_tokens WHERE workspace_id = ? AND category = 'spatial' AND locale = ''`,
   ).bind(workspaceId).all<{ key: string; value: string }>();
   const tokens = Object.fromEntries((spatialTokens.results ?? []).map((r) => [r.key, r.value]));
-
-  const hasV10Spatial =
-    tokens['radius'] !== undefined ||
-    tokens['radius_lg'] !== undefined ||
-    tokens['spacing_unit'] !== undefined;
-
-  if (!hasV10Spatial) return undefined;
 
   const { DEFAULT_RADIUS, DEFAULT_SHADOW, COMPONENT_DEFAULTS } =
     await import('../../../services/brand-spec-extras');
@@ -1050,10 +1119,14 @@ async function assembleSpatialV11(
 
   return {
     // v1.0 — emit ONLY when the operator explicitly set the token.
+    // Falling back to defaults here would override the shell's bundled
+    // CSS via /brand/css and visibly shift the workspace look.
     radius: tokens['radius'] ?? undefined,
     radius_lg: tokens['radius_lg'] ?? undefined,
     spacing_unit: tokens['spacing_unit'] ?? undefined,
-    // v1.1 — generateCssFromSpec doesn't read these, so they're safe.
+    // v1.1 — ALWAYS emit. generateCssFromSpec doesn't read these, so
+    // CSS output is identical regardless. External agents get a full
+    // spacing system to reference.
     radius_scale: radiusScale,
     spacing: {
       unit: tokens['spacing_unit'] ?? '0.25rem',
