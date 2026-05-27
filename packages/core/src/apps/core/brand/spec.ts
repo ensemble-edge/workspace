@@ -619,7 +619,7 @@ export async function assembleBrandSpec(
   const spec: EnsembleBrandSpec = {
     ensemble_brand: '1.1',
     schema_version: '1.1.0',
-    spec_url: baseUrl ? `${baseUrl}/_ensemble/brand/spec` : undefined,
+    spec_url: baseUrl ? `${baseUrl}/brand/spec` : undefined,
     workspace: workspaceRow ? {
       id: workspaceRow.id,
       slug: workspaceRow.slug,
@@ -695,19 +695,23 @@ export async function assembleBrandSpec(
 
     ...(baseUrl ? {
       endpoints: {
-        spec: `${baseUrl}/_ensemble/brand/spec`,
-        css: `${baseUrl}/_ensemble/brand/css`,
-        context: `${baseUrl}/_ensemble/brand/context`,
-        tokens: `${baseUrl}/_ensemble/brand/tokens`,
-        // v1.1 — everything an external agent might want, as absolute URLs.
-        brand_guide: `${baseUrl}/brand`,
-        variant_index: `${baseUrl}/_ensemble/brand/variants`,
-        // font_stylesheet points at /brand/css — there is no separate
-        // fonts-only endpoint. /brand/css already includes the Google
-        // Fonts @import alongside the CSS variable block.
+        // v0.1.92: public brand-guide renderings moved out of
+        // /_ensemble/brand/ to /brand/*. The /_ensemble/ prefix is
+        // reserved for shell-internal API; everything the public guide
+        // exposes (HTML, JSON, Markdown, schema, variants, changelog)
+        // lives under /brand/. /brand/css and /brand/theme remain in
+        // /_ensemble/ because they're consumed by the shell at all
+        // times (login chrome) and a wide set of consumer sites
+        // already hot-link them — moving those is a separate decision.
+        spec:            `${baseUrl}/brand/spec`,
+        css:             `${baseUrl}/_ensemble/brand/css`,
+        context:         `${baseUrl}/brand/context`,
+        tokens:          `${baseUrl}/_ensemble/brand/tokens`,
+        brand_guide:     `${baseUrl}/brand`,
+        variant_index:   `${baseUrl}/brand/variants`,
         font_stylesheet: `${baseUrl}/_ensemble/brand/css`,
-        schema: `${baseUrl}/_ensemble/brand/spec/schema.json`,
-        changelog: `${baseUrl}/_ensemble/brand/changelog`,
+        schema:          `${baseUrl}/brand/spec/schema.json`,
+        changelog:       `${baseUrl}/brand/changelog`,
         preview_card: logoSlotUrls.og_image
           ? logoSlotUrls.og_image
           : `${baseUrl}/_ensemble/brand/og.png`,

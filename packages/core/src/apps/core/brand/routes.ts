@@ -39,10 +39,26 @@ export function registerBrandRoutes(
   // Default (no params) returns the full payload. The meta block
   // (ensemble_brand, workspace, etag, endpoints, ...) is ALWAYS retained
   // so the response stays self-describing.
-  app.get('/_ensemble/brand/spec', async (c) => {
+  // v0.1.92: TWO paths feed the same handler, intentionally:
+  //
+  //   /brand/spec               — public, gated on public_brand_guide_enabled
+  //   /_ensemble/brand/spec     — admin-internal, always works for the shell
+  //
+  // The shell's Brand Admin Overview needs the data BEFORE the operator
+  // publishes the guide; the public sibling is for external agents and
+  // is locked behind the guide toggle. Same handler body, different
+  // gate. The handler reads c.req.path to decide which gate to apply.
+  const specHandler = async (c: import('hono').Context<{ Bindings: Env; Variables: ContextVariables }>) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
-    if (!(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
+
+    const isAdminPath = c.req.path.startsWith('/_ensemble/');
+    if (!isAdminPath) {
+      // Public path — gate on guide toggle.
+      if (!(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
+    }
+    // Admin path skips the gate; the regular auth middleware upstream
+    // already enforces that the caller has a valid session.
 
     try {
       const baseUrl = new URL(c.req.url).origin;
@@ -52,49 +68,51 @@ export function registerBrandRoutes(
 
       const format = c.req.query('format');
       if (format === 'yaml') {
-        // Simple YAML-like output (no dependency needed for basic structure)
         return c.text(jsonToYaml(spec), 200, { 'Content-Type': 'text/yaml' });
       }
 
-      // v1.1: apply `?for=` preset + `?include=` allowlist if provided.
       const forParam = c.req.query('for');
       const includeParam = c.req.query('include');
       const filtered = await applySpecFilters(spec, forParam, includeParam);
 
-      return c.json(filtered, 200, {
-        'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
-      });
+      return c.json(filtered, 200, isAdminPath
+        ? { 'Cache-Control': 'private, no-store' }
+        : { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400' });
     } catch (error) {
       console.error('Failed to generate brand spec:', error);
       return c.json({ error: 'Failed to generate brand spec' }, 500);
     }
-  });
+  };
+  app.get('/brand/spec', specHandler);
+  app.get('/_ensemble/brand/spec', specHandler);
 
-  // GET /_ensemble/brand/spec/schema.json — JSON Schema (Draft 2020-12)
+
+// GET /_ensemble/brand/spec/schema.json — JSON Schema (Draft 2020-12)
   // describing the v1.1 spec response. Same public-guide gate as the
   // rest of the brand-spec family: one operator switch, consistent
   // effect. Exceptions like /brand/css and /brand/theme stay public
   // because the shell needs them at all times (login page chrome,
   // themed admin); the schema is purely a consumer convenience and
   // follows the toggle.
-  app.get('/_ensemble/brand/spec/schema.json', async (c) => {
+  const schemaHandler = async (c: import('hono').Context<{ Bindings: Env; Variables: ContextVariables }>) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
-    if (!(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
+    const isAdminPath = c.req.path.startsWith('/_ensemble/');
+    if (!isAdminPath && !(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
     const { BRAND_SPEC_SCHEMA } = await import('../../../services/brand-spec-extras');
     return c.json(BRAND_SPEC_SCHEMA, 200, {
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': isAdminPath ? 'private, no-store' : 'public, max-age=3600',
     });
-  });
+  };
+  app.get('/brand/spec/schema.json', schemaHandler);
+  app.get('/_ensemble/brand/spec/schema.json', schemaHandler);
 
-  // GET /_ensemble/brand/variants — JSON enumeration of every approved
-  // logo render. Same data as spec.assets.variants[], surfaced as a
-  // standalone endpoint so agents that only want the variant matrix
-  // can skip the full spec. Same public-guide gate as /brand/spec.
-  app.get('/_ensemble/brand/variants', async (c) => {
+  // /brand/variants — public, gated. /_ensemble/brand/variants — admin.
+  const variantsHandler = async (c: import('hono').Context<{ Bindings: Env; Variables: ContextVariables }>) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
-    if (!(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
+    const isAdminPath = c.req.path.startsWith('/_ensemble/');
+    if (!isAdminPath && !(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
     try {
       const baseUrl = new URL(c.req.url).origin;
       const { getSetting } = await import('../../../services/workspace-settings');
@@ -104,19 +122,23 @@ export function registerBrandRoutes(
         variants: spec.assets?.variants ?? [],
         banned: spec.assets?.banned ?? [],
         clearspace: spec.assets?.clearspace ?? {},
-      }, 200, { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400' });
+      }, 200, isAdminPath
+        ? { 'Cache-Control': 'private, no-store' }
+        : { 'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400' });
     } catch (error) {
       console.error('Failed to generate brand variants:', error);
       return c.json({ error: 'Failed to generate brand variants' }, 500);
     }
-  });
+  };
+  app.get('/brand/variants', variantsHandler);
+  app.get('/_ensemble/brand/variants', variantsHandler);
 
-  // GET /_ensemble/brand/changelog — recent brand-* audit log entries.
-  // What-changed-when (no actor PII). Same public-guide gate.
-  app.get('/_ensemble/brand/changelog', async (c) => {
+  // /brand/changelog — public, gated. /_ensemble/brand/changelog — admin.
+  const changelogHandler = async (c: import('hono').Context<{ Bindings: Env; Variables: ContextVariables }>) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
-    if (!(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
+    const isAdminPath = c.req.path.startsWith('/_ensemble/');
+    if (!isAdminPath && !(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
     try {
       const rows = await c.env.DB.prepare(
         `SELECT action, created_at, details
@@ -130,12 +152,16 @@ export function registerBrandRoutes(
         at: r.created_at,
         details: (() => { try { return r.details ? JSON.parse(r.details) : null; } catch { return null; } })(),
       }));
-      return c.json({ entries }, 200, { 'Cache-Control': 'public, max-age=60' });
+      return c.json({ entries }, 200, isAdminPath
+        ? { 'Cache-Control': 'private, no-store' }
+        : { 'Cache-Control': 'public, max-age=60' });
     } catch (error) {
       console.error('Failed to fetch brand changelog:', error);
       return c.json({ error: 'Failed to fetch brand changelog' }, 500);
     }
-  });
+  };
+  app.get('/brand/changelog', changelogHandler);
+  app.get('/_ensemble/brand/changelog', changelogHandler);
 
   // NOTE: no separate /brand/fonts.css endpoint. The full /brand/css
   // already includes the Google Fonts @import at the top alongside all
@@ -148,10 +174,11 @@ export function registerBrandRoutes(
   // GET /_ensemble/brand/context — AI-readable markdown
   // Same public-guide gate as /brand/spec — it's just the markdown
   // rendering of the same data the HTML guide and JSON spec emit.
-  app.get('/_ensemble/brand/context', async (c) => {
+  const contextHandler = async (c: import('hono').Context<{ Bindings: Env; Variables: ContextVariables }>) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
-    if (!(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
+    const isAdminPath = c.req.path.startsWith('/_ensemble/');
+    if (!isAdminPath && !(await isPublicBrandEnabled(c.env, workspace.id))) return c.notFound();
 
     try {
       const { getSetting } = await import('../../../services/workspace-settings');
@@ -160,13 +187,17 @@ export function registerBrandRoutes(
       const markdown = generateContextFromSpec(spec);
       return c.text(markdown, 200, {
         'Content-Type': 'text/markdown',
-        'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400',
+        'Cache-Control': isAdminPath
+          ? 'private, no-store'
+          : 'public, max-age=300, stale-while-revalidate=86400',
       });
     } catch (error) {
       console.error('Failed to generate brand context:', error);
       return c.text('Failed to generate brand context', 500);
     }
-  });
+  };
+  app.get('/brand/context', contextHandler);
+  app.get('/_ensemble/brand/context', contextHandler);
 
   // POST /_ensemble/brand/import — Import a brand spec
   app.post('/_ensemble/brand/import', async (c) => {

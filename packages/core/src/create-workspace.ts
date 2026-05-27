@@ -97,6 +97,10 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   // OPTIONS preflight short-circuits inside publicCors before reaching
   // the GET handlers.
   app.use('/_ensemble/brand/*', publicCors());
+  // v0.1.92: public brand-guide renderings moved out of /_ensemble/brand/
+  // to live at /brand/* alongside the HTML guide. Same posture: cross-
+  // origin embeds (consumer sites, partner pages) fetch with Origin: *.
+  app.use('/brand/*', publicCors());
   app.use('/_ensemble/version', publicCors());
   app.use('/favicon.svg', publicCors());
   app.use('/favicon.ico', publicCors());
