@@ -249,7 +249,8 @@ export interface EnsembleBrandSpec {
     spec?: string;
     css?: string;
     context?: string;
-    tokens?: string;
+    // tokens?: removed v0.1.95 — no public GET handler existed; the
+    // token data is already inline in this spec response.
     // v1.1 additions:
     brand_guide?: string;
     variant_index?: string;
@@ -724,18 +725,16 @@ export async function assembleBrandSpec(
 
     ...(baseUrl ? {
       endpoints: {
-        // v0.1.92: public brand-guide renderings moved out of
-        // /_ensemble/brand/ to /brand/*. The /_ensemble/ prefix is
-        // reserved for shell-internal API; everything the public guide
-        // exposes (HTML, JSON, Markdown, schema, variants, changelog)
-        // lives under /brand/. /brand/css and /brand/theme remain in
-        // /_ensemble/ because they're consumed by the shell at all
-        // times (login chrome) and a wide set of consumer sites
-        // already hot-link them — moving those is a separate decision.
+        // v0.1.95: removed `tokens` from endpoints. The previous URL
+        // (/_ensemble/brand/tokens) only supports PUT for admin token
+        // writes — there is no public GET for token data. The token
+        // *content* is already in this spec response (colors.groups,
+        // colors.palettes, typography.roles, spatial.*), so a separate
+        // endpoint would only duplicate it. Removed rather than
+        // inventing a fake-handler endpoint.
         spec:            `${baseUrl}/brand/spec`,
         css:             `${baseUrl}/_ensemble/brand/css`,
         context:         `${baseUrl}/brand/context`,
-        tokens:          `${baseUrl}/_ensemble/brand/tokens`,
         brand_guide:     `${baseUrl}/brand`,
         variant_index:   `${baseUrl}/brand/variants`,
         font_stylesheet: `${baseUrl}/_ensemble/brand/css`,
@@ -944,14 +943,28 @@ async function assembleLogosV11(
         return { ...v, usage, examples, recommended_for };
       }
 
+      // v0.1.95: PNG size matrix per composition. Wordmark/stacked/
+      // horizontal cover hero → thumbnail at three sizes; icon-only
+      // covers the full range from social to favicon-sized at six.
+      // Each PNG appends ?size=N to the render URL — the render
+      // endpoint reads ?size= and renders at that pixel dimension.
+      const PNG_SIZES: Record<string, readonly number[]> = {
+        'wordmark-only': [1024, 512, 256],
+        'stacked':       [1024, 512, 256],
+        'horizontal':    [1024, 512, 256],
+        'icon-only':     [1024, 512, 256, 128, 64, 32],
+      };
+
       for (const comp of allowedComps) {
         const compShort = compShortMap[comp] ?? comp;
         const roleForComp: LogoVariantSpec['role'] = comp === 'icon-only' ? 'icon' : 'wordmark';
+        const pngSizes = PNG_SIZES[comp] ?? [1024];
         for (const finish of allowedFinishes) {
           for (const bg of allowedBgs) {
             const approved = !banSet.has(`${finish.id}|${bg.id}`);
             if (!approved) continue;
             const baseName = `${workspaceSlug}-${compShort}-${finish.id}-${bg.id}`;
+            // SVG — single entry, scales infinitely.
             variants.push(enrichVariant({
               role: roleForComp,
               composition: comp as LogoVariantSpec['composition'],
@@ -962,24 +975,40 @@ async function assembleLogosV11(
               url: `${baseUrl}/_ensemble/brand/render/${baseName}.svg`,
               approved: true,
             }));
-            variants.push(enrichVariant({
-              role: roleForComp,
-              composition: comp as LogoVariantSpec['composition'],
-              finish: finish.id as LogoVariantSpec['finish'],
-              background: bg.id,
-              format: 'png',
-              size_px: 1024,
-              url: `${baseUrl}/_ensemble/brand/render/${baseName}.png`,
-              approved: true,
-            }));
+            // PNG — one entry per size in the matrix.
+            for (const size of pngSizes) {
+              variants.push(enrichVariant({
+                role: roleForComp,
+                composition: comp as LogoVariantSpec['composition'],
+                finish: finish.id as LogoVariantSpec['finish'],
+                background: bg.id,
+                format: 'png',
+                size_px: size,
+                url: `${baseUrl}/_ensemble/brand/render/${baseName}.png?size=${size}`,
+                approved: true,
+              }));
+            }
           }
         }
       }
 
-      // Favicons — list the canonical favicon if set, plus standard sizes
-      // the render endpoint can produce on demand from the icon master.
-      if (logoSlotUrls.favicon) {
-        for (const size of [16, 32, 192, 512] as const) {
+      // Favicon variants — emit unconditionally when an icon master is
+      // available (NOT gated on a separate `favicon` token slot — favicons
+      // are sized renders of the icon master, no separate upload needed).
+      // The /_ensemble/brand/favicon-N.png routes already exist and
+      // return the icon master rasterized at exactly N pixels with
+      // square aspect + full-color finish + transparent background —
+      // the right defaults for every favicon use case.
+      const hasIcon = !!logoSlotUrls.icon_mark || !!logoSlotUrls.icon_mark_dark;
+      if (hasIcon) {
+        const FAVICONS: Array<{ size: number; use: string }> = [
+          { size: 16,  use: 'favicon' },
+          { size: 32,  use: 'favicon' },
+          { size: 180, use: 'apple-touch' },
+          { size: 192, use: 'android-chrome' },
+          { size: 512, use: 'android-chrome-maskable' },
+        ];
+        for (const { size, use } of FAVICONS) {
           variants.push(enrichVariant({
             role: 'favicon',
             composition: 'icon-only',
@@ -987,9 +1016,9 @@ async function assembleLogosV11(
             background: 'transparent',
             format: 'png',
             size_px: size,
-            url: `${baseUrl}/_ensemble/brand/render/${workspaceSlug}-favicon-${size}.png`,
+            url: `${baseUrl}/_ensemble/brand/favicon-${size}.png`,
             approved: true,
-            use: size === 192 ? 'android-chrome' : size === 512 ? 'android-chrome-maskable' : 'favicon',
+            use,
           }));
         }
       }

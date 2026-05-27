@@ -445,7 +445,6 @@ export const BRAND_SPEC_SCHEMA = {
         spec: { type: 'string', format: 'uri' },
         css: { type: 'string', format: 'uri' },
         context: { type: 'string', format: 'uri' },
-        tokens: { type: 'string', format: 'uri' },
         brand_guide: { type: 'string', format: 'uri' },
         variant_index: { type: 'string', format: 'uri' },
         font_stylesheet: { type: 'string', format: 'uri' },

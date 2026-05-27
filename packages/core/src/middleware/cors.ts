@@ -127,6 +127,15 @@ export function publicCors() {
           'Access-Control-Allow-Headers': 'Content-Type, Accept, Range',
           'Access-Control-Max-Age': '86400',
           'Vary': 'Origin',
+          // v0.1.95: Cross-Origin-Resource-Policy must be explicitly
+          // 'cross-origin' for these assets to embed via <img>, <link>,
+          // <script> from third-party origins. CORS Access-Control-*
+          // headers govern fetch(); CORP governs no-cors embeds. The
+          // browser default is 'same-origin' which silently blocks
+          // <img src> in a page on any other origin even when CORS
+          // would permit fetch. Spec advertises these assets as public
+          // for partner sites / READMEs / AI demos — CORP must match.
+          'Cross-Origin-Resource-Policy': 'cross-origin',
         },
       });
     }
@@ -142,6 +151,15 @@ export function publicCors() {
     // header (e.g. caching layers that respect non-* policies later)
     // produces correct cache keys.
     c.header('Vary', 'Origin');
+    // v0.1.95: opt these assets out of the Worker default
+    // Cross-Origin-Resource-Policy: same-origin so cross-origin <img>,
+    // <link rel="stylesheet">, and <script> embeds resolve. Without
+    // this header set explicitly, browsers block third-party embeds
+    // of /brand/render/* PNGs, /brand/css stylesheets, and similar
+    // resources even though CORS would allow them — the Allow-Origin
+    // header governs fetch(); CORP governs no-cors loads (which is
+    // what <img> and <link> do).
+    c.header('Cross-Origin-Resource-Policy', 'cross-origin');
 
     // v0.1.81: default cache policy for public brand assets.
     // 5 min fresh + 24h stale-while-revalidate. Short freshness so

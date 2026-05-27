@@ -392,6 +392,14 @@ export function createCredentialsRoutes(): App {
       /** Output format. Defaults to 'svg' when the URL ends in .svg or has no extension. */
       format?: 'svg' | 'png';
       /**
+       * v0.1.95: explicit pixel size for PNG output. When set, the render
+       * is sized to sizePx × sizePx (square). Ignored for SVG (which is
+       * inherently scalable). Used by spec-exposed PNG variants to deliver
+       * the right size for the use case (favicon 32, social 1200, etc.)
+       * without forcing every consumer to use the composition's default.
+       */
+      sizePx?: number;
+      /**
        * v0.1.48+: when set, the render uses these policy overrides
        * instead of the stored policy values. Powers the live-preview
        * tiles in the Logos composition editor so operators see slider
@@ -430,6 +438,10 @@ export function createCredentialsRoutes(): App {
       backgroundId,
       backgrounded: options.backgrounded,
       format: options.format,
+      // v0.1.95: explicit PNG size for spec-exposed variants. Reuses
+      // the favicon-size channel since the render pipeline already
+      // overrides canvas dimensions when this is set.
+      faviconSize: options.format === 'png' ? options.sizePx : undefined,
       overrides: options.overrides,
     });
 
@@ -583,6 +595,18 @@ export function createCredentialsRoutes(): App {
     // colored variants the operator configures.
     const BGS = ['transparent', 'true-white', 'true-black', 'light', 'dark'];
 
+    // v0.1.95: ?size=N query param — when present (and the format is
+    // png), render at NxN pixels instead of the composition's default
+    // canvas. Used by the brand spec to expose PNG variants at multiple
+    // useful sizes (1024 / 512 / 256 / 128 / 64 / 32). Pulled through
+    // as `faviconSize` because the render pipeline already handles
+    // square pixel overrides via that channel.
+    const sizeQ = c.req.query('size');
+    const sizeParsed = sizeQ ? parseInt(sizeQ, 10) : undefined;
+    const sizePx = (sizeParsed !== undefined && sizeParsed > 0 && sizeParsed <= 4096)
+      ? sizeParsed
+      : undefined;
+
     // v0.1.49: parse override + backgrounded query params so the
     // path-style route accepts the same live-preview controls as
     // the query-string route. The composition editor on Logos tab
@@ -626,6 +650,7 @@ export function createCredentialsRoutes(): App {
               download,
               filename,
               format,
+              sizePx,
               overrides: hasOverride ? overrides : undefined,
             });
           }
@@ -635,6 +660,7 @@ export function createCredentialsRoutes(): App {
               download,
               filename,
               format,
+              sizePx,
               overrides: hasOverride ? overrides : undefined,
             });
           }
@@ -665,8 +691,8 @@ export function createCredentialsRoutes(): App {
   // Old path kept as alias for back-compat with any operator scripts.
   const versionPayload = () => ({
     package: '@ensemble-edge/workspace',
-    version: '0.1.94',
-    buildFingerprint: 'v0.1.94-changelog-column-fix-and-legacy-410',
+    version: '0.1.95',
+    buildFingerprint: 'v0.1.95-png-sizes-favicons-corp-tokens-cleanup',
     timestamp: new Date().toISOString(),
   });
   // v0.1.81: version probe should never be stale — CI / monitoring /
@@ -771,6 +797,9 @@ export function createCredentialsRoutes(): App {
     });
   }
 
+  // v0.1.95: 16px added for completeness — the brand spec surfaces it
+  // and an external favicon-generator script would expect to find it.
+  app.get('/_ensemble/brand/favicon-16.png',  (c) => renderFaviconPng(c, 16));
   app.get('/_ensemble/brand/favicon-32.png',  (c) => renderFaviconPng(c, 32));
   app.get('/_ensemble/brand/favicon-180.png', (c) => renderFaviconPng(c, 180));
   app.get('/_ensemble/brand/favicon-192.png', (c) => renderFaviconPng(c, 192));
