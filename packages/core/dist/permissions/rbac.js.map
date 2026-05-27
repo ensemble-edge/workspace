@@ -1,0 +1,1 @@
+{"version":3,"file":"rbac.js","sourceRoot":"","sources":["../../src/permissions/rbac.ts"],"names":[],"mappings":"AAAA;;;;GAIG;AAOH,MAAM,UAAU,wBAAwB;IACtC,OAAO;QACL,KAAK,EAAE,KAAK,EAAE,OAAe,EAAE,WAAuB,EAAoB,EAAE;YAC1E,sCAAsC;YACtC,OAAO,IAAI,CAAC;QACd,CAAC;KACF,CAAC;AACJ,CAAC"}
