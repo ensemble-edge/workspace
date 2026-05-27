@@ -218,6 +218,10 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   app.use('/_ensemble/users/*', auth());
   // v0.1.14: brand upload is admin-only (asset GET stays public for img tags).
   app.use('/_ensemble/brand/upload', auth());
+  // v0.1.99: same auth gate on the canonical admin path.
+  app.use('/_ensemble/admin/brand/upload', auth());
+  // v0.1.99: same gate on the canonical admin tokens path.
+  app.use('/_ensemble/admin/brand/tokens', auth());
   // v0.1.47: mutations under /_ensemble/core/brand/* (logo-policy
   // PUT etc.) need an authenticated user so requireAdmin can read
   // membership.role. GET reads on these paths stay open to public
@@ -242,14 +246,19 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
 
   // Brand endpoints (public, no auth)
   // Ensemble Design System: warm canvas + floating dark cards
-  app.get('/_ensemble/brand/theme', async (c) => {
+  //
+  // v0.1.99: extracted to named handler, registered at both canonical
+  // /brand/theme and legacy /_ensemble/brand/theme. Direct registration
+  // — no re-dispatch — so workspace context (set by workspaceResolver
+  // middleware above) is preserved.
+  const brandThemeHandler: import('hono').Handler = async (c) => {
     // Try to load custom accent from brand_tokens table
     let accent = resolvedConfig.brand.accent;
     try {
-      const result = await c.env.DB.prepare(
+      const result = (await c.env.DB.prepare(
         `SELECT value FROM brand_tokens
          WHERE workspace_id = ? AND category = 'colors' AND key = 'accent' AND locale = ''`
-      ).bind(c.get('workspace')?.id || '').first<{ value: string }>();
+      ).bind(c.get('workspace')?.id || '').first()) as { value: string } | null;
       if (result?.value) {
         accent = result.value;
       }
@@ -260,10 +269,10 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
     // Load canvas color from DB (if saved)
     let canvas = '#BDB7B0'; // Default: light warm beige (Ensemble)
     try {
-      const canvasResult = await c.env.DB.prepare(
+      const canvasResult = (await c.env.DB.prepare(
         `SELECT value FROM brand_tokens
          WHERE workspace_id = ? AND category = 'colors' AND key = 'canvas' AND locale = ''`
-      ).bind(c.get('workspace')?.id || '').first<{ value: string }>();
+      ).bind(c.get('workspace')?.id || '').first()) as { value: string } | null;
       if (canvasResult?.value) {
         canvas = canvasResult.value;
       }
@@ -326,7 +335,9 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
         faviconUrl: null,
       },
     });
-  });
+  };
+  app.get('/_ensemble/brand/theme', brandThemeHandler);
+  app.get('/brand/theme',          brandThemeHandler);
 
   // v0.1.98: brand CSS — canonical /brand/css; legacy /_ensemble/brand/css
   // kept registered for back-compat (consumer sites have hot-linked it
@@ -349,8 +360,13 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   app.get('/brand/css', brandCssHandler);
   app.get('/_ensemble/brand/css', brandCssHandler);
 
-  // PUT endpoint to save brand tokens
-  app.put('/_ensemble/brand/tokens', async (c) => {
+  // PUT endpoint to save brand tokens.
+  //
+  // v0.1.99: extracted as named handler so the canonical admin path
+  // /_ensemble/admin/brand/tokens can register directly with the same
+  // body. Old path stays for shell back-compat — the shell can migrate
+  // to the new canonical at its own pace.
+  const brandTokensPutHandler: import('hono').Handler = async (c) => {
     try {
       const workspace = c.get('workspace');
       if (!workspace?.id) {
@@ -405,7 +421,9 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
       console.error('Failed to save brand tokens:', error);
       return c.json({ error: 'Failed to save brand settings' }, 500);
     }
-  });
+  };
+  app.put('/_ensemble/brand/tokens',       brandTokensPutHandler); // legacy
+  app.put('/_ensemble/admin/brand/tokens', brandTokensPutHandler); // v0.1.99 canonical
 
   // Workspace info
   app.get('/_ensemble/workspace', (c) => {

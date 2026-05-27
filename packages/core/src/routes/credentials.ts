@@ -94,7 +94,10 @@ export function createCredentialsRoutes(): App {
     return max + 1;
   }
 
-  app.post('/_ensemble/brand/upload', async (c) => {
+  // v0.1.99: extracted as named handler so /_ensemble/admin/brand/upload
+  // can register directly. Legacy /_ensemble/brand/upload stays for
+  // shell back-compat.
+  const brandUploadPostHandler: import('hono').Handler = async (c) => {
     const adminCheck = requireAdmin(c);
     if (adminCheck instanceof Response) return adminCheck;
     const workspace = c.get('workspace');
@@ -205,7 +208,9 @@ export function createCredentialsRoutes(): App {
       url: canonical,
       display_url: display,
     });
-  });
+  };
+  app.post('/_ensemble/brand/upload',       brandUploadPostHandler); // legacy
+  app.post('/_ensemble/admin/brand/upload', brandUploadPostHandler); // v0.1.99 canonical
 
   /**
    * GET /_ensemble/core/brand/logo-policy — current policy + computed
@@ -549,8 +554,10 @@ export function createCredentialsRoutes(): App {
    * under /_ensemble/brand/ canonically, rewrites to /<alias>/brand/
    * via the unified alias mechanism.
    */
-  app.get('/_ensemble/brand/render/:filename{.+}', async (c, next) => {
-    const filename = c.req.param('filename');
+  // v0.1.99: extracted to named handler so /brand/render/* registers
+  // directly with the same body — no re-dispatch.
+  const renderHandler: import('hono').Handler = async (c, next) => {
+    const filename = c.req.param('filename')!;
     // v0.1.51: PNG output supported alongside SVG. Same path grammar,
     // different rasterization tail. Anything else (.jpg/.webp) falls
     // through — we don't transcode in v0.1.51.
@@ -674,7 +681,9 @@ export function createCredentialsRoutes(): App {
       filename,
       hint: 'Expected: /brand/<slug>-<composition>-<finish>-<bg>.{svg|png} where composition is one of wordmark|icon|stacked|horizontal, finish is full-color|mono-black|mono-white|mono-brand, bg is transparent|light|dark. (Light and dark variants automatically use the brand-background padding configured in Brand → Logos → Background settings.)',
     }, 404);
-  });
+  };
+  app.get('/_ensemble/brand/render/:filename{.+}', renderHandler);
+  app.get('/brand/render/:filename{.+}',          renderHandler);
 
   /**
    * GET /_ensemble/diagnostic/version
@@ -691,8 +700,8 @@ export function createCredentialsRoutes(): App {
   // Old path kept as alias for back-compat with any operator scripts.
   const versionPayload = () => ({
     package: '@ensemble-edge/workspace',
-    version: '0.1.98',
-    buildFingerprint: 'v0.1.98-brand-url-namespace-canonical-/brand-and-/admin/brand',
+    version: '0.1.99',
+    buildFingerprint: 'v0.1.99-brand-aliases-direct-registration-not-redispatch',
     timestamp: new Date().toISOString(),
   });
   // v0.1.81: version probe should never be stale — CI / monitoring /
@@ -732,7 +741,9 @@ export function createCredentialsRoutes(): App {
    * path, the link gets rewritten to /<alias>/brand/favicon.svg by
    * the unified alias mechanism.
    */
-  app.get('/_ensemble/brand/favicon.svg', async (c) => {
+  // v0.1.99: extracted as named handler so /brand/favicon.svg can
+  // register directly with the same body — no re-dispatch.
+  const faviconSvgHandler: import('hono').Handler = async (c) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
     const { getIconSvg } = await import('../services/brand-render/sources');
@@ -749,7 +760,9 @@ export function createCredentialsRoutes(): App {
         'Cache-Control': 'public, max-age=3600, must-revalidate',
       },
     });
-  });
+  };
+  app.get('/_ensemble/brand/favicon.svg', faviconSvgHandler);
+  app.get('/brand/favicon.svg',          faviconSvgHandler);
 
   /**
    * v0.1.53: full favicon suite. Together with /favicon.svg these
@@ -805,18 +818,31 @@ export function createCredentialsRoutes(): App {
   // workspace login screen instead of an image. The spec now omits
   // preview_card when no og_image is uploaded; this handler exists
   // so a direct URL probe gets a useful JSON 404 instead of HTML.
-  app.get('/_ensemble/brand/og.png', (c) => c.json({
+  // v0.1.99: canonical /brand/og.png mirrors the legacy path.
+  const ogPng404Handler: import('hono').Handler = (c) => c.json({
     error: 'no_og_image',
     message: 'No og_image asset is configured for this workspace. Upload one under Brand → Logos → Open Graph image, or set logos.og_image in your brand spec.',
-  }, 404));
+  }, 404);
+  app.get('/_ensemble/brand/og.png', ogPng404Handler);
+  app.get('/brand/og.png',          ogPng404Handler);
 
   app.get('/_ensemble/brand/favicon-16.png',  (c) => renderFaviconPng(c, 16));
   app.get('/_ensemble/brand/favicon-32.png',  (c) => renderFaviconPng(c, 32));
   app.get('/_ensemble/brand/favicon-180.png', (c) => renderFaviconPng(c, 180));
   app.get('/_ensemble/brand/favicon-192.png', (c) => renderFaviconPng(c, 192));
   app.get('/_ensemble/brand/favicon-512.png', (c) => renderFaviconPng(c, 512));
+  // v0.1.99: canonical /brand/favicon-N.png registered next to the
+  // legacy paths. Direct registrations — no re-dispatch — so the
+  // handler runs in-place with full workspace context.
+  app.get('/brand/favicon-16.png',  (c) => renderFaviconPng(c, 16));
+  app.get('/brand/favicon-32.png',  (c) => renderFaviconPng(c, 32));
+  app.get('/brand/favicon-180.png', (c) => renderFaviconPng(c, 180));
+  app.get('/brand/favicon-192.png', (c) => renderFaviconPng(c, 192));
+  app.get('/brand/favicon-512.png', (c) => renderFaviconPng(c, 512));
 
-  app.get('/_ensemble/brand/favicon.ico', async (c) => {
+  // v0.1.99: extracted as named handler so /brand/favicon.ico can
+  // register directly with the same body — no re-dispatch.
+  const faviconIcoHandler: import('hono').Handler = async (c) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
     // Render the 32px PNG, then wrap in an ICO container. IE11+
@@ -849,7 +875,9 @@ export function createCredentialsRoutes(): App {
         'Cache-Control': 'public, max-age=2592000, immutable',
       },
     });
-  });
+  };
+  app.get('/_ensemble/brand/favicon.ico', faviconIcoHandler);
+  app.get('/brand/favicon.ico',          faviconIcoHandler);
 
   app.get('/_ensemble/brand/manifest.webmanifest', async (c) => {
     const workspace = c.get('workspace');
@@ -962,9 +990,11 @@ export function createCredentialsRoutes(): App {
     return new Response(obj.body, { headers });
   }
 
-  app.get('/_ensemble/brand/asset/:key{.+}', async (c) => {
-    return serveBrandAsset(c, decodeURIComponent(c.req.param('key')));
-  });
+  // v0.1.99: canonical /brand/asset/* registered alongside legacy path.
+  const assetHandler: import('hono').Handler = (c) =>
+    serveBrandAsset(c, decodeURIComponent(c.req.param('key')!));
+  app.get('/_ensemble/brand/asset/:key{.+}', assetHandler);
+  app.get('/brand/asset/:key{.+}',           assetHandler);
 
   // NOTE: The configurable asset alias used to be registered here as
   // `app.get('/:alias/:key{.+}')`. That route shape matched ANY two-
@@ -2240,90 +2270,11 @@ export function createCredentialsRoutes(): App {
     }
   });
 
-  // ═══════════════════════════════════════════════════════════════════
-  // v0.1.98 — Canonical /brand/* public surface
-  // ═══════════════════════════════════════════════════════════════════
-  //
-  // Every public brand asset is reachable under the short `/brand/*`
-  // namespace going forward. The existing `/_ensemble/brand/*` paths
-  // stay registered for back-compat — consumer sites that hot-linked
-  // them in earlier releases continue to work. New consumers should
-  // follow the URLs the spec response advertises, which all live under
-  // `/brand/*` now.
-  //
-  // Implementation: each canonical path is a thin alias that internally
-  // re-dispatches to the original `/_ensemble/brand/*` handler. Same
-  // approach as the operator alias-path rewrite in create-workspace.ts
-  // (SPA catch-all). No handler-body duplication; one source of truth
-  // for the actual logic.
-  //
-  // Path scheme going forward:
-  //   /brand/*                       — public, canonical
-  //   /_ensemble/brand/*             — public, back-compat alias
-  //   /_ensemble/admin/brand/*       — admin, canonical (auth required)
-  //   /_ensemble/brand/tokens (PUT)  — admin, back-compat alias for /admin/brand/tokens
-  //   /_ensemble/brand/upload (POST) — admin, back-compat alias for /admin/brand/upload
-  //   /<alias>/brand/*               — operator-configured pretty alias
-  //                                    (rewrites to /brand/* via SPA catch-all)
-  function aliasTo(canonicalPath: string): import('hono').Handler {
-    return (c) => app.fetch(
-      new Request(`${new URL(c.req.url).origin}${canonicalPath}${new URL(c.req.url).search}`, c.req.raw),
-      c.env,
-      c.executionCtx,
-    );
-  }
-  // Render with optional ?size= — the canonical handler reads filename
-  // from the path param, so the alias must preserve it.
-  app.get('/brand/render/:filename{.+}', (c) => {
-    const filename = c.req.param('filename');
-    const search = new URL(c.req.url).search;
-    return app.fetch(
-      new Request(`${new URL(c.req.url).origin}/_ensemble/brand/render/${filename}${search}`, c.req.raw),
-      c.env,
-      c.executionCtx,
-    );
-  });
-  // R2 asset reads — same handler, short path.
-  app.get('/brand/asset/:key{.+}', (c) => {
-    const key = c.req.param('key');
-    return app.fetch(
-      new Request(`${new URL(c.req.url).origin}/_ensemble/brand/asset/${key}`, c.req.raw),
-      c.env,
-      c.executionCtx,
-    );
-  });
-  app.get('/brand/theme',         aliasTo('/_ensemble/brand/theme'));
-  app.get('/brand/favicon.svg',   aliasTo('/_ensemble/brand/favicon.svg'));
-  app.get('/brand/favicon.ico',   aliasTo('/_ensemble/brand/favicon.ico'));
-  app.get('/brand/favicon-16.png',  aliasTo('/_ensemble/brand/favicon-16.png'));
-  app.get('/brand/favicon-32.png',  aliasTo('/_ensemble/brand/favicon-32.png'));
-  app.get('/brand/favicon-180.png', aliasTo('/_ensemble/brand/favicon-180.png'));
-  app.get('/brand/favicon-192.png', aliasTo('/_ensemble/brand/favicon-192.png'));
-  app.get('/brand/favicon-512.png', aliasTo('/_ensemble/brand/favicon-512.png'));
-  app.get('/brand/og.png',        aliasTo('/_ensemble/brand/og.png'));
-
-  // ═══════════════════════════════════════════════════════════════════
-  // v0.1.98 — Canonical /_ensemble/admin/brand/* admin surface
-  // ═══════════════════════════════════════════════════════════════════
-  //
-  // Admin token/upload endpoints now have a canonical home under
-  // /_ensemble/admin/brand/*. Old paths (/_ensemble/brand/tokens PUT,
-  // /_ensemble/brand/upload POST) stay registered as aliases so shell
-  // code can migrate at its own pace — no big-bang rename needed.
-  app.put('/_ensemble/admin/brand/tokens', (c) => app.fetch(
-    new Request(`${new URL(c.req.url).origin}/_ensemble/brand/tokens`, c.req.raw),
-    c.env,
-    c.executionCtx,
-  ));
-  app.post('/_ensemble/admin/brand/upload', (c) => app.fetch(
-    new Request(`${new URL(c.req.url).origin}/_ensemble/brand/upload`, c.req.raw),
-    c.env,
-    c.executionCtx,
-  ));
   // GET /_ensemble/brand/tokens — pre-v0.1.98 fell through to SPA HTML.
-  // It only ever had a PUT handler; the bare GET now returns an honest
-  // 405 with a pointer to /brand/spec (where the token data actually
-  // lives, inline).
+  // It only ever had a PUT handler; the bare GET returns an honest 405
+  // with a pointer to /brand/spec (where the token data actually lives,
+  // inline). v0.1.99: registered here in credentials.ts where the PUT
+  // handler also lives — sibling route, same place.
   app.get('/_ensemble/brand/tokens', (c) => c.json({
     error: 'method_not_allowed',
     message: 'This endpoint accepts PUT only (admin token writes). To READ brand tokens, fetch /brand/spec — the token values are inline under colors.*, typography.*, spatial.*.',
