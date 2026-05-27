@@ -124,22 +124,25 @@ export function registerBrandRoutes(
   });
 
   // GET /brand/changelog — recent brand-* audit log entries (last 100).
+  // v0.1.94 hotfix: the audit_log column is `details_json`, not `details`
+  // (per migration 001). The v0.1.89 code shipped the wrong column and
+  // every changelog fetch 500'd until this fix. Curl-verify after deploy.
   app.get('/brand/changelog', async (c) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
     if (!(await canReadBrand(c))) return c.notFound();
     try {
       const rows = await c.env.DB.prepare(
-        `SELECT action, created_at, details
+        `SELECT action, created_at, details_json
            FROM audit_log
           WHERE workspace_id = ? AND action LIKE 'brand.%'
           ORDER BY created_at DESC
           LIMIT 100`,
-      ).bind(workspace.id).all<{ action: string; created_at: string; details: string | null }>();
+      ).bind(workspace.id).all<{ action: string; created_at: string; details_json: string | null }>();
       const entries = (rows.results ?? []).map((r) => ({
         action: r.action,
         at: r.created_at,
-        details: (() => { try { return r.details ? JSON.parse(r.details) : null; } catch { return null; } })(),
+        details: (() => { try { return r.details_json ? JSON.parse(r.details_json) : null; } catch { return null; } })(),
       }));
       return c.json({ entries }, 200, brandCacheHeaders(c));
     } catch (error) {
@@ -147,6 +150,34 @@ export function registerBrandRoutes(
       return c.json({ error: 'Failed to fetch brand changelog' }, 500);
     }
   });
+
+  // v0.1.94: legacy /_ensemble/brand/* spec-family URLs return JSON 410
+  // Gone with a pointer to the canonical /brand/* path. Without these,
+  // the request falls through to the SPA catch-all and an external
+  // agent gets ~2KB of HTML instead of an explainable response —
+  // confusing to debug. The Gone responses also surface in browser
+  // dev-tools as 410, which is the conventional code for "this URL
+  // was here but isn't anymore" (vs 404 "never existed" or 301
+  // "permanent move" — we're not redirecting because tooling that
+  // parsed `/_ensemble/brand/spec` as JSON wouldn't auto-follow a
+  // redirect and would get HTML on the new URL anyway).
+  const gonePaths: Array<[string, string]> = [
+    ['/_ensemble/brand/spec',              '/brand/spec'],
+    ['/_ensemble/brand/spec/schema.json',  '/brand/spec/schema.json'],
+    ['/_ensemble/brand/variants',          '/brand/variants'],
+    ['/_ensemble/brand/context',           '/brand/context'],
+    ['/_ensemble/brand/changelog',         '/brand/changelog'],
+  ];
+  for (const [oldPath, newPath] of gonePaths) {
+    app.get(oldPath, (c) => {
+      const baseUrl = new URL(c.req.url).origin;
+      return c.json({
+        error: 'gone',
+        message: `This endpoint moved in v0.1.93. Use ${newPath} instead.`,
+        canonical_url: `${baseUrl}${newPath}`,
+      }, 410, { 'Cache-Control': 'public, max-age=3600' });
+    });
+  }
 
   // NOTE: no separate /brand/fonts.css endpoint. The full /brand/css
   // already includes the Google Fonts @import at the top alongside all
