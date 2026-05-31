@@ -215,59 +215,13 @@ export function OverviewTab() {
           operators see here is what external collaborators see. */}
       <BrandColorsSection />
 
-      {/* v0.1.100: additional accents (2-4) when configured. The
-          BrandCard above shows accent #1 (back-compat slot). The
-          extras show here as compact swatch cards with their full
-          5-rung scales so the operator sees them alongside the
-          primary palettes. Public /brand guide renders them too. */}
-      {spec.colors.accents && spec.colors.accents.length > 1 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2">
-              <Palette className="h-5 w-5" /> Additional accents
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {spec.colors.accents.slice(1).map((a, i) => {
-                const idx = i + 2; // accents[1] → accent-2
-                const fg = a.on ?? '#ffffff';
-                return (
-                  <div key={idx} className="rounded-xl overflow-hidden border-[0.5px] border-black/[0.07] bg-background">
-                    <div
-                      className="p-4 flex flex-col justify-between"
-                      style={{ background: a.main, color: fg, aspectRatio: '16/11' }}
-                    >
-                      <div>
-                        <div className="text-lg font-medium tracking-tight">{a.name}</div>
-                        <div className="text-[10px] font-semibold uppercase tracking-wider opacity-80 mt-0.5">
-                          accent-{idx}
-                        </div>
-                      </div>
-                      <div className="flex justify-between items-end font-mono text-[10px] opacity-90">
-                        <span>accent-{idx}-main</span>
-                        <span>{a.main.toUpperCase()}</span>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-4 gap-1 p-2">
-                      {(['dark', 'bright', 'pastel', 'faded'] as const).map((rung) => (
-                        <div key={rung} className="flex flex-col gap-0.5">
-                          <div
-                            className="h-5 rounded border-[0.5px] border-black/[0.08]"
-                            style={{ background: a[rung] }}
-                            title={a[rung].toUpperCase()}
-                          />
-                          <div className="text-[9px] text-muted-foreground capitalize">{rung}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* v0.1.101: Additional accents now render INSIDE
+          BrandColorsSection's BrandCard via the accentExtrasSlot
+          prop — slotted between palettes and Neutral so the visual
+          order on the Overview matches the operator's mental model
+          (all accents stay together with the primary palettes;
+          chrome neutrals follow). The standalone post-BrandCard card
+          from v0.1.100 is gone. */}
 
       {/* Typography specimen — full width, renders every content role at
           its real brand tokens (family/weight/size/letter-spacing/case)
@@ -972,16 +926,32 @@ function FaviconSuiteCard() {
  * to brand.tokens.changed so it refetches when the operator saves.
  * ──────────────────────────────────────────────────────────── */
 
+interface AccentExtraResolved {
+  /** Operator-provided name (e.g. "Coral"). */
+  name: string;
+  /** Resolved 5-rung scale, same shape as primary/secondary/accent rungs. */
+  resolved: { dark: string; main: string; bright: string; pastel: string; faded: string };
+}
+
 function BrandColorsSection() {
   const [data, setData] = useState<BrandCardData | null>(null);
+  const [accentExtras, setAccentExtras] = useState<AccentExtraResolved[]>([]);
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     authedFetch('/_ensemble/core/brand/colors-doc/resolved')
       .then((r) => r.json() as Promise<{
-        doc: { palettes: BrandCardData['palettes']; semantic: BrandCardData['semantic'] };
-        palettes: BrandCardData['resolvedPalettes'];
+        doc: {
+          palettes: BrandCardData['palettes'] & {
+            // v0.1.100: optional additional accents (0-3 extras).
+            accentExtras?: Array<{ name: string; main: string }>;
+          };
+          semantic: BrandCardData['semantic'];
+        };
+        palettes: BrandCardData['resolvedPalettes'] & {
+          accentExtras?: Array<{ dark: string; main: string; bright: string; pastel: string; faded: string }>;
+        };
         gradients: BrandCardData['gradients'];
         onColor: BrandCardData['onColor'];
       }>)
@@ -994,6 +964,20 @@ function BrandColorsSection() {
           gradients: res.gradients,
           semantic: res.doc.semantic,
         });
+        // v0.1.101: zip the stored extras (for the name) with the
+        // server-resolved extras (for the rungs) so the swatch row
+        // shows both the operator's chosen names and the full 5-rung
+        // scale generated server-side.
+        const storedExtras = res.doc.palettes.accentExtras ?? [];
+        const resolvedExtras = res.palettes.accentExtras ?? [];
+        const zipped: AccentExtraResolved[] = storedExtras
+          .map((stored, i) => {
+            const r = resolvedExtras[i];
+            if (!r) return null;
+            return { name: stored.name, resolved: r };
+          })
+          .filter((x): x is AccentExtraResolved => x !== null);
+        setAccentExtras(zipped);
       })
       .catch(() => { /* card hidden on error */ });
     return () => { cancelled = true; };
@@ -1018,7 +1002,60 @@ function BrandColorsSection() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <BrandCard data={data} mode="display" />
+        <BrandCard
+          data={data}
+          mode="display"
+          accentExtrasSlot={
+            accentExtras.length > 0 ? (
+              <section>
+                <header className="flex items-baseline justify-between mb-3.5">
+                  <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                    Additional accents
+                  </h2>
+                  <span className="text-[11px] text-muted-foreground font-mono">
+                    {accentExtras.length} {accentExtras.length === 1 ? 'accent' : 'accents'}
+                  </span>
+                </header>
+                <div className="grid gap-3.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                  {accentExtras.map((a, i) => {
+                    const idx = i + 2; // accentExtras[0] → accent-2
+                    return (
+                      <div key={idx} className="rounded-xl overflow-hidden border-[0.5px] border-black/[0.07] bg-background">
+                        <div
+                          className="p-4 flex flex-col justify-between text-white"
+                          style={{ background: a.resolved.main, aspectRatio: '16/11' }}
+                        >
+                          <div>
+                            <div className="text-lg font-medium tracking-tight">{a.name}</div>
+                            <div className="text-[10px] font-semibold uppercase tracking-wider opacity-80 mt-0.5">
+                              accent-{idx}
+                            </div>
+                          </div>
+                          <div className="flex justify-between items-end font-mono text-[10px] opacity-90">
+                            <span>accent-{idx}-main</span>
+                            <span>{a.resolved.main.toUpperCase()}</span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-4 gap-1 p-2">
+                          {(['dark', 'bright', 'pastel', 'faded'] as const).map((rung) => (
+                            <div key={rung} className="flex flex-col gap-0.5">
+                              <div
+                                className="h-5 rounded border-[0.5px] border-black/[0.08]"
+                                style={{ background: a.resolved[rung] }}
+                                title={a.resolved[rung].toUpperCase()}
+                              />
+                              <div className="text-[9px] text-muted-foreground capitalize">{rung}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : undefined
+          }
+        />
       </CardContent>
     </Card>
   );

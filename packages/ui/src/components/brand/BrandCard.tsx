@@ -111,6 +111,16 @@ export interface BrandCardProps {
     which: 'main' | 'light',
     hex: string,
   ) => void;
+  /**
+   * v0.1.101: optional render slot for an "Additional accents" section.
+   * Renders between Section 1 (Brand palettes) and Section 2 (Neutral).
+   * The host (ColorsTab in edit mode, OverviewTab in display mode)
+   * passes the JSX in; BrandCard just renders it where it belongs in
+   * the visual hierarchy. Kept as a slot rather than a built-in
+   * section so the editor vs. display tabs can each control their
+   * own affordances without forking BrandCard.
+   */
+  accentExtrasSlot?: React.ReactNode;
   className?: string;
 }
 
@@ -766,6 +776,7 @@ export function BrandCard({
   onNeutralHueModeChange,
   onGradientNameChange,
   onSemanticChange,
+  accentExtrasSlot,
   className,
 }: BrandCardProps) {
   const hasGradients = data.gradients.length > 0;
@@ -807,6 +818,14 @@ export function BrandCard({
           ))}
         </div>
       </section>
+
+      {/* v0.1.101: optional additional-accents slot. Host (ColorsTab
+          in edit mode, OverviewTab in display mode) passes the JSX
+          for accents 2-4 in here. Sits between Section 1 (primary/
+          secondary/accent palettes) and Section 2 (Neutral) so it
+          reads naturally as "more accents alongside the brand
+          palettes, before the chrome neutrals." */}
+      {accentExtrasSlot}
 
       {/* Section 2 — Neutral */}
       <section>

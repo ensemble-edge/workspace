@@ -481,7 +481,14 @@ export function ColorsTab() {
           rendered by BrandCard in edit mode. v0.1.57: the Neutral
           hue selector is now inline in NeutralStrip (was a separate
           Card below); the BrandCard owns the entire Neutral surface
-          including hue mode + Main override. */}
+          including hue mode + Main override.
+
+          v0.1.101: Additional accents section is passed through
+          accentExtrasSlot so it renders between palettes and Neutral
+          (the right reading order: more accents stay together with
+          the brand palettes; chrome comes after). Pre-v0.1.101 the
+          section sat below the full BrandCard which put it after
+          Semantic — visually buried. */}
       <BrandCard
         data={cardData}
         mode="edit"
@@ -491,46 +498,42 @@ export function ColorsTab() {
         onNeutralHueModeChange={updateNeutralHueMode}
         onGradientNameChange={updateGradientName}
         onSemanticChange={updateSemantic}
-      />
-
-      {/* v0.1.100: Additional accents — 0..3 extra named accents
-          beyond the primary accent edited in the BrandCard above.
-          Each gets its own 5-rung scale at render time (same OkLCh
-          derivation as primary/secondary/accent) and emits its own
-          --brand-accent-{N}-* CSS variables. */}
-      <AccentExtrasSection
-        extras={draft.palettes.accentExtras ?? []}
-        onAdd={() => {
-          setDraft({
-            ...draft,
-            palettes: {
-              ...draft.palettes,
-              accentExtras: [
-                ...(draft.palettes.accentExtras ?? []),
-                { name: `Accent ${(draft.palettes.accentExtras?.length ?? 0) + 2}`, main: '#10B981' },
-              ],
-            },
-          });
-        }}
-        onRemove={(idx) => {
-          const next = (draft.palettes.accentExtras ?? []).filter((_, i) => i !== idx);
-          setDraft({
-            ...draft,
-            palettes: {
-              ...draft.palettes,
-              accentExtras: next.length > 0 ? next : undefined,
-            },
-          });
-        }}
-        onUpdate={(idx, patch) => {
-          const next = (draft.palettes.accentExtras ?? []).map((p, i) =>
-            i === idx ? { ...p, ...patch } : p,
-          );
-          setDraft({
-            ...draft,
-            palettes: { ...draft.palettes, accentExtras: next },
-          });
-        }}
+        accentExtrasSlot={
+          <AccentExtrasSection
+            extras={draft.palettes.accentExtras ?? []}
+            onAdd={() => {
+              setDraft({
+                ...draft,
+                palettes: {
+                  ...draft.palettes,
+                  accentExtras: [
+                    ...(draft.palettes.accentExtras ?? []),
+                    { name: `Accent ${(draft.palettes.accentExtras?.length ?? 0) + 2}`, main: '#10B981' },
+                  ],
+                },
+              });
+            }}
+            onRemove={(idx) => {
+              const next = (draft.palettes.accentExtras ?? []).filter((_, i) => i !== idx);
+              setDraft({
+                ...draft,
+                palettes: {
+                  ...draft.palettes,
+                  accentExtras: next.length > 0 ? next : undefined,
+                },
+              });
+            }}
+            onUpdate={(idx, patch) => {
+              const next = (draft.palettes.accentExtras ?? []).map((p, i) =>
+                i === idx ? { ...p, ...patch } : p,
+              );
+              setDraft({
+                ...draft,
+                palettes: { ...draft.palettes, accentExtras: next },
+              });
+            }}
+          />
+        }
       />
 
       {/* Gradients editor — adds advanced controls below the BrandCard's

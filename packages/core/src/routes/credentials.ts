@@ -700,8 +700,8 @@ export function createCredentialsRoutes(): App {
   // Old path kept as alias for back-compat with any operator scripts.
   const versionPayload = () => ({
     package: '@ensemble-edge/workspace',
-    version: '0.1.100',
-    buildFingerprint: 'v0.1.100-multi-accent-and-migration-005-fix',
+    version: '0.1.101',
+    buildFingerprint: 'v0.1.101-accent-extras-slot-position',
     timestamp: new Date().toISOString(),
   });
   // v0.1.81: version probe should never be stale — CI / monitoring /
