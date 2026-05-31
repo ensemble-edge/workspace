@@ -35,13 +35,25 @@ ALTER TABLE guest_apps
 UPDATE guest_apps SET tier = 'iframe'    WHERE isolation = 'trusted';
 UPDATE guest_apps SET tier = 'sandboxed' WHERE isolation = 'sandboxed';
 
+-- v0.1.100 BUGFIX: drop idx_guest_apps_isolation BEFORE dropping the
+-- isolation column. SQLite implements DROP COLUMN by rebuilding the
+-- whole table; during the rebuild it re-creates every surviving index.
+-- If idx_guest_apps_isolation still exists at DROP COLUMN time, SQLite
+-- tries to re-create an index over a column that's being dropped in
+-- the same statement and fails with:
+--   "error in index idx_guest_apps_isolation after drop column:
+--    no such column: isolation: SQLITE_ERROR"
+-- ...which meant migration 005 never succeeded on fresh D1 deploys
+-- (every first request 500'd, every subsequent request 500'd). The
+-- fix is statement order: drop the index first, then the column.
+DROP INDEX IF EXISTS idx_guest_apps_isolation;
+
 -- The isolation column is now unused. Drop it.
 -- SQLite supports DROP COLUMN since 3.35 (March 2021); D1 is on a newer
 -- engine, so the direct DROP is safe.
 ALTER TABLE guest_apps DROP COLUMN isolation;
 
--- Replace the old isolation index with a tier index.
-DROP INDEX IF EXISTS idx_guest_apps_isolation;
+-- Create the replacement tier index.
 CREATE INDEX IF NOT EXISTS idx_guest_apps_tier ON guest_apps(workspace_id, tier);
   `,
 };

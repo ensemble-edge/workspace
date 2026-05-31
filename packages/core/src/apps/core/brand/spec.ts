@@ -102,8 +102,29 @@ export interface EnsembleBrandSpec {
      * Brand palettes (primary/secondary/accent/neutral) with full rung
      * metadata: `on` foreground for accessibility, `css_vars` for
      * stylesheet references, `usage` prose, and concrete `examples`.
+     *
+     * Note: `palettes.accent` always carries the FIRST accent (back-
+     * compat). For all accents (up to 4), use the `accents` array
+     * below.
      */
     palettes?: Record<string, ColorPaletteSpec>;
+
+    /**
+     * v0.1.100: canonical list of ALL configured accents (1-4), each
+     * with its own full 5-rung scale + on color + css_vars + usage.
+     * `accents[0]` is always present and identical to `palettes.accent`.
+     * `accents[1..3]` are operator-added extras (when configured).
+     *
+     * CSS variable naming convention:
+     *   accents[0] → --brand-accent-<rung> AND --brand-accent-1-<rung>
+     *   accents[1] → --brand-accent-2-<rung>
+     *   accents[2] → --brand-accent-3-<rung>
+     *   accents[3] → --brand-accent-4-<rung>
+     *
+     * Agents that want "the brand's accents" should iterate this
+     * array; pick by name + intent, not by index.
+     */
+    accents?: ColorPaletteSpec[];
 
     /** Semantic colors with `on` + `usage` for v1.1 consumers. */
     semantic_v2?: Record<string, SemanticColorSpec>;
@@ -1090,7 +1111,12 @@ async function assembleLogosV11(
 async function assembleColorsV11(
   db: D1Database,
   workspaceId: string,
-): Promise<{ palettes?: Record<string, ColorPaletteSpec>; semantic_v2?: Record<string, SemanticColorSpec>; modes?: { light: ColorModeSpec; dark: ColorModeSpec } }> {
+): Promise<{
+  palettes?: Record<string, ColorPaletteSpec>;
+  accents?: ColorPaletteSpec[];
+  semantic_v2?: Record<string, SemanticColorSpec>;
+  modes?: { light: ColorModeSpec; dark: ColorModeSpec };
+}> {
   try {
     const { loadBrandColors } = await import('../../../services/brand-colors/load');
     const { resolvePalettes } = await import('../../../services/brand-colors/resolver');
@@ -1106,7 +1132,7 @@ async function assembleColorsV11(
       palettesOut[role] = {
         name: doc.palettes[role].name,
         dark: p.dark, main: p.main, bright: p.bright, pastel: p.pastel, faded: p.faded,
-        on: '#ffffff', // Sensible default — a future v0.1.90 can derive from contrast.
+        on: '#ffffff', // Sensible default — a future release can derive from contrast.
         css_vars: {
           dark: `--brand-${role}-dark`,
           main: `--brand-${role}-main`,
@@ -1117,6 +1143,52 @@ async function assembleColorsV11(
         usage: meta.usage,
         examples: meta.examples,
       };
+    }
+
+    // v0.1.100: canonical accents list (1-4). First entry is the
+    // back-compat accent (same data as palettes.accent), then
+    // accentExtras in order. Each carries its own full rung set +
+    // css_vars block. accent-1 has BOTH `--brand-accent-<rung>` and
+    // `--brand-accent-1-<rung>` aliases registered in CSS; we expose
+    // the indexed form here so an agent walking the array uses
+    // consistent naming across all accents.
+    const accentMeta = PALETTE_USAGE.accent;
+    const accentsOut: ColorPaletteSpec[] = [];
+    accentsOut.push({
+      name: doc.palettes.accent.name,
+      dark: palettes.accent.dark, main: palettes.accent.main,
+      bright: palettes.accent.bright, pastel: palettes.accent.pastel,
+      faded: palettes.accent.faded,
+      on: '#ffffff',
+      css_vars: {
+        dark: '--brand-accent-1-dark',
+        main: '--brand-accent-1-main',
+        bright: '--brand-accent-1-bright',
+        pastel: '--brand-accent-1-pastel',
+        faded: '--brand-accent-1-faded',
+      },
+      usage: accentMeta.usage,
+      examples: accentMeta.examples,
+    });
+    if (palettes.accentExtras && doc.palettes.accentExtras) {
+      palettes.accentExtras.forEach((p, i) => {
+        const idx = i + 2; // accentExtras[0] → accent-2
+        const stored = doc.palettes.accentExtras![i]!;
+        accentsOut.push({
+          name: stored.name,
+          dark: p.dark, main: p.main, bright: p.bright, pastel: p.pastel, faded: p.faded,
+          on: '#ffffff',
+          css_vars: {
+            dark: `--brand-accent-${idx}-dark`,
+            main: `--brand-accent-${idx}-main`,
+            bright: `--brand-accent-${idx}-bright`,
+            pastel: `--brand-accent-${idx}-pastel`,
+            faded: `--brand-accent-${idx}-faded`,
+          },
+          usage: accentMeta.usage,
+          examples: accentMeta.examples,
+        });
+      });
     }
 
     const semanticV2: Record<string, SemanticColorSpec> = {};
@@ -1152,7 +1224,7 @@ async function assembleColorsV11(
       },
     };
 
-    return { palettes: palettesOut, semantic_v2: semanticV2, modes };
+    return { palettes: palettesOut, accents: accentsOut, semantic_v2: semanticV2, modes };
   } catch {
     return {};
   }

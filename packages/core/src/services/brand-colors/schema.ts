@@ -41,11 +41,17 @@ export type PaletteRole = 'primary' | 'secondary' | 'accent' | 'neutral';
 
 /** Palette-rung reference like "primary-main". The fully-qualified
  *  identifier used in CSS (--primary-main) and in theme bindings /
- *  gradient stops. */
+ *  gradient stops.
+ *
+ *  v0.1.100: accent supports an optional numeric suffix (1-4). Bare
+ *  "accent-faded" still resolves to accent #1 (the back-compat
+ *  palettes.accent slot); "accent-2-faded" resolves to the second
+ *  accent in palettes.accentExtras. */
 export type PaletteRungRef =
   | `primary-${RungName}`
   | `secondary-${RungName}`
   | `accent-${RungName}`
+  | `accent-${1 | 2 | 3 | 4}-${RungName}`
   | `neutral-${RungName}`;
 
 /** A theme-binding value: a palette-rung ref, a literal hex, or
@@ -157,7 +163,22 @@ export interface BrandColorsDoc {
   palettes: {
     primary: Palette;
     secondary: Palette;
+    /**
+     * Primary accent (= "accent 1"). Back-compat slot — every CSS
+     * variable named `--brand-accent-<rung>` (no number) resolves
+     * from this palette. v0.1.100: additional accents live in
+     * `accentExtras` below.
+     */
     accent: Palette;
+    /**
+     * v0.1.100: optional additional accents (2, 3, 4). Hard-capped
+     * at 3 entries (so total accents incl. `accent` is ≤ 4). Each
+     * entry has the same shape as `accent` (5-rung scale generated
+     * the same way). CSS variables emit as
+     * `--brand-accent-2-<rung>`, `--brand-accent-3-<rung>`,
+     * `--brand-accent-4-<rung>`.
+     */
+    accentExtras?: Palette[];
     neutral: NeutralPalette;
   };
   /** Gradients in operator-defined order. Hard-capped at 5. */
@@ -184,6 +205,9 @@ export function defaultBrandColors(): BrandColorsDoc {
       primary:   { name: 'Primary',   main: '#3B82F6' },
       secondary: { name: 'Secondary', main: '#64748B' },
       accent:    { name: 'Accent',    main: '#F59E0B' },
+      // accentExtras: undefined by default — operator adds 0..3 more
+      // accents via the Brand → Colors tab. Omitted from defaults so
+      // workspaces upgrading from <v0.1.100 see no change.
       neutral:   { name: 'Neutral',   main: '#71717A', hueMode: 'branded' },
     },
     gradients: [],
@@ -215,7 +239,12 @@ export function defaultBrandColors(): BrandColorsDoc {
  * Detection / parsing helpers
  * ──────────────────────────────────────────────────────────── */
 
-const RUNG_REF_RE = /^(primary|secondary|accent|neutral)-(dark|main|bright|pastel|faded)$/;
+// v0.1.100: accent supports optional numeric suffix 1-4. Matches:
+//   primary-main, secondary-faded, accent-dark, accent-2-faded, accent-3-main, etc.
+// Group 1: role (primary|secondary|accent|neutral)
+// Group 2: accent index ("1".."4") — only present when role === "accent" and a suffix exists
+// Group 3: rung name
+const RUNG_REF_RE = /^(primary|secondary|accent|neutral)(?:-([1-4]))?-(dark|main|bright|pastel|faded)$/;
 
 export function isPaletteRungRef(value: string): value is PaletteRungRef {
   return RUNG_REF_RE.test(value);
@@ -225,8 +254,21 @@ export function isHex(value: string): boolean {
   return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value);
 }
 
-export function parseRungRef(ref: string): { role: PaletteRole; rung: RungName } | null {
+/**
+ * Parse a rung reference into its parts.
+ * v0.1.100: extended return shape — `accentIndex` is set when the
+ * reference includes an explicit accent number (e.g. accent-2-main).
+ * A bare `accent-main` resolves to accentIndex=1 (the back-compat
+ * `palettes.accent` slot). Non-accent references have accentIndex=null.
+ */
+export function parseRungRef(
+  ref: string,
+): { role: PaletteRole; rung: RungName; accentIndex: number | null } | null {
   const m = RUNG_REF_RE.exec(ref);
   if (!m) return null;
-  return { role: m[1] as PaletteRole, rung: m[2] as RungName };
+  const role = m[1] as PaletteRole;
+  const accentIndex = role === 'accent'
+    ? (m[2] ? parseInt(m[2], 10) : 1)
+    : null;
+  return { role, rung: m[3] as RungName, accentIndex };
 }

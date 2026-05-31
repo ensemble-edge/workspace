@@ -32,16 +32,55 @@ import {
  * OkLCh-derived value.
  */
 export type ResolvedPalette = Record<RungName, string>;
-export type ResolvedPalettes = Record<PaletteRole, ResolvedPalette>;
+/**
+ * v0.1.100: the four canonical role keys (primary/secondary/accent/
+ * neutral) PLUS an optional `accentExtras` array carrying 0..3
+ * additional accents. The `accent` key always holds accent #1
+ * (back-compat). `accentExtras[0]` is accent #2, [1] is #3, [2] is #4.
+ *
+ * Consumers that don't care about extras (the vast majority — CSS
+ * variable lookup by role+rung name, theme binding resolution, etc.)
+ * keep working unchanged. Consumers that DO need extras read
+ * `accentExtras[i]` directly.
+ */
+export type ResolvedPalettes = Record<PaletteRole, ResolvedPalette> & {
+  accentExtras?: ResolvedPalette[];
+};
 
 export function resolvePalettes(doc: BrandColorsDoc): ResolvedPalettes {
   const primaryMain = doc.palettes.primary.main;
+  const extras = (doc.palettes.accentExtras ?? []).slice(0, 3).map(resolvePalette);
   return {
     primary:   resolvePalette(doc.palettes.primary),
     secondary: resolvePalette(doc.palettes.secondary),
     accent:    resolvePalette(doc.palettes.accent),
     neutral:   resolveNeutral(doc.palettes.neutral, primaryMain),
+    ...(extras.length > 0 ? { accentExtras: extras } : {}),
   };
+}
+
+/**
+ * v0.1.100: central rung lookup. Handles the accent-index case
+ * uniformly so every consumer goes through one helper. Bare
+ * `accent-main` resolves to accent #1 (palettes.accent). Indexed
+ * `accent-2-main` resolves to palettes.accentExtras[0]. Out-of-range
+ * indices (e.g. `accent-5-main` if it somehow gets through, or
+ * `accent-3-main` when only 1 extra is configured) fall back to
+ * accent #1 so the render pipeline degrades gracefully instead of
+ * emitting blank CSS values.
+ */
+export function lookupRung(
+  ref: { role: PaletteRole; rung: RungName; accentIndex: number | null },
+  palettes: ResolvedPalettes,
+): string {
+  if (ref.role === 'accent' && ref.accentIndex && ref.accentIndex > 1) {
+    const extrasIdx = ref.accentIndex - 2; // accent-2 → index 0, accent-3 → 1, accent-4 → 2
+    const extra = palettes.accentExtras?.[extrasIdx];
+    if (extra) return extra[ref.rung];
+    // Graceful fallback to accent #1 if requested extra not present.
+    return palettes.accent[ref.rung];
+  }
+  return palettes[ref.role][ref.rung];
 }
 
 function resolvePalette(p: Palette): ResolvedPalette {
@@ -114,7 +153,7 @@ export function resolveBindingValue(
   if (isHex(value)) return value;
   if (isPaletteRungRef(value)) {
     const ref = parseRungRef(value)!;
-    return palettes[ref.role][ref.rung];
+    return lookupRung(ref, palettes);
   }
   // Unknown shape — return a sensible default rather than throwing
   // so an operator typo doesn't crash the render pipeline.
@@ -134,7 +173,7 @@ export function resolveStopValue(
   if (value === 'black') return '#000000';
   if (isPaletteRungRef(value)) {
     const ref = parseRungRef(value)!;
-    return palettes[ref.role][ref.rung];
+    return lookupRung(ref, palettes);
   }
   return '#0a0a0a';
 }
@@ -162,7 +201,7 @@ export function displayLabel(
   if (value === 'auto') return { label: 'auto', isToken: false, hex: '' };
   if (isPaletteRungRef(value)) {
     const ref = parseRungRef(value)!;
-    return { label: value, isToken: true, hex: palettes[ref.role][ref.rung] };
+    return { label: value, isToken: true, hex: lookupRung(ref, palettes) };
   }
   if (isHex(value)) {
     // Bonus: check if this hex matches a known rung.
@@ -191,6 +230,18 @@ export function findRungByHex(
     for (const rung of rungs) {
       if (palettes[role][rung].toLowerCase() === target) {
         return `${role}-${rung}` as PaletteRungRef;
+      }
+    }
+  }
+  // v0.1.100: also check accentExtras (accents 2-4). Match returns
+  // the indexed form (accent-2-main, etc.).
+  if (palettes.accentExtras) {
+    for (let i = 0; i < palettes.accentExtras.length; i++) {
+      const p = palettes.accentExtras[i]!;
+      for (const rung of rungs) {
+        if (p[rung].toLowerCase() === target) {
+          return `accent-${i + 2}-${rung}` as PaletteRungRef;
+        }
       }
     }
   }
@@ -254,9 +305,24 @@ export function resolveTheme(
 export function onColorForeground(
   paletteRole: PaletteRole,
   palettes: ResolvedPalettes,
+  /**
+   * v0.1.100: for accent role, optionally pick a specific accent (1-4).
+   * accentIndex=1 (the default) → palettes.accent (back-compat).
+   * accentIndex=2..4 → palettes.accentExtras[i-2].
+   * Other roles ignore this parameter.
+   */
+  accentIndex?: number,
 ): { hex: string; usedFallback: boolean } {
-  const main = palettes[paletteRole].main;
-  const faded = palettes[paletteRole].faded;
+  // Resolve which palette object to pair against — accent extras path
+  // for accent-N references, normal role lookup for everything else.
+  let p: ResolvedPalette;
+  if (paletteRole === 'accent' && accentIndex && accentIndex >= 2) {
+    p = palettes.accentExtras?.[accentIndex - 2] ?? palettes.accent;
+  } else {
+    p = palettes[paletteRole];
+  }
+  const main = p.main;
+  const faded = p.faded;
   // APCA Lc 60 — the spec's on-color foreground threshold. |Lc|
   // because the sign indicates direction (light-on-dark vs dark-on-
   // light) and we just need adequate magnitude.
@@ -283,7 +349,7 @@ export function gradientOnColor(
 ): { hex: string; usedFallback: boolean } {
   if (isPaletteRungRef(firstStop)) {
     const ref = parseRungRef(firstStop)!;
-    return onColorForeground(ref.role, palettes);
+    return onColorForeground(ref.role, palettes, ref.accentIndex ?? undefined);
   }
   // white/black stops — use APCA-max-contrast against the midpoint.
   const fallback = pickHigherContrast(midColor, '#FAFAFA', '#0A0A0A');

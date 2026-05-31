@@ -46,6 +46,18 @@ interface BrandSpec {
   colors: {
     groups: Array<{ slug: string; label: string; shades: Record<string, string> }>;
     semantic: Record<string, string>;
+    /** v0.1.100: canonical list of all configured accents (1-4). */
+    accents?: Array<{
+      name: string;
+      dark: string;
+      main: string;
+      bright: string;
+      pastel: string;
+      faded: string;
+      on?: string;
+      css_vars?: Record<string, string>;
+      usage?: string;
+    }>;
   };
   typography: {
     display?: { family: string; category?: string };
@@ -202,6 +214,60 @@ export function OverviewTab() {
           component renders on /brand public guide too, so what
           operators see here is what external collaborators see. */}
       <BrandColorsSection />
+
+      {/* v0.1.100: additional accents (2-4) when configured. The
+          BrandCard above shows accent #1 (back-compat slot). The
+          extras show here as compact swatch cards with their full
+          5-rung scales so the operator sees them alongside the
+          primary palettes. Public /brand guide renders them too. */}
+      {spec.colors.accents && spec.colors.accents.length > 1 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <Palette className="h-5 w-5" /> Additional accents
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {spec.colors.accents.slice(1).map((a, i) => {
+                const idx = i + 2; // accents[1] → accent-2
+                const fg = a.on ?? '#ffffff';
+                return (
+                  <div key={idx} className="rounded-xl overflow-hidden border-[0.5px] border-black/[0.07] bg-background">
+                    <div
+                      className="p-4 flex flex-col justify-between"
+                      style={{ background: a.main, color: fg, aspectRatio: '16/11' }}
+                    >
+                      <div>
+                        <div className="text-lg font-medium tracking-tight">{a.name}</div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider opacity-80 mt-0.5">
+                          accent-{idx}
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-end font-mono text-[10px] opacity-90">
+                        <span>accent-{idx}-main</span>
+                        <span>{a.main.toUpperCase()}</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1 p-2">
+                      {(['dark', 'bright', 'pastel', 'faded'] as const).map((rung) => (
+                        <div key={rung} className="flex flex-col gap-0.5">
+                          <div
+                            className="h-5 rounded border-[0.5px] border-black/[0.08]"
+                            style={{ background: a[rung] }}
+                            title={a[rung].toUpperCase()}
+                          />
+                          <div className="text-[9px] text-muted-foreground capitalize">{rung}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Typography specimen — full width, renders every content role at
           its real brand tokens (family/weight/size/letter-spacing/case)

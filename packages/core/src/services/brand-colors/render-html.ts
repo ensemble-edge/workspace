@@ -36,19 +36,24 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
   // data-hex attribute. The /brand page's existing swatch click
   // handler picks these up and copies the hex to clipboard with a
   // brief "Copied!" confirmation.
-  const palette = (role: 'primary' | 'secondary' | 'accent') => {
-    const p = doc.palettes[role];
-    const r = palettes[role];
-    const fg = onColorForeground(role, palettes).hex;
-    return `
+  // v0.1.100: generalized to take a palette object + label + role key
+  // so the same card can render primary/secondary AND each individual
+  // accent (back-compat accent + up to 3 extras from accentExtras).
+  const paletteCard = (
+    label: string,            // display name (e.g. "Curalisto Coral")
+    roleLabel: string,        // small badge text (e.g. "accent", "accent-2")
+    rungLabel: string,        // main rung token shown bottom-right (e.g. "accent-main", "accent-2-main")
+    r: { dark: string; main: string; bright: string; pastel: string; faded: string },
+    fg: string,
+  ) => `
       <div style="border-radius:14px;overflow:hidden;background:#fff;border:0.5px solid rgba(0,0,0,0.07);">
         <div data-hex="${r.main}" title="Click to copy ${r.main.toUpperCase()}" style="aspect-ratio:16/11;padding:18px;background:${r.main};color:${fg};display:flex;flex-direction:column;justify-content:space-between;">
           <div>
-            <div style="font-size:26px;font-weight:400;letter-spacing:-0.005em;line-height:1.05;">${escapeHtml(p.name)}</div>
-            <div style="font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:0.08em;opacity:0.8;margin-top:2px;">${role}</div>
+            <div style="font-size:26px;font-weight:400;letter-spacing:-0.005em;line-height:1.05;">${escapeHtml(label)}</div>
+            <div style="font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:0.08em;opacity:0.8;margin-top:2px;">${escapeHtml(roleLabel)}</div>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:flex-end;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;opacity:0.9;">
-            <span>${role}-main</span>
+            <span>${escapeHtml(rungLabel)}</span>
             <span>${r.main.toUpperCase()}</span>
           </div>
         </div>
@@ -63,6 +68,13 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
         </div>
       </div>
     `;
+
+  // Original role-keyed wrapper kept for primary/secondary callers.
+  const palette = (role: 'primary' | 'secondary' | 'accent') => {
+    const p = doc.palettes[role];
+    const r = palettes[role];
+    const fg = onColorForeground(role, palettes).hex;
+    return paletteCard(p.name, role, `${role}-main`, r, fg);
   };
 
   const neutralStrip = () => {
@@ -149,11 +161,30 @@ export function renderBrandColorsHtml(doc: BrandColorsDoc): string {
   return `
     <div style="display:flex;flex-direction:column;gap:40px;">
       <section>
-        ${sectionHead('Brand palettes', 'primary · secondary · accent')}
+        ${sectionHead(
+          'Brand palettes',
+          (() => {
+            const extras = palettes.accentExtras?.length ?? 0;
+            const accentLabel = extras > 0 ? `${1 + extras} accents` : 'accent';
+            return `primary · secondary · ${accentLabel}`;
+          })(),
+        )}
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;">
           ${palette('primary')}
           ${palette('secondary')}
           ${palette('accent')}
+          ${(palettes.accentExtras ?? []).map((p, i) => {
+            const idx = i + 2;
+            const stored = doc.palettes.accentExtras?.[i];
+            const fg = onColorForeground('accent', palettes, idx).hex;
+            return paletteCard(
+              stored?.name ?? `Accent ${idx}`,
+              `accent-${idx}`,
+              `accent-${idx}-main`,
+              p,
+              fg,
+            );
+          }).join('')}
         </div>
       </section>
 

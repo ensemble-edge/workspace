@@ -111,6 +111,8 @@ interface BrandColorsDoc {
     primary: Palette;
     secondary: Palette;
     accent: Palette;
+    /** v0.1.100: 0-3 additional accents (total accents incl. `accent` ≤ 4). */
+    accentExtras?: Palette[];
     neutral: NeutralPalette;
   };
   gradients: Gradient[];
@@ -489,6 +491,46 @@ export function ColorsTab() {
         onNeutralHueModeChange={updateNeutralHueMode}
         onGradientNameChange={updateGradientName}
         onSemanticChange={updateSemantic}
+      />
+
+      {/* v0.1.100: Additional accents — 0..3 extra named accents
+          beyond the primary accent edited in the BrandCard above.
+          Each gets its own 5-rung scale at render time (same OkLCh
+          derivation as primary/secondary/accent) and emits its own
+          --brand-accent-{N}-* CSS variables. */}
+      <AccentExtrasSection
+        extras={draft.palettes.accentExtras ?? []}
+        onAdd={() => {
+          setDraft({
+            ...draft,
+            palettes: {
+              ...draft.palettes,
+              accentExtras: [
+                ...(draft.palettes.accentExtras ?? []),
+                { name: `Accent ${(draft.palettes.accentExtras?.length ?? 0) + 2}`, main: '#10B981' },
+              ],
+            },
+          });
+        }}
+        onRemove={(idx) => {
+          const next = (draft.palettes.accentExtras ?? []).filter((_, i) => i !== idx);
+          setDraft({
+            ...draft,
+            palettes: {
+              ...draft.palettes,
+              accentExtras: next.length > 0 ? next : undefined,
+            },
+          });
+        }}
+        onUpdate={(idx, patch) => {
+          const next = (draft.palettes.accentExtras ?? []).map((p, i) =>
+            i === idx ? { ...p, ...patch } : p,
+          );
+          setDraft({
+            ...draft,
+            palettes: { ...draft.palettes, accentExtras: next },
+          });
+        }}
       />
 
       {/* Gradients editor — adds advanced controls below the BrandCard's
@@ -1162,4 +1204,128 @@ function wcagRatio(fg: string, bg: string): number {
   const lighter = Math.max(a, b);
   const darker = Math.min(a, b);
   return (lighter + 0.05) / (darker + 0.05);
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * v0.1.100 — Additional accents (up to 3 extras beyond accent #1)
+ *
+ * The BrandCard above handles the primary accent (palettes.accent —
+ * back-compat slot, always present, always == "accent 1"). This
+ * section manages 0-3 ADDITIONAL accents stored in
+ * palettes.accentExtras. Each extra has its own name + main hex; the
+ * 5-rung scale (dark/main/bright/pastel/faded) is derived server-
+ * side via the same OkLCh math as primary/secondary/accent. CSS
+ * variables emit as --brand-accent-2-<rung>, etc.
+ *
+ * Capped at 3 extras (total accents = 4). Operator names each one
+ * so it shows up under that name in the spec response, the public
+ * /brand guide, and the Overview swatch row.
+ * ──────────────────────────────────────────────────────────── */
+
+function AccentExtrasSection({
+  extras,
+  onAdd,
+  onRemove,
+  onUpdate,
+}: {
+  extras: Palette[];
+  onAdd: () => void;
+  onRemove: (idx: number) => void;
+  onUpdate: (idx: number, patch: Partial<Palette>) => void;
+}) {
+  const atCap = extras.length >= 3;
+  return (
+    <section className="space-y-3.5">
+      <header className="flex items-baseline justify-between">
+        <h2
+          className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground"
+          style={{ fontFamily: 'var(--brand-font-eyebrow, var(--brand-font-body, inherit))' }}
+        >
+          Additional accents
+        </h2>
+        <div className="flex items-center gap-3">
+          <span
+            className="text-[11px] text-muted-foreground"
+            style={{ fontFamily: 'var(--brand-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)' }}
+          >
+            {extras.length} of 3
+          </span>
+          {atCap ? (
+            <Button type="button" variant="outline" size="sm" disabled title="Maximum 3 additional accents (4 total accents)" className="h-7 px-2 text-xs">
+              <Plus className="h-3.5 w-3.5 mr-1" /> Add accent
+            </Button>
+          ) : (
+            <Button type="button" variant="outline" size="sm" onClick={onAdd} className="h-7 px-2 text-xs">
+              <Plus className="h-3.5 w-3.5 mr-1" /> Add accent
+            </Button>
+          )}
+        </div>
+      </header>
+      <p className="text-xs text-muted-foreground max-w-[680px]">
+        Add up to three more accent colors beyond the primary accent above. Each gets a
+        full 5-rung scale generated automatically and is published as
+        <code className="mx-1">--brand-accent-2-*</code> through
+        <code className="ml-1">--brand-accent-4-*</code> CSS variables, plus its own
+        entry in <code>/brand/spec</code> and on the public brand guide.
+      </p>
+      {extras.length === 0 ? (
+        <p className="text-xs text-muted-foreground italic py-4">
+          No additional accents defined yet. Click <strong>Add accent</strong> above to
+          create one.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {extras.map((p, idx) => {
+            const accentNumber = idx + 2; // accentExtras[0] → "Accent 2"
+            return (
+              <div
+                key={idx}
+                className="rounded-2xl border-[0.5px] border-black/[0.07] bg-background p-4 flex items-center gap-3"
+              >
+                <div
+                  className="h-12 w-12 rounded-lg border-[0.5px] border-black/[0.08] shrink-0"
+                  style={{ background: p.main }}
+                  title={p.main.toUpperCase()}
+                />
+                <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0">
+                  <div className="space-y-1">
+                    <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Name (accent-{accentNumber})
+                    </Label>
+                    <Input
+                      value={p.name}
+                      onChange={(e) => onUpdate(idx, { name: e.currentTarget.value })}
+                      placeholder={`Accent ${accentNumber}`}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Main hex
+                    </Label>
+                    <Input
+                      value={p.main}
+                      onChange={(e) => onUpdate(idx, { main: e.currentTarget.value })}
+                      placeholder="#10B981"
+                      className="h-8 text-sm font-mono"
+                    />
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onRemove(idx)}
+                  className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                  title="Remove this accent"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }

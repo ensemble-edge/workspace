@@ -167,6 +167,29 @@ async function generateShellCss(
       brandTokens[`${role}-pastel`] = p.pastel;
       brandTokens[`${role}-faded`]  = p.faded;
     }
+    // v0.1.100: accent #1 also addressable as accent-1-<rung> for
+    // symmetry with accents 2-4. The bare `accent-<rung>` form
+    // (above) is the back-compat path.
+    {
+      const p = palettes.accent;
+      brandTokens['accent-1-dark']   = p.dark;
+      brandTokens['accent-1-main']   = p.main;
+      brandTokens['accent-1-bright'] = p.bright;
+      brandTokens['accent-1-pastel'] = p.pastel;
+      brandTokens['accent-1-faded']  = p.faded;
+    }
+    // v0.1.100: accents 2-4 from palettes.accentExtras. Each emits
+    // a full 5-rung scale with accent-<N>- prefix.
+    if (palettes.accentExtras) {
+      palettes.accentExtras.forEach((p, i) => {
+        const idx = i + 2; // accentExtras[0] → accent-2
+        brandTokens[`accent-${idx}-dark`]   = p.dark;
+        brandTokens[`accent-${idx}-main`]   = p.main;
+        brandTokens[`accent-${idx}-bright`] = p.bright;
+        brandTokens[`accent-${idx}-pastel`] = p.pastel;
+        brandTokens[`accent-${idx}-faded`]  = p.faded;
+      });
+    }
     // Semantic — emit as semantic.<role> keys for the existing
     // shadcn-preset machinery below; emit pairs in a separate
     // namespace for the brand-css consumers (--semantic-success-main, etc).

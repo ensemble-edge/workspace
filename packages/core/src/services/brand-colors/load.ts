@@ -28,6 +28,12 @@ export async function loadBrandColors(db: D1Database, workspaceId: string): Prom
         primary:   { ...def.palettes.primary,   ...(parsed.palettes?.primary   ?? {}) },
         secondary: { ...def.palettes.secondary, ...(parsed.palettes?.secondary ?? {}) },
         accent:    { ...def.palettes.accent,    ...(parsed.palettes?.accent    ?? {}) },
+        // v0.1.100: load up to 3 additional accents. Clamp at 3 in
+        // case a corrupted doc somehow has more; downstream UI also
+        // enforces the cap on save.
+        ...(Array.isArray(parsed.palettes?.accentExtras) && parsed.palettes!.accentExtras!.length > 0
+          ? { accentExtras: parsed.palettes!.accentExtras!.slice(0, 3) }
+          : {}),
         neutral:   { ...def.palettes.neutral,   ...(parsed.palettes?.neutral   ?? {}) },
       },
       gradients: parsed.gradients ?? def.gradients,
