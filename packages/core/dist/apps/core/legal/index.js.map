@@ -1,0 +1,1 @@
+{"version":3,"file":"index.js","sourceRoot":"","sources":["../../../../src/apps/core/legal/index.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,aAAa,EAAE,MAAM,YAAY,CAAC;AAC3C,OAAO,EAAE,mBAAmB,EAAE,MAAM,UAAU,CAAC;AAE/C,MAAM,CAAC,MAAM,QAAQ,GAAsB;IACzC,QAAQ,EAAE,aAAa;IACvB,cAAc,EAAE,mBAAmB;CACpC,CAAC"}
