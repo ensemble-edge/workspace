@@ -42,25 +42,71 @@ function formatDate(iso: string, lang: string): string {
   }
 }
 
+// These pages dogfood the workspace brand: they <link> /brand/css and
+// reference the same design tokens as the shell, login page, and brand
+// guide — hsl(var(--background/foreground/card/muted-foreground/border/
+// primary)), var(--font-heading/body), var(--radius). So the public
+// /legal/* pages inherit the operator's colors, fonts, and radius and
+// track theme changes, instead of carrying a hardcoded palette.
+//
+// The fallback :root below only kicks in if /brand/css fails to load
+// (network blip) — neutral values so the page is never unstyled. When
+// /brand/css loads (it does, same-origin) its :root wins.
 const STYLE = `
-  :root { --ink:#1a1a2e; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --bg:#ffffff; }
+  :root {
+    --background: 0 0% 100%; --foreground: 222 47% 11%;
+    --card: 0 0% 100%; --card-foreground: 222 47% 11%;
+    --muted: 210 40% 96%; --muted-foreground: 215 16% 47%;
+    --border: 214 32% 91%; --primary: 222 47% 11%;
+    --radius: 0.6rem;
+    --font-heading: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
   * { box-sizing: border-box; }
-  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--ink); background:var(--bg); line-height:1.6; }
-  .legal-wrap { display:flex; max-width:1080px; margin:0 auto; min-height:100vh; }
-  .legal-toc { width:260px; flex:0 0 260px; border-right:1px solid var(--line); padding:32px 20px; }
-  .legal-toc h2 { font-size:.75rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0 0 16px; }
-  .legal-toc a { display:block; padding:8px 12px; color:var(--ink); text-decoration:none; border-radius:6px; border-left:3px solid transparent; font-size:.95rem; }
-  .legal-toc a:hover { background:#f9fafb; }
-  .legal-toc a.active { border-left-color:var(--accent); font-weight:600; background:#f3f6ff; }
-  .legal-main { flex:1; padding:40px 48px; min-width:0; }
+  body { margin:0; font-family: var(--font-body); color: hsl(var(--foreground)); background: hsl(var(--background)); line-height:1.6; }
+  .legal-wrap { display:flex; max-width:1080px; margin:0 auto; min-height:100vh; gap: 3rem; padding: 0 1.5rem; }
+  .legal-toc { width:240px; flex:0 0 240px; padding:40px 0; }
+  .legal-toc h2 { font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.12em; color: hsl(var(--muted-foreground)); margin:0 0 16px; }
+  .legal-toc a { display:block; padding:8px 14px; margin-bottom:6px; color: hsl(var(--muted-foreground)); text-decoration:none; border:1px solid transparent; border-radius: var(--radius); font-size:.9rem; transition: color .15s, background-color .15s; }
+  .legal-toc a:hover { color: hsl(var(--foreground)); }
+  .legal-toc a.active { color: hsl(var(--primary)); font-weight:700; border-color: hsl(var(--primary) / 0.28); background: hsl(var(--primary) / 0.08); }
+  .legal-main { flex:1; padding:40px 0; min-width:0; max-width: 48rem; }
   .legal-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:8px; }
-  .legal-main h1 { font-size:1.9rem; margin:0; }
-  .legal-updated { color:var(--muted); font-size:.9rem; margin:0 0 28px; }
-  .legal-body h1,.legal-body h2,.legal-body h3 { margin-top:1.6em; }
-  .legal-body a { color:var(--accent); }
-  .legal-lang select { padding:6px 10px; border:1px solid var(--line); border-radius:6px; font-size:.9rem; background:#fff; }
-  @media (max-width:720px) { .legal-wrap { flex-direction:column; } .legal-toc { width:auto; flex:none; border-right:none; border-bottom:1px solid var(--line); } .legal-main { padding:24px; } }
+  .legal-main h1 { font-family: var(--font-heading); font-size:1.9rem; font-weight:800; letter-spacing:-0.02em; margin:0; }
+  .legal-updated { color: hsl(var(--muted-foreground)); font-size:.85rem; margin:0 0 32px; }
+  /* Each top-level markdown section (## heading + its prose) becomes a card,
+     matching the brand-guide / landing-page legal layout. */
+  .legal-body h2 { font-family: var(--font-heading); font-size:1.1rem; font-weight:700; margin:0 0 12px; }
+  .legal-body h2 + p, .legal-body h2 ~ p, .legal-body h2 ~ ul { color: hsl(var(--muted-foreground)); }
+  .legal-body > h2 { margin-top:0; padding-top:1.5rem; }
+  .legal-body { display:flex; flex-direction:column; gap:1.5rem; }
+  .legal-body section { background: hsl(var(--card)); border:1px solid hsl(var(--border)); border-radius: calc(var(--radius) + 0.4rem); padding:1.5rem 2rem; }
+  .legal-body a { color: hsl(var(--primary)); font-weight:500; }
+  .legal-body ul { padding-left:1.1rem; }
+  .legal-body li { margin:.3rem 0; }
+  .legal-lang select { padding:6px 10px; border:1px solid hsl(var(--border)); border-radius: var(--radius); font-size:.85rem; background: hsl(var(--card)); color: hsl(var(--foreground)); }
+  @media (max-width:720px) { .legal-wrap { flex-direction:column; gap:1rem; } .legal-toc { width:auto; flex:none; padding:24px 0 0; } .legal-main { padding:16px 0 40px; } .legal-body section { padding:1.25rem 1.25rem; } }
 `;
+
+/**
+ * Group rendered markdown HTML into <section> cards, one per top-level
+ * `## heading`. This is a PAGE-presentation concern, not part of the
+ * content: renderMarkdown() stays semantic (flat h2/p/ul) so the JSON
+ * API consumers get clean embeddable HTML; the page wraps those into
+ * cards here — the same shape the brand guide and landing-page legal
+ * sections use.
+ *
+ * Splits on `<h2`. Anything before the first `<h2>` (an intro paragraph)
+ * becomes its own leading section.
+ */
+function sectionize(html: string): string {
+  if (!html.includes('<h2')) {
+    // No section headings — wrap the whole body in one card.
+    return `<section>${html}</section>`;
+  }
+  const parts = html.split(/(?=<h2)/g).filter((p) => p.trim());
+  return parts.map((p) => `<section>${p}</section>`).join('\n');
+}
 
 export interface LegalPageData {
   lang: string;
@@ -109,6 +155,9 @@ export function renderLegalPage(data: LegalPageData): string {
 <title>${esc(data.title)}</title>
 ${hreflangs}
 <style>${STYLE}</style>
+<!-- Dogfood the workspace brand: load the same tokens the shell + brand
+     guide use. Loaded AFTER the fallback <style> so /brand/css :root wins. -->
+<link rel="stylesheet" href="/brand/css">
 </head>
 <body>
 <div class="legal-wrap">
@@ -122,7 +171,7 @@ ${hreflangs}
       ${langSwitcher}
     </div>
     <p class="legal-updated">${esc(t.updated)}: ${esc(formatDate(data.lastUpdated, data.lang))}</p>
-    <div class="legal-body">${data.contentHtml}</div>
+    <div class="legal-body">${sectionize(data.contentHtml)}</div>
   </main>
 </div>
 </body>
@@ -134,7 +183,7 @@ export function renderLegalNotFound(lang: string): string {
   const t = dict(lang);
   return `<!DOCTYPE html>
 <html lang="${esc(lang)}">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(t.notFound)}</title><style>${STYLE}</style></head>
-<body><main class="legal-main"><h1>${esc(t.notFound)}</h1></main></body>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(t.notFound)}</title><style>${STYLE}</style><link rel="stylesheet" href="/brand/css"></head>
+<body><main class="legal-main" style="max-width:48rem;margin:0 auto;"><h1>${esc(t.notFound)}</h1></main></body>
 </html>`;
 }

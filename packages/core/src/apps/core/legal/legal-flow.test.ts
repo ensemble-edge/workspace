@@ -18,10 +18,12 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Miniflare } from 'miniflare';
+import { Hono } from 'hono';
 import { migration as m015 } from '../../../db/migrations/015_legal_docs';
 import { migration as m010 } from '../../../db/migrations/010_workspace_settings';
 import { buildLegalSeedStatements } from './seed';
 import { getSetting, setSetting } from '../../../services/workspace-settings';
+import { registerLegalPublicRoutes } from './public-routes';
 
 let mf: Miniflare;
 let db: D1Database;
@@ -207,5 +209,44 @@ describe('legal data-layer flow', () => {
         .prepare(`INSERT INTO legal_doc_slugs (workspace_id,slug,locale,doc_id) VALUES ('ws2','privacy','en','privacy')`)
         .run(),
     ).resolves.toBeTruthy();
+  });
+});
+
+describe('public route ordering', () => {
+  // Regression test: /api/legal/active and /active-versions are STATIC
+  // paths that must be registered before the parameterized /:slug, or
+  // Hono matches them as a slug value and they 404. This builds the real
+  // route table via registerLegalPublicRoutes and confirms the static
+  // routes resolve to their own handlers.
+  it('routes /active and /active-versions to their handlers, not /:slug', async () => {
+    const app = new Hono();
+    // Minimal context: a workspace, and publish enabled so the gate
+    // passes; the DB is the seeded one from beforeAll (WS).
+    app.use('*', async (c, next) => {
+      c.set('workspace' as never, { id: WS } as never);
+      (c as { env: unknown }).env = { DB: db };
+      await next();
+    });
+    registerLegalPublicRoutes(app as never);
+
+    await setSetting({ DB: db } as never, WS, 'legal_public_enabled', 'true', 'u1');
+
+    const active = await app.request('http://x/api/legal/active?lang=en');
+    const activeBody = (await active.json()) as { docs?: unknown[]; error?: string };
+    expect(active.status).toBe(200);
+    // The enumeration handler returns { lang, docs }, NOT the slug
+    // handler's { error: 'not_found' }.
+    expect(Array.isArray(activeBody.docs)).toBe(true);
+
+    const versions = await app.request('http://x/api/legal/active-versions?ids=privacy');
+    const versionsBody = (await versions.json()) as { versions?: unknown[] };
+    expect(versions.status).toBe(200);
+    expect(Array.isArray(versionsBody.versions)).toBe(true);
+
+    // And a real slug still resolves through /:slug.
+    const slug = await app.request('http://x/api/legal/privacy');
+    expect(slug.status).toBe(200);
+    const slugBody = (await slug.json()) as { id?: string };
+    expect(slugBody.id).toBe('privacy');
   });
 });

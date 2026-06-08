@@ -47,8 +47,20 @@ const SEED_DOCS: SeedDoc[] = [
       en: 'How we collect, use, and protect your personal information.',
     },
     bodyMd: {
-      es: '## Política de privacidad\n\n[COMPANY NAME] valora su privacidad. Esta política describe cómo recopilamos, usamos y protegemos su información personal.\n\n## Contacto\n\nSi tiene preguntas, escríbanos a [EMAIL].\n\nÚltima actualización: [DATE].',
-      en: '## Privacy Policy\n\n[COMPANY NAME] values your privacy. This policy describes how we collect, use, and protect your personal information.\n\n## Contact\n\nIf you have questions, contact us at [EMAIL].\n\nLast updated: [DATE].',
+      es:
+        '[COMPANY NAME] valora su privacidad. Esta política describe cómo recopilamos, usamos y protegemos su información personal. Última actualización: [DATE].\n\n' +
+        '## Información que recopilamos\n\nRecopilamos la información que usted nos proporciona directamente (como nombre, correo electrónico y datos de contacto) y la información que se genera automáticamente cuando usa nuestros servicios.\n\n' +
+        '## Cómo usamos su información\n\nUsamos su información para prestar y mejorar nuestros servicios, comunicarnos con usted y cumplir con nuestras obligaciones legales.\n\n' +
+        '## Cómo compartimos su información\n\nNo vendemos su información personal. Podemos compartirla con proveedores de servicios que actúan en nuestro nombre y cuando lo exija la ley.\n\n' +
+        '## Sus derechos\n\nUsted puede solicitar acceso, corrección o eliminación de su información personal. Para ejercer estos derechos, escríbanos a [LEGAL NOTICES EMAIL].\n\n' +
+        '## Contacto\n\nSi tiene preguntas sobre esta política, escríbanos a [EMAIL].',
+      en:
+        '[COMPANY NAME] values your privacy. This policy describes how we collect, use, and protect your personal information. Last updated: [DATE].\n\n' +
+        '## Information we collect\n\nWe collect information you provide to us directly (such as your name, email, and contact details) and information generated automatically when you use our services.\n\n' +
+        '## How we use your information\n\nWe use your information to provide and improve our services, communicate with you, and meet our legal obligations.\n\n' +
+        '## How we share your information\n\nWe do not sell your personal information. We may share it with service providers acting on our behalf and where required by law.\n\n' +
+        '## Your rights\n\nYou may request access to, correction of, or deletion of your personal information. To exercise these rights, contact us at [LEGAL NOTICES EMAIL].\n\n' +
+        '## Contact\n\nIf you have questions about this policy, contact us at [EMAIL].',
     },
     sortOrder: 10,
   },
@@ -61,8 +73,22 @@ const SEED_DOCS: SeedDoc[] = [
       en: 'The rules for using our services.',
     },
     bodyMd: {
-      es: '## Términos de uso\n\nAl usar los servicios de [COMPANY NAME], usted acepta estos términos.\n\n## Contacto\n\nPara preguntas sobre estos términos, escríbanos a [EMAIL].\n\nÚltima actualización: [DATE].',
-      en: '## Terms of Use\n\nBy using [COMPANY NAME] services, you agree to these terms.\n\n## Contact\n\nFor questions about these terms, contact us at [EMAIL].\n\nLast updated: [DATE].',
+      es:
+        'Al usar los servicios de [COMPANY NAME], usted acepta estos términos. Léalos con atención. Última actualización: [DATE].\n\n' +
+        '## Uso de los servicios\n\nUsted acepta usar nuestros servicios solo para fines lícitos y de acuerdo con estos términos y la legislación aplicable.\n\n' +
+        '## Cuentas\n\nUsted es responsable de mantener la confidencialidad de su cuenta y de toda la actividad que ocurra en ella.\n\n' +
+        '## Pagos\n\nLos precios y las condiciones de pago aplicables se le comunican antes de cada compra. Usted es responsable de los cargos asociados a su cuenta.\n\n' +
+        '## Limitación de responsabilidad\n\nNuestros servicios se ofrecen "tal cual". En la medida permitida por la ley, [COMPANY NAME] no será responsable de daños indirectos o incidentales.\n\n' +
+        '## Cambios a estos términos\n\nPodemos actualizar estos términos ocasionalmente. El uso continuado de los servicios constituye su aceptación de los términos revisados.\n\n' +
+        '## Contacto\n\nPara preguntas sobre estos términos, escríbanos a [EMAIL].',
+      en:
+        'By using [COMPANY NAME] services, you agree to these terms. Please read them carefully. Last updated: [DATE].\n\n' +
+        '## Use of the services\n\nYou agree to use our services only for lawful purposes and in accordance with these terms and applicable law.\n\n' +
+        '## Accounts\n\nYou are responsible for keeping your account credentials confidential and for all activity that occurs under your account.\n\n' +
+        '## Payments\n\nApplicable prices and payment terms are disclosed to you before each purchase. You are responsible for charges associated with your account.\n\n' +
+        '## Limitation of liability\n\nOur services are provided "as is." To the extent permitted by law, [COMPANY NAME] is not liable for indirect or incidental damages.\n\n' +
+        '## Changes to these terms\n\nWe may update these terms from time to time. Continued use of the services constitutes acceptance of the revised terms.\n\n' +
+        '## Contact\n\nFor questions about these terms, contact us at [EMAIL].',
     },
     sortOrder: 20,
   },

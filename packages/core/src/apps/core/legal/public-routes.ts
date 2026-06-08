@@ -51,69 +51,11 @@ export function registerLegalPublicRoutes(
   app: Hono<{ Bindings: Env; Variables: ContextVariables }>,
 ): void {
   // ───────────────────── Public JSON API ─────────────────────
-
-  /** GET /api/legal/:slug — render one doc by localized slug. */
-  app.get('/api/legal/:slug', async (c) => {
-    const workspace = c.get('workspace');
-    if (!workspace?.id) return c.notFound();
-    if (!(await isLegalPublicEnabled(c, workspace.id))) return c.notFound();
-
-    const slug = c.req.param('slug');
-    const format = c.req.query('format') === 'markdown' ? 'markdown' : 'html';
-
-    // 1. Resolve slug → (doc_id, native locale).
-    const slugRow = await c.env.DB.prepare(
-      `SELECT doc_id, locale FROM legal_doc_slugs
-        WHERE workspace_id = ? AND slug = ? LIMIT 1`,
-    )
-      .bind(workspace.id, slug)
-      .first<{ doc_id: string; locale: string }>();
-    if (!slugRow) return c.json({ error: 'not_found' }, 404);
-
-    // 2. Load the active doc.
-    const row = await c.env.DB.prepare(
-      `SELECT id, slugs_json, title_json, description_json, body_md_json,
-              last_updated, status, sort_order
-         FROM legal_docs
-        WHERE workspace_id = ? AND id = ? AND status = 'active'`,
-    )
-      .bind(workspace.id, slugRow.doc_id)
-      .first<LegalDocRow>();
-    if (!row) return c.json({ error: 'not_found' }, 404);
-
-    const doc = parseDocRow(row);
-    // 3. Render locale: ?lang override → slug's native locale.
-    const lang = c.req.query('lang') || slugRow.locale;
-
-    const title = loc(doc.title, lang, slugRow.locale);
-    const bodyMd = loc(doc.bodyMd, lang, slugRow.locale);
-
-    // 4. Substitute placeholders (runs for BOTH html + markdown).
-    const { resolveLegalPlaceholders } = await import('../../../services/legal-placeholders');
-    const resolved = await resolveLegalPlaceholders(
-      c.env,
-      workspace.id,
-      bodyMd,
-      doc.lastUpdated,
-      lang,
-    );
-
-    const content = format === 'html' ? renderMarkdown(resolved) : resolved;
-
-    return c.json(
-      {
-        slug,
-        id: doc.id,
-        lang,
-        title,
-        lastUpdated: doc.lastUpdated,
-        format,
-        content,
-      },
-      200,
-      { 'Cache-Control': CACHE_300 },
-    );
-  });
+  //
+  // ROUTE ORDER MATTERS: the static paths (/active, /active-versions)
+  // MUST be registered before the parameterized /:slug, or Hono matches
+  // "active"/"active-versions" as a slug value and they 404. Most-
+  // specific-first.
 
   /** GET /api/legal/active — every active doc in the requested locale. */
   app.get('/api/legal/active', async (c) => {
@@ -175,6 +117,74 @@ export function registerLegalPublicRoutes(
 
     const versions = (results ?? []).map((r) => ({ id: r.doc_id, versionId: r.version_id }));
     return c.json({ versions }, 200, { 'Cache-Control': CACHE_60 });
+  });
+
+  /**
+   * GET /api/legal/:slug — render one doc by localized slug.
+   *
+   * Registered LAST: this parameterized route must come after the static
+   * /active and /active-versions routes above, or it shadows them.
+   */
+  app.get('/api/legal/:slug', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.notFound();
+    if (!(await isLegalPublicEnabled(c, workspace.id))) return c.notFound();
+
+    const slug = c.req.param('slug');
+    const format = c.req.query('format') === 'markdown' ? 'markdown' : 'html';
+
+    // 1. Resolve slug → (doc_id, native locale).
+    const slugRow = await c.env.DB.prepare(
+      `SELECT doc_id, locale FROM legal_doc_slugs
+        WHERE workspace_id = ? AND slug = ? LIMIT 1`,
+    )
+      .bind(workspace.id, slug)
+      .first<{ doc_id: string; locale: string }>();
+    if (!slugRow) return c.json({ error: 'not_found' }, 404);
+
+    // 2. Load the active doc.
+    const row = await c.env.DB.prepare(
+      `SELECT id, slugs_json, title_json, description_json, body_md_json,
+              last_updated, status, sort_order
+         FROM legal_docs
+        WHERE workspace_id = ? AND id = ? AND status = 'active'`,
+    )
+      .bind(workspace.id, slugRow.doc_id)
+      .first<LegalDocRow>();
+    if (!row) return c.json({ error: 'not_found' }, 404);
+
+    const doc = parseDocRow(row);
+    // 3. Render locale: ?lang override → slug's native locale.
+    const lang = c.req.query('lang') || slugRow.locale;
+
+    const title = loc(doc.title, lang, slugRow.locale);
+    const bodyMd = loc(doc.bodyMd, lang, slugRow.locale);
+
+    // 4. Substitute placeholders (runs for BOTH html + markdown).
+    const { resolveLegalPlaceholders } = await import('../../../services/legal-placeholders');
+    const resolved = await resolveLegalPlaceholders(
+      c.env,
+      workspace.id,
+      bodyMd,
+      doc.lastUpdated,
+      lang,
+    );
+
+    const content = format === 'html' ? renderMarkdown(resolved) : resolved;
+
+    return c.json(
+      {
+        slug,
+        id: doc.id,
+        lang,
+        title,
+        lastUpdated: doc.lastUpdated,
+        format,
+        content,
+      },
+      200,
+      { 'Cache-Control': CACHE_300 },
+    );
   });
 
   // ───────────────────── Public HTML pages ─────────────────────
