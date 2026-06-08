@@ -1,0 +1,1 @@
+{"version":3,"file":"bootstrap.d.ts","sourceRoot":"","sources":["../../src/routes/bootstrap.ts"],"names":[],"mappings":"AAAA;;;;;;;;;GASG;AAEH,OAAO,EAAE,IAAI,EAAE,MAAM,MAAM,CAAC;AAC5B,OAAO,KAAK,EAAE,GAAG,EAAE,gBAAgB,EAAE,cAAc,EAAE,MAAM,UAAU,CAAC;AA4GtE;;;;;GAKG;AACH,wBAAgB,qBAAqB,CAAC,MAAM,EAAE,cAAc;cAE9C,GAAG;eACF,gBAAgB;0CAgN9B"}
