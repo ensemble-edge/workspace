@@ -63,7 +63,7 @@ beforeAll(async () => {
     }
   }
 
-  // Seed the six starter docs for WS.
+  // Seed the starter docs for WS (Privacy Policy + Terms of Use).
   await db.batch(buildLegalSeedStatements(db, WS, '2026-06-07T00:00:00Z', 'u1'));
 });
 
@@ -72,19 +72,12 @@ afterAll(async () => {
 });
 
 describe('legal data-layer flow', () => {
-  it('seeds six active docs, ordered', async () => {
+  it('seeds the two starter docs (Privacy Policy + Terms of Use), ordered', async () => {
     const { results } = await db
       .prepare(`SELECT id FROM legal_docs WHERE workspace_id=? AND status='active' ORDER BY sort_order ASC`)
       .bind(WS)
       .all<{ id: string }>();
-    expect(results.map((r) => r.id)).toEqual([
-      'privacy',
-      'terms',
-      'telehealth-consent',
-      'cancellation-refunds',
-      'privacy-practices',
-      'consumer-rights',
-    ]);
+    expect(results.map((r) => r.id)).toEqual(['privacy', 'terms']);
   });
 
   it('resolves a localized slug to its doc + native locale', async () => {
@@ -159,6 +152,28 @@ describe('legal data-layer flow', () => {
       .all<{ doc_id: string; version_id: number }>();
     expect(results).toHaveLength(1);
     expect(results[0].version_id).toBeGreaterThan(0);
+  });
+
+  it('re-seeding is idempotent — no duplicate docs or slugs', async () => {
+    // Use a dedicated, un-mutated workspace so other tests' slug edits
+    // can't perturb the counts. Seed twice (what double-clicking the
+    // "Add starter documents" button, or a re-run, would do).
+    const FRESH = 'ws-seed';
+    await db.prepare('INSERT INTO workspaces (id,slug,name) VALUES (?,?,?)').bind(FRESH, 'seed', 'Seed').run();
+    await db.batch(buildLegalSeedStatements(db, FRESH, '2026-06-08T00:00:00Z', 'u2'));
+    await db.batch(buildLegalSeedStatements(db, FRESH, '2026-06-08T00:00:00Z', 'u2'));
+
+    const docs = await db
+      .prepare(`SELECT COUNT(*) AS n FROM legal_docs WHERE workspace_id=?`)
+      .bind(FRESH)
+      .first<{ n: number }>();
+    expect(docs?.n).toBe(2); // privacy + terms, not 4
+
+    const slugs = await db
+      .prepare(`SELECT COUNT(*) AS n FROM legal_doc_slugs WHERE workspace_id=?`)
+      .bind(FRESH)
+      .first<{ n: number }>();
+    expect(slugs?.n).toBe(4); // 2 docs × 2 locales, not 8
   });
 
   it('public-publish gate defaults off and toggles on (legal_public_enabled)', async () => {

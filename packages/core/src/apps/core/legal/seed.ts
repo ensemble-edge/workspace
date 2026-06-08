@@ -26,91 +26,45 @@ interface SeedDoc {
   sortOrder: number;
 }
 
-/** The six starter docs. `lastUpdated` is stamped at seed time. */
+/**
+ * The starter docs. Intentionally just TWO — Privacy Policy and Terms of
+ * Use — the documents every workspace is expected to have. They ship as
+ * very basic placeholder skeletons (a heading + a couple of one-line
+ * sections) for the operator to expand and have reviewed by counsel.
+ * Other docs (telehealth consent, refunds, privacy practices, consumer
+ * rights, etc.) are NOT auto-created — an operator adds them in the CMS
+ * if their business needs them.
+ *
+ * `lastUpdated` is stamped at seed time.
+ */
 const SEED_DOCS: SeedDoc[] = [
   {
     id: 'privacy',
     slugs: { es: 'privacidad', en: 'privacy' },
-    title: { es: 'Privacidad', en: 'Privacy' },
+    title: { es: 'Política de privacidad', en: 'Privacy Policy' },
     description: {
       es: 'Cómo recopilamos, usamos y protegemos su información personal.',
       en: 'How we collect, use, and protect your personal information.',
     },
     bodyMd: {
-      es: '## Introducción\n\n[COMPANY NAME] valora su privacidad. Para preguntas, escríbanos a [EMAIL]. Última actualización: [DATE].',
-      en: '## Introduction\n\n[COMPANY NAME] values your privacy. For questions, contact us at [EMAIL]. Last updated: [DATE].',
+      es: '## Política de privacidad\n\n[COMPANY NAME] valora su privacidad. Esta política describe cómo recopilamos, usamos y protegemos su información personal.\n\n## Contacto\n\nSi tiene preguntas, escríbanos a [EMAIL].\n\nÚltima actualización: [DATE].',
+      en: '## Privacy Policy\n\n[COMPANY NAME] values your privacy. This policy describes how we collect, use, and protect your personal information.\n\n## Contact\n\nIf you have questions, contact us at [EMAIL].\n\nLast updated: [DATE].',
     },
     sortOrder: 10,
   },
   {
     id: 'terms',
     slugs: { es: 'terminos', en: 'terms' },
-    title: { es: 'Términos', en: 'Terms & Conditions' },
+    title: { es: 'Términos de uso', en: 'Terms of Use' },
     description: {
       es: 'Las reglas para usar nuestros servicios.',
       en: 'The rules for using our services.',
     },
     bodyMd: {
-      es: '## Términos y Condiciones\n\nAl usar los servicios de [COMPANY NAME], usted acepta estos términos. Contacto: [EMAIL]. Última actualización: [DATE].',
-      en: '## Terms & Conditions\n\nBy using [COMPANY NAME] services, you agree to these terms. Contact: [EMAIL]. Last updated: [DATE].',
+      es: '## Términos de uso\n\nAl usar los servicios de [COMPANY NAME], usted acepta estos términos.\n\n## Contacto\n\nPara preguntas sobre estos términos, escríbanos a [EMAIL].\n\nÚltima actualización: [DATE].',
+      en: '## Terms of Use\n\nBy using [COMPANY NAME] services, you agree to these terms.\n\n## Contact\n\nFor questions about these terms, contact us at [EMAIL].\n\nLast updated: [DATE].',
     },
     sortOrder: 20,
-  },
-  {
-    id: 'telehealth-consent',
-    slugs: { es: 'consentimiento-medico', en: 'telehealth-consent' },
-    title: { es: 'Consentimiento médico', en: 'Telehealth Medical Consent' },
-    description: {
-      es: 'Su consentimiento para recibir atención por telesalud.',
-      en: 'Your consent to receive telehealth care.',
-    },
-    bodyMd: {
-      es: '## Consentimiento de telesalud\n\nUsted consiente recibir atención médica por telesalud de [COMPANY NAME]. Preguntas: [EMAIL]. Última actualización: [DATE].',
-      en: '## Telehealth Consent\n\nYou consent to receive telehealth medical care from [COMPANY NAME]. Questions: [EMAIL]. Last updated: [DATE].',
-    },
-    sortOrder: 30,
-  },
-  {
-    id: 'cancellation-refunds',
-    slugs: { es: 'cancelacion-reembolsos', en: 'cancellation-refunds' },
-    title: { es: 'Cancelación y reembolsos', en: 'Cancellation & Refunds' },
-    description: {
-      es: 'Nuestras políticas de cancelación y reembolso.',
-      en: 'Our cancellation and refund policies.',
-    },
-    bodyMd: {
-      es: '## Cancelación y reembolsos\n\nPuede cancelar contactando a [COMPANY NAME] en [EMAIL] o [PHONE]. Última actualización: [DATE].',
-      en: '## Cancellation & Refunds\n\nYou may cancel by contacting [COMPANY NAME] at [EMAIL] or [PHONE]. Last updated: [DATE].',
-    },
-    sortOrder: 40,
-  },
-  {
-    id: 'privacy-practices',
-    slugs: { es: 'practicas-de-privacidad', en: 'privacy-practices' },
-    title: { es: 'Prácticas de privacidad', en: 'Notice of Privacy Practices' },
-    description: {
-      es: 'Cómo se pueden usar y divulgar sus datos de salud.',
-      en: 'How your health information may be used and disclosed.',
-    },
-    bodyMd: {
-      es: '## Aviso de prácticas de privacidad\n\nEste aviso describe cómo [COMPANY NAME] puede usar su información de salud. Avisos legales: [LEGAL NOTICES EMAIL]. Última actualización: [DATE].',
-      en: '## Notice of Privacy Practices\n\nThis notice describes how [COMPANY NAME] may use your health information. Legal notices: [LEGAL NOTICES EMAIL]. Last updated: [DATE].',
-    },
-    sortOrder: 50,
-  },
-  {
-    id: 'consumer-rights',
-    slugs: { es: 'derechos-del-consumidor', en: 'consumer-rights' },
-    title: { es: 'Derechos del consumidor', en: 'Consumer Rights' },
-    description: {
-      es: 'Sus derechos respecto a sus datos personales.',
-      en: 'Your rights regarding your personal data.',
-    },
-    bodyMd: {
-      es: '## Derechos del consumidor\n\nUsted tiene derechos sobre sus datos personales. Para ejercerlos, escriba a [LEGAL NOTICES EMAIL]. Dirección: [LEGAL BUSINESS ADDRESS]. Última actualización: [DATE].',
-      en: '## Consumer Rights\n\nYou have rights over your personal data. To exercise them, write to [LEGAL NOTICES EMAIL]. Address: [LEGAL BUSINESS ADDRESS]. Last updated: [DATE].',
-    },
-    sortOrder: 60,
   },
 ];
 

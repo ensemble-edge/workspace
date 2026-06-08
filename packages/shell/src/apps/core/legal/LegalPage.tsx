@@ -33,9 +33,16 @@ import {
   SaveStatus,
   useSaveStatus,
   toast,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
 } from '@ensemble-edge/ui';
 
+import { useHashTab } from '../../../hooks/useHashTab';
 import { authedFetch } from '../../../state';
+
+const TABS = ['content', 'settings'] as const;
 
 // ── Types (mirror the server contract in apps/core/legal/types.ts) ──
 
@@ -110,6 +117,8 @@ export function LegalPage() {
     void loadDocs(showArchived);
   }, [showArchived, loadDocs]);
 
+  const [tab, setTab] = useHashTab('content', TABS);
+
   return (
     <div className="space-y-6">
       <div>
@@ -119,36 +128,90 @@ export function LegalPage() {
         </p>
       </div>
 
-      <PublishCard />
-      <SnippetCard defaultLocale={defaultLocale} />
-      <LegalCopyCard />
+      <Tabs value={tab} onValueChange={setTab} className="w-full">
+        <TabsList variant="line" className="mb-6">
+          <TabsTrigger value="content">Content</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
+        </TabsList>
 
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Live legal documents. Edits autosave on blur.
-        </p>
-        <label className="flex items-center gap-2 text-sm">
-          <Switch checked={showArchived} onCheckedChange={setShowArchived} />
-          Show archived
-        </label>
-      </div>
+        {/* ── Content: the document CMS ── */}
+        <TabsContent value="content" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Live legal documents. Edits autosave on blur.
+            </p>
+            <label className="flex items-center gap-2 text-sm">
+              <Switch checked={showArchived} onCheckedChange={setShowArchived} />
+              Show archived
+            </label>
+          </div>
 
-      {loading ? (
-        <p className="text-muted-foreground">Loading…</p>
-      ) : (
-        <div className="space-y-3">
-          {docs.map((doc) => (
-            <LegalDocCard
-              key={doc.id}
-              summary={doc}
-              defaultLocale={defaultLocale}
-              enabledCodes={enabledCodes}
-              onChanged={() => void loadDocs(showArchived)}
-            />
-          ))}
-        </div>
-      )}
+          {loading ? (
+            <p className="text-muted-foreground">Loading…</p>
+          ) : docs.length === 0 ? (
+            <EmptyDocs onSeeded={(seeded) => setDocs(seeded)} />
+          ) : (
+            <div className="space-y-3">
+              {docs.map((doc) => (
+                <LegalDocCard
+                  key={doc.id}
+                  summary={doc}
+                  defaultLocale={defaultLocale}
+                  enabledCodes={enabledCodes}
+                  onChanged={() => void loadDocs(showArchived)}
+                />
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ── Settings: publish toggle, placeholder values, fetch snippets ── */}
+        <TabsContent value="settings" className="space-y-6">
+          <PublishCard />
+          <LegalCopyCard />
+          <SnippetCard defaultLocale={defaultLocale} />
+        </TabsContent>
+      </Tabs>
     </div>
+  );
+}
+
+// ───────────────────────── Empty state ─────────────────────────
+
+function EmptyDocs({ onSeeded }: { onSeeded: (docs: LegalDoc[]) => void }) {
+  const [seeding, setSeeding] = useState(false);
+
+  const seed = useCallback(async () => {
+    setSeeding(true);
+    try {
+      const r = await authedFetch('/_ensemble/core/legal/seed', { method: 'POST' });
+      if (!r.ok) throw new Error(`seed failed: ${r.status}`);
+      const body = (await r.json()) as { docs: LegalDoc[] };
+      onSeeded(body.docs ?? []);
+      toast.success('Default documents added');
+    } catch {
+      toast.error('Failed to seed default documents');
+    } finally {
+      setSeeding(false);
+    }
+  }, [onSeeded]);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>No legal documents yet</CardTitle>
+        <CardDescription>
+          Start with a basic Privacy Policy and Terms of Use you can edit, or add your own
+          documents from scratch. The starter docs are placeholder skeletons — expand them and
+          have them reviewed by counsel before publishing.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button onClick={() => void seed()} disabled={seeding}>
+          {seeding ? 'Adding…' : 'Add starter documents'}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 

@@ -87,3 +87,39 @@ The spec uses `marked`. Check whether it's already a dependency; if not,
 either add it or use a tiny in-repo markdown→HTML pass. Content is
 authored by operators (trusted), so the spec says no sanitization — but
 we will still escape inside code spans defensively.
+
+## Updates since the initial build (as shipped)
+
+The plan above is the original design. What actually shipped differs in
+a few deliberate ways:
+
+- **Markdown:** no `marked` dependency — a small dependency-free renderer
+  in `shared.ts` (headings, lists, bold/italic, links, code) keeps the
+  Worker bundle lean.
+- **Migration 015 is schema-only.** The workspace id is minted at
+  bootstrap, so per-workspace doc seeding can't live in a global
+  migration. Seeding moved to `apps/core/legal/seed.ts`
+  (`buildLegalSeedStatements`), called from `routes/bootstrap.ts`.
+- **Multi-tenancy:** all three tables carry `workspace_id` (the
+  prototype was single-tenant). Every query is workspace-scoped.
+- **Seed scope reduced to TWO docs** — Privacy Policy + Terms of Use,
+  basic placeholder skeletons. The other four are not auto-created; an
+  operator adds them in the CMS as needed.
+- **Existing-workspace seeding:** because the seed is bootstrap-only,
+  upgraded workspaces start empty. The CMS Content tab shows an "Add
+  starter documents" button that calls `POST /_ensemble/core/legal/seed`
+  (reuses `buildLegalSeedStatements`; idempotent via ON CONFLICT DO
+  NOTHING). No data-backfill migration — legal content is operator-owned.
+- **Publish gate:** `legal_public_enabled` setting (default OFF). When
+  off, `/legal/*` and `/api/legal/*` return 404; the CMS stays available.
+  Mirrors brand's `public_brand_guide_enabled`.
+- **CMS auth:** `/_ensemble/core/legal/*` uses `auth()` (required), not
+  `auth({ required: false })` — the CMS is operator-only; public reads
+  live on the separate unauthenticated `/api/legal/*` + `/legal/*`.
+- **Nav:** the sidebar entry is added to the live `/_ensemble/nav`
+  handler in `create-workspace.ts` (the code-built nav), so existing
+  workspaces get it on upgrade with no nav_config backfill.
+- **Client is tabbed** (Content | Settings), mirroring Brand: Content =
+  the doc CMS (default tab); Settings = publish toggle + Legal copy +
+  fetch snippets. Mounts at `/legal-app` (bare `/legal` is the public
+  pages).

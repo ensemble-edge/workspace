@@ -18,6 +18,7 @@ import type { Env, ContextVariables } from '../../../types';
 import type { LegalDocUpsert } from './types';
 import { ID_RE, SLUG_RE, parseDocRow, type LegalDocRow } from './shared';
 import { registerLegalPublicRoutes } from './public-routes';
+import { buildLegalSeedStatements } from './seed';
 
 type Ctx = Context<{ Bindings: Env; Variables: ContextVariables }>;
 
@@ -65,6 +66,38 @@ export function registerLegalRoutes(
 
     const docs = (results ?? []).map(parseDocRow);
     return c.json({ docs });
+  });
+
+  /**
+   * POST /_ensemble/core/legal/seed — seed the starter docs.
+   *
+   * Reuses buildLegalSeedStatements (the SAME content path as workspace
+   * bootstrap — no duplication). For existing workspaces that upgraded
+   * after the legal app shipped: their tables exist but were never
+   * seeded, so the CMS surfaces a "Seed default documents" button that
+   * calls this. Idempotent — the seed INSERTs use ON CONFLICT DO
+   * NOTHING, so this never overwrites edited docs or duplicates rows.
+   */
+  app.post('/_ensemble/core/legal/seed', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'Workspace not found' }, 400);
+
+    const now = new Date().toISOString();
+    const stmts = buildLegalSeedStatements(c.env.DB, workspace.id, now, actor(c) ?? 'system');
+    await c.env.DB.batch(stmts);
+
+    // Return the (possibly newly-seeded) active set so the client can
+    // refresh without a second round-trip.
+    const { results } = await c.env.DB.prepare(
+      `SELECT id, slugs_json, title_json, description_json, body_md_json,
+              last_updated, status, sort_order
+         FROM legal_docs WHERE workspace_id = ? AND status = 'active'
+        ORDER BY sort_order ASC, id ASC`,
+    )
+      .bind(workspace.id)
+      .all<LegalDocRow>();
+
+    return c.json({ ok: true, docs: (results ?? []).map(parseDocRow) });
   });
 
   /** GET /_ensemble/core/legal/docs/:id — full doc incl. body. */
