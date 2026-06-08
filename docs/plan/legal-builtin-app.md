@@ -93,9 +93,13 @@ we will still escape inside code spans defensively.
 The plan above is the original design. What actually shipped differs in
 a few deliberate ways:
 
-- **Markdown:** no `marked` dependency — a small dependency-free renderer
-  in `shared.ts` (headings, lists, bold/italic, links, code) keeps the
-  Worker bundle lean.
+- **Markdown:** `renderMarkdown` in `shared.ts` uses the `marked`
+  library (CommonMark + GFM). It originally shipped as a hand-rolled
+  dependency-free renderer, but that couldn't do ordered lists or
+  multi-line list items (wrapped `- item` lines split into stray
+  paragraphs), so it was replaced with marked (~+15KB gzip in the
+  Worker). The page renderer's `sectionize()` still splits marked's
+  output on top-level `<h2>` into section cards.
 - **Migration 015 is schema-only.** The workspace id is minted at
   bootstrap, so per-workspace doc seeding can't live in a global
   migration. Seeding moved to `apps/core/legal/seed.ts`

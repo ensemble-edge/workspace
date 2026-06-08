@@ -82,8 +82,12 @@ const STYLE = `
   .legal-body { display:flex; flex-direction:column; gap:1.5rem; }
   .legal-body section { background: hsl(var(--card)); border:1px solid hsl(var(--border)); border-radius: calc(var(--radius) + 0.4rem); padding:1.5rem 2rem; }
   .legal-body a { color: hsl(var(--primary)); font-weight:500; }
-  .legal-body ul { padding-left:1.1rem; }
-  .legal-body li { margin:.3rem 0; }
+  .legal-body ul, .legal-body ol { padding-left:1.25rem; margin:.5rem 0; }
+  .legal-body ol { list-style: decimal; }
+  .legal-body ul { list-style: disc; }
+  .legal-body li { margin:.3rem 0; padding-left:.15rem; }
+  .legal-body li > ul, .legal-body li > ol { margin:.25rem 0; }
+  .legal-body p { margin:.6rem 0; }
   .legal-lang select { padding:6px 10px; border:1px solid hsl(var(--border)); border-radius: var(--radius); font-size:.85rem; background: hsl(var(--card)); color: hsl(var(--foreground)); }
   @media (max-width:720px) { .legal-wrap { flex-direction:column; gap:1rem; } .legal-toc { width:auto; flex:none; padding:24px 0 0; } .legal-main { padding:16px 0 40px; } .legal-body section { padding:1.25rem 1.25rem; } }
 `;

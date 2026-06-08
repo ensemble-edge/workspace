@@ -4,10 +4,11 @@
  *
  *   • loc()              locale fallback for LocalizedString values
  *   • parseDocRow()      DB row → typed LegalDoc
- *   • renderMarkdown()   tiny dependency-free markdown → HTML
+ *   • renderMarkdown()   markdown → HTML via marked (CommonMark + GFM)
  *   • SLUG_RE / ID_RE    validation regexes (spec §3)
  */
 
+import { marked } from 'marked';
 import type { LegalDoc, LocalizedString } from './types';
 
 /** id + slug validation: lowercase alphanumerics + hyphens, 1–80 chars. */
@@ -77,79 +78,27 @@ export function parseDocRow(row: LegalDocRow): LegalDoc {
   };
 }
 
-/** Escape the five HTML-significant characters in a text node. */
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-/** Inline markdown: bold, italic, links, code. Escapes text first. */
-function renderInline(text: string): string {
-  let out = escapeHtml(text);
-  // links: [label](url) — url is escaped by the earlier escapeHtml pass.
-  out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, label, url) => {
-    return `<a href="${url}">${label}</a>`;
-  });
-  // bold then italic (bold first so ** isn't eaten by *).
-  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  out = out.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  // inline code
-  out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
-  return out;
-}
-
 /**
- * Minimal markdown → HTML. Supports: #/##/### headings, unordered
- * lists (- or *), blank-line-separated paragraphs, and the inline set
- * above. Deliberately small — covers legal-doc prose without pulling in
- * a markdown dependency into the Worker bundle.
+ * Markdown → HTML for legal docs, via `marked` (CommonMark + GFM).
+ *
+ * Replaces the earlier hand-rolled renderer, which couldn't do ordered
+ * lists or multi-line list items (a wrapped `- item` line split into a
+ * stray paragraph). marked handles ordered/nested lists, tables,
+ * blockquotes, and inline formatting correctly.
+ *
+ * Config:
+ *   • gfm:    GitHub-flavored extensions (tables, strikethrough).
+ *   • async:  false — we need a synchronous string return.
+ *   • breaks: false — a single newline is NOT a <br>; paragraphs are
+ *             separated by blank lines, the markdown norm. (The legal
+ *             bodies are authored with blank-line-separated sections.)
+ *
+ * Sanitization: the spec treats doc bodies as authored-by-us (trusted),
+ * and the resolved placeholder VALUES (company name, address, emails)
+ * are substituted BEFORE this runs. marked HTML-escapes text content by
+ * default, so a stray `<` in an operator-set value renders as text, not
+ * markup — the defensive posture we want without extra work.
  */
 export function renderMarkdown(md: string): string {
-  const lines = md.replace(/\r\n/g, '\n').split('\n');
-  const html: string[] = [];
-  let para: string[] = [];
-  let listItems: string[] = [];
-
-  const flushPara = () => {
-    if (para.length) {
-      html.push(`<p>${renderInline(para.join(' '))}</p>`);
-      para = [];
-    }
-  };
-  const flushList = () => {
-    if (listItems.length) {
-      html.push(`<ul>${listItems.map((li) => `<li>${renderInline(li)}</li>`).join('')}</ul>`);
-      listItems = [];
-    }
-  };
-
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-    const heading = /^(#{1,3})\s+(.*)$/.exec(line);
-    const listItem = /^[-*]\s+(.*)$/.exec(line);
-
-    if (heading) {
-      flushPara();
-      flushList();
-      const level = heading[1].length;
-      html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
-    } else if (listItem) {
-      flushPara();
-      listItems.push(listItem[1]);
-    } else if (line.trim() === '') {
-      flushPara();
-      flushList();
-    } else {
-      flushList();
-      para.push(line);
-    }
-  }
-  flushPara();
-  flushList();
-
-  return html.join('\n');
+  return marked.parse(md, { gfm: true, async: false, breaks: false }) as string;
 }
