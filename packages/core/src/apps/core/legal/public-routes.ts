@@ -66,7 +66,7 @@ export function registerLegalPublicRoutes(
     const lang = c.req.query('lang') || (await defaultLocale(c, workspace.id));
 
     const { results } = await c.env.DB.prepare(
-      `SELECT id, slugs_json, title_json, description_json, body_md_json,
+      `SELECT id, slugs_json, title_json, description_json, notice_json, body_md_json,
               last_updated, status, sort_order
          FROM legal_docs
         WHERE workspace_id = ? AND status = 'active'
@@ -144,7 +144,7 @@ export function registerLegalPublicRoutes(
 
     // 2. Load the active doc.
     const row = await c.env.DB.prepare(
-      `SELECT id, slugs_json, title_json, description_json, body_md_json,
+      `SELECT id, slugs_json, title_json, description_json, notice_json, body_md_json,
               last_updated, status, sort_order
          FROM legal_docs
         WHERE workspace_id = ? AND id = ? AND status = 'active'`,
@@ -159,6 +159,7 @@ export function registerLegalPublicRoutes(
 
     const title = loc(doc.title, lang, slugRow.locale);
     const bodyMd = loc(doc.bodyMd, lang, slugRow.locale);
+    const noticeRaw = loc(doc.notice, lang, slugRow.locale);
 
     // 4. Substitute placeholders (runs for BOTH html + markdown).
     const { resolveLegalPlaceholders } = await import('../../../services/legal-placeholders');
@@ -169,6 +170,9 @@ export function registerLegalPublicRoutes(
       doc.lastUpdated,
       lang,
     );
+    const notice = noticeRaw
+      ? await resolveLegalPlaceholders(c.env, workspace.id, noticeRaw, doc.lastUpdated, lang)
+      : '';
 
     const content = format === 'html' ? renderMarkdown(resolved) : resolved;
 
@@ -178,6 +182,9 @@ export function registerLegalPublicRoutes(
         id: doc.id,
         lang,
         title,
+        // Resolved notice text (empty string if none). Plain text/markdown;
+        // consumers format it. The HTML page renders it as a top callout.
+        notice,
         lastUpdated: doc.lastUpdated,
         format,
         content,
@@ -233,7 +240,7 @@ export function registerLegalPublicRoutes(
 
     // The active doc.
     const row = await c.env.DB.prepare(
-      `SELECT id, slugs_json, title_json, description_json, body_md_json,
+      `SELECT id, slugs_json, title_json, description_json, notice_json, body_md_json,
               last_updated, status, sort_order
          FROM legal_docs
         WHERE workspace_id = ? AND id = ? AND status = 'active'`,
@@ -244,7 +251,7 @@ export function registerLegalPublicRoutes(
 
     // The ToC: all active docs, ordered.
     const { results: tocRows } = await c.env.DB.prepare(
-      `SELECT id, slugs_json, title_json, description_json, body_md_json,
+      `SELECT id, slugs_json, title_json, description_json, notice_json, body_md_json,
               last_updated, status, sort_order
          FROM legal_docs
         WHERE workspace_id = ? AND status = 'active'
@@ -255,16 +262,23 @@ export function registerLegalPublicRoutes(
 
     const doc = parseDocRow(row);
     const bodyMd = loc(doc.bodyMd, lang, slugRow.locale);
+    const noticeRaw = loc(doc.notice, lang, slugRow.locale);
 
     const { resolveLegalPlaceholders } = await import('../../../services/legal-placeholders');
     const resolved = await resolveLegalPlaceholders(c.env, workspace.id, bodyMd, doc.lastUpdated, lang);
     const contentHtml = renderMarkdown(resolved);
+    // Notice: resolve placeholders, render inline markdown (bold/links), but
+    // NOT sectionized — it's a single callout block.
+    const noticeHtml = noticeRaw
+      ? renderMarkdown(await resolveLegalPlaceholders(c.env, workspace.id, noticeRaw, doc.lastUpdated, lang))
+      : '';
 
     const html = renderLegalPage({
       lang,
       activeId: doc.id,
       title: loc(doc.title, lang, slugRow.locale),
       lastUpdated: doc.lastUpdated,
+      noticeHtml,
       contentHtml,
       slugs: doc.slugs,
       toc: (tocRows ?? []).map((r) => {
@@ -289,6 +303,7 @@ const EMPTY_ROW: LegalDocRow = {
   slugs_json: '{}',
   title_json: '{}',
   description_json: null,
+  notice_json: null,
   body_md_json: '{}',
   last_updated: '',
   status: 'active',

@@ -20,10 +20,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Miniflare } from 'miniflare';
 import { Hono } from 'hono';
 import { migration as m015 } from '../../../db/migrations/015_legal_docs';
+import { migration as m016 } from '../../../db/migrations/016_legal_notice';
 import { migration as m010 } from '../../../db/migrations/010_workspace_settings';
 import { buildLegalSeedStatements } from './seed';
 import { getSetting, setSetting } from '../../../services/workspace-settings';
 import { registerLegalPublicRoutes } from './public-routes';
+import { registerLegalRoutes } from './routes';
 
 let mf: Miniflare;
 let db: D1Database;
@@ -59,7 +61,7 @@ beforeAll(async () => {
         return line;
       })
       .join('\n');
-  for (const m of [m010, m015]) {
+  for (const m of [m010, m015, m016]) {
     for (const stmt of stripComments(m.sql).split(';').map((s) => s.trim()).filter(Boolean)) {
       await db.exec(stmt.replace(/\n/g, ' '));
     }
@@ -248,5 +250,82 @@ describe('public route ordering', () => {
     expect(slug.status).toBe(200);
     const slugBody = (await slug.json()) as { id?: string };
     expect(slugBody.id).toBe('privacy');
+  });
+});
+
+describe('localized notice field', () => {
+  function appForWorkspace(workspaceId: string) {
+    const app = new Hono();
+    app.use('*', async (c, next) => {
+      c.set('workspace' as never, { id: workspaceId } as never);
+      c.set('user' as never, { id: 'u1', email: 'admin@x.com' } as never);
+      (c as { env: unknown }).env = { DB: db };
+      await next();
+    });
+    registerLegalRoutes(app as never);
+    return app;
+  }
+
+  it('saves a localized notice, round-trips it, and snapshots it on the next save', async () => {
+    const WSN = 'ws-notice';
+    await db.prepare('INSERT INTO workspaces (id,slug,name) VALUES (?,?,?)').bind(WSN, 'wn', 'WN').run();
+    await db.batch(buildLegalSeedStatements(db, WSN, '2026-06-07T00:00:00Z', 'u1'));
+    const app = appForWorkspace(WSN);
+
+    // Save a notice on the terms doc.
+    const put1 = await app.request('http://x/_ensemble/core/legal/docs/terms', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        slugs: { en: 'terms' },
+        title: { en: 'Terms of Use' },
+        notice: { en: 'PLEASE READ — binding arbitration in Section 13.' },
+        bodyMd: { en: '## Body\n\nText.' },
+        lastUpdated: '2026-06-08',
+      }),
+    });
+    expect(put1.status).toBe(200);
+
+    // GET detail returns the notice.
+    const get1 = await app.request('http://x/_ensemble/core/legal/docs/terms');
+    const doc1 = (await get1.json()) as { doc: { notice: Record<string, string> | null } };
+    expect(doc1.doc.notice?.en).toContain('binding arbitration');
+
+    // Second save changes the notice; the PRIOR notice must land in versions.
+    const put2 = await app.request('http://x/_ensemble/core/legal/docs/terms', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        slugs: { en: 'terms' },
+        title: { en: 'Terms of Use' },
+        notice: { en: 'Updated notice.' },
+        bodyMd: { en: '## Body\n\nText.' },
+        lastUpdated: '2026-06-09',
+      }),
+    });
+    expect(put2.status).toBe(200);
+
+    const snap = await db
+      .prepare(`SELECT notice_json FROM legal_docs_versions WHERE workspace_id=? AND doc_id='terms' ORDER BY version_id DESC LIMIT 1`)
+      .bind(WSN)
+      .first<{ notice_json: string | null }>();
+    expect(snap?.notice_json).toContain('binding arbitration');
+
+    // undefined notice on a later save PRESERVES the current value.
+    const put3 = await app.request('http://x/_ensemble/core/legal/docs/terms', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        slugs: { en: 'terms' },
+        title: { en: 'Terms of Use' },
+        // no notice key
+        bodyMd: { en: '## Body\n\nMore.' },
+        lastUpdated: '2026-06-10',
+      }),
+    });
+    expect(put3.status).toBe(200);
+    const get3 = await app.request('http://x/_ensemble/core/legal/docs/terms');
+    const doc3 = (await get3.json()) as { doc: { notice: Record<string, string> | null } };
+    expect(doc3.doc.notice?.en).toBe('Updated notice.'); // preserved, not cleared
   });
 });

@@ -53,6 +53,7 @@ interface LegalDoc {
   slugs: LocalizedString;
   title: LocalizedString;
   description: LocalizedString | null;
+  notice: LocalizedString | null;
   bodyMd: LocalizedString;
   lastUpdated: string;
   status: 'active' | 'archived';
@@ -437,6 +438,7 @@ function LegalDocCard({
           slugs: next.slugs,
           title: next.title,
           description: next.description,
+          notice: next.notice,
           bodyMd: next.bodyMd,
           lastUpdated: next.lastUpdated,
           status: next.status,
@@ -560,6 +562,16 @@ function LegalDocCard({
             onChange={(description) => patchDraft((d) => ({ ...d, description }))}
             onBlur={commit}
             rows={2}
+          />
+          <LocaleEditor
+            label="Notice"
+            hint="Optional prominent callout shown at the top of the doc (e.g. an arbitration / class-action-waiver warning). Markdown supported. Leave blank for no notice."
+            codes={enabledCodes}
+            defaultLocale={defaultLocale}
+            value={draft.notice ?? {}}
+            onChange={(notice) => patchDraft((d) => ({ ...d, notice }))}
+            onBlur={commit}
+            rows={3}
           />
           <div className="grid gap-4 sm:grid-cols-2">
             <div>

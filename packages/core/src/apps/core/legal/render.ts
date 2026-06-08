@@ -73,7 +73,14 @@ const STYLE = `
   .legal-main { flex:1; padding:40px 0; min-width:0; max-width: 48rem; }
   .legal-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:8px; }
   .legal-main h1 { font-family: var(--font-heading); font-size:1.9rem; font-weight:800; letter-spacing:-0.02em; margin:0; }
-  .legal-updated { color: hsl(var(--muted-foreground)); font-size:.85rem; margin:0 0 32px; }
+  .legal-updated { color: hsl(var(--muted-foreground)); font-size:.85rem; margin:0 0 24px; }
+  /* Prominent notice/callout — e.g. an arbitration warning. Uses the
+     primary accent so it reads as important without being an error. */
+  .legal-notice { margin:0 0 28px; padding:1.25rem 1.5rem; border:1px solid hsl(var(--border)); border-left:4px solid hsl(var(--primary)); border-radius: calc(var(--radius) + 0.4rem); background: hsl(var(--muted)); color: hsl(var(--foreground)); font-size:.9rem; font-weight:500; line-height:1.55; }
+  .legal-notice p { margin:.35rem 0; }
+  .legal-notice p:first-child { margin-top:0; }
+  .legal-notice p:last-child { margin-bottom:0; }
+  .legal-notice a { color: hsl(var(--primary)); }
   /* Each top-level markdown section (## heading + its prose) becomes a card,
      matching the brand-guide / landing-page legal layout. */
   .legal-body h2 { font-family: var(--font-heading); font-size:1.1rem; font-weight:700; margin:0 0 12px; }
@@ -117,6 +124,10 @@ export interface LegalPageData {
   activeId: string;
   title: string;
   lastUpdated: string;
+  /** Rendered notice HTML (already markdown-rendered + placeholder-
+   *  resolved). Empty string = no notice. Shown as a prominent callout
+   *  above the body. */
+  noticeHtml: string;
   contentHtml: string;
   /** The active doc's slugs by locale — drives the language switcher + hreflang. */
   slugs: Record<string, string | null | undefined>;
@@ -175,6 +186,7 @@ ${hreflangs}
       ${langSwitcher}
     </div>
     <p class="legal-updated">${esc(t.updated)}: ${esc(formatDate(data.lastUpdated, data.lang))}</p>
+    ${data.noticeHtml ? `<aside class="legal-notice" role="note">${data.noticeHtml}</aside>` : ''}
     <div class="legal-body">${sectionize(data.contentHtml)}</div>
   </main>
 </div>

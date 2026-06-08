@@ -22,6 +22,9 @@ export interface LegalDoc {
   slugs: LocalizedString;
   title: LocalizedString;
   description: LocalizedString | null;
+  /** Prominent localized callout shown at the top of the doc (e.g. an
+   *  arbitration / class-action-waiver warning). Null = no notice. */
+  notice: LocalizedString | null;
   bodyMd: LocalizedString;
   lastUpdated: string;
   status: 'active' | 'archived';
@@ -34,6 +37,8 @@ export interface LegalDocUpsert {
   title: LocalizedString;
   /** undefined preserves existing; null clears; object replaces. */
   description?: LocalizedString | null;
+  /** undefined preserves existing; null clears; object replaces. */
+  notice?: LocalizedString | null;
   bodyMd: LocalizedString;
   lastUpdated: string;
   status?: 'active' | 'archived';

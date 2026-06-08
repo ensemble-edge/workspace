@@ -58,6 +58,7 @@ export interface LegalDocRow {
   slugs_json: string;
   title_json: string;
   description_json: string | null;
+  notice_json: string | null;
   body_md_json: string;
   last_updated: string;
   status: string;
@@ -71,6 +72,7 @@ export function parseDocRow(row: LegalDocRow): LegalDoc {
     slugs: parseJson(row.slugs_json),
     title: parseJson(row.title_json),
     description: row.description_json ? parseJson(row.description_json) : null,
+    notice: row.notice_json ? parseJson(row.notice_json) : null,
     bodyMd: parseJson(row.body_md_json),
     lastUpdated: row.last_updated,
     status: row.status === 'archived' ? 'archived' : 'active',

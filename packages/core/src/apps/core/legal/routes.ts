@@ -56,7 +56,7 @@ export function registerLegalRoutes(
       : `WHERE workspace_id = ? AND status = 'active'`;
 
     const { results } = await c.env.DB.prepare(
-      `SELECT id, slugs_json, title_json, description_json, body_md_json,
+      `SELECT id, slugs_json, title_json, description_json, notice_json, body_md_json,
               last_updated, status, sort_order
          FROM legal_docs ${where}
         ORDER BY sort_order ASC, id ASC`,
@@ -89,7 +89,7 @@ export function registerLegalRoutes(
     // Return the (possibly newly-seeded) active set so the client can
     // refresh without a second round-trip.
     const { results } = await c.env.DB.prepare(
-      `SELECT id, slugs_json, title_json, description_json, body_md_json,
+      `SELECT id, slugs_json, title_json, description_json, notice_json, body_md_json,
               last_updated, status, sort_order
          FROM legal_docs WHERE workspace_id = ? AND status = 'active'
         ORDER BY sort_order ASC, id ASC`,
@@ -107,7 +107,7 @@ export function registerLegalRoutes(
 
     const id = c.req.param('id');
     const row = await c.env.DB.prepare(
-      `SELECT id, slugs_json, title_json, description_json, body_md_json,
+      `SELECT id, slugs_json, title_json, description_json, notice_json, body_md_json,
               last_updated, status, sort_order
          FROM legal_docs WHERE workspace_id = ? AND id = ?`,
     )
@@ -173,7 +173,7 @@ export function registerLegalRoutes(
 
     // Read existing row (for the version snapshot + field preservation).
     const existing = await c.env.DB.prepare(
-      `SELECT id, slugs_json, title_json, description_json, body_md_json,
+      `SELECT id, slugs_json, title_json, description_json, notice_json, body_md_json,
               last_updated, status, sort_order
          FROM legal_docs WHERE workspace_id = ? AND id = ?`,
     )
@@ -191,6 +191,14 @@ export function registerLegalRoutes(
           ? null
           : JSON.stringify(body.description);
 
+    // notice: same undefined/null/object semantics as description.
+    const noticeJson: string | null =
+      body.notice === undefined
+        ? (existing?.notice_json ?? null)
+        : body.notice === null
+          ? null
+          : JSON.stringify(body.notice);
+
     // status / sortOrder: preserve existing when absent.
     const status =
       body.status ?? (existing?.status === 'archived' ? 'archived' : 'active');
@@ -203,15 +211,16 @@ export function registerLegalRoutes(
       stmts.push(
         c.env.DB.prepare(
           `INSERT INTO legal_docs_versions
-             (workspace_id, doc_id, slugs_json, title_json, description_json,
+             (workspace_id, doc_id, slugs_json, title_json, description_json, notice_json,
               body_md_json, last_updated, status, saved_by, saved_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).bind(
           workspace.id,
           id,
           existing.slugs_json,
           existing.title_json,
           existing.description_json,
+          existing.notice_json,
           existing.body_md_json,
           existing.last_updated,
           existing.status,
@@ -225,14 +234,15 @@ export function registerLegalRoutes(
     stmts.push(
       c.env.DB.prepare(
         `INSERT INTO legal_docs
-           (workspace_id, id, slugs_json, title_json, description_json,
+           (workspace_id, id, slugs_json, title_json, description_json, notice_json,
             body_md_json, last_updated, status, sort_order,
             created_by, created_at, updated_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (workspace_id, id) DO UPDATE SET
            slugs_json = excluded.slugs_json,
            title_json = excluded.title_json,
            description_json = excluded.description_json,
+           notice_json = excluded.notice_json,
            body_md_json = excluded.body_md_json,
            last_updated = excluded.last_updated,
            status = excluded.status,
@@ -245,6 +255,7 @@ export function registerLegalRoutes(
         JSON.stringify(body.slugs),
         JSON.stringify(body.title),
         descJson,
+        noticeJson,
         JSON.stringify(body.bodyMd),
         body.lastUpdated,
         status,
