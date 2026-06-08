@@ -128,6 +128,9 @@ export interface LegalPageData {
    *  resolved). Empty string = no notice. Shown as a prominent callout
    *  above the body. */
   noticeHtml: string;
+  /** Favicon <link> suite from the workspace brand (built by the route
+   *  handler via buildFaviconHeadSnippet). Empty string = none. */
+  faviconHtml: string;
   contentHtml: string;
   /** The active doc's slugs by locale — drives the language switcher + hreflang. */
   slugs: Record<string, string | null | undefined>;
@@ -169,6 +172,7 @@ export function renderLegalPage(data: LegalPageData): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(data.title)}</title>
 ${hreflangs}
+${data.faviconHtml}
 <style>${STYLE}</style>
 <!-- Dogfood the workspace brand: load the same tokens the shell + brand
      guide use. Loaded AFTER the fallback <style> so /brand/css :root wins. -->
@@ -195,11 +199,11 @@ ${hreflangs}
 }
 
 /** Small 404 page (spec §6.1) — site-default-locale, no sidebar. */
-export function renderLegalNotFound(lang: string): string {
+export function renderLegalNotFound(lang: string, faviconHtml = ''): string {
   const t = dict(lang);
   return `<!DOCTYPE html>
 <html lang="${esc(lang)}">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(t.notFound)}</title><style>${STYLE}</style><link rel="stylesheet" href="/brand/css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(t.notFound)}</title>${faviconHtml}<style>${STYLE}</style><link rel="stylesheet" href="/brand/css"></head>
 <body><main class="legal-main" style="max-width:48rem;margin:0 auto;"><h1>${esc(t.notFound)}</h1></main></body>
 </html>`;
 }

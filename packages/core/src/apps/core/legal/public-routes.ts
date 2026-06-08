@@ -47,6 +47,25 @@ async function isLegalPublicEnabled(c: Ctx, workspaceId: string): Promise<boolea
   return (await getSetting(c.env, workspaceId, 'legal_public_enabled')) === 'true';
 }
 
+/**
+ * Build the workspace brand favicon <link> suite for the page <head>.
+ * Dogfoods the same `/_ensemble/brand/favicon.*` endpoints (honoring the
+ * operator's asset alias) that the login page and brand guide use — so
+ * the public legal pages carry the workspace's icon, not a blank tab.
+ * Uses root-relative URLs (baseUrl ''), like the /brand/css link.
+ */
+async function legalFavicon(c: Ctx, workspaceId: string): Promise<string> {
+  try {
+    const { buildFaviconHeadSnippet } = await import('../../../services/brand-render/favicon');
+    const { getSetting } = await import('../../../services/workspace-settings');
+    const aliasPath = (await getSetting(c.env, workspaceId, 'asset_public_alias_path')).trim();
+    const iconBasePath = aliasPath ? `/${aliasPath}/brand` : '/_ensemble/brand';
+    return buildFaviconHeadSnippet({ baseUrl: '', iconBasePath });
+  } catch {
+    return '';
+  }
+}
+
 export function registerLegalPublicRoutes(
   app: Hono<{ Bindings: Env; Variables: ContextVariables }>,
 ): void {
@@ -212,11 +231,11 @@ export function registerLegalPublicRoutes(
       .first<{ slugs_json: string }>();
 
     if (!first) {
-      return c.html(renderLegalNotFound(lang), 404);
+      return c.html(renderLegalNotFound(lang, await legalFavicon(c, workspace.id)), 404);
     }
     const doc = parseDocRow({ ...EMPTY_ROW, slugs_json: first.slugs_json });
     const slug = loc(doc.slugs, lang) || Object.values(doc.slugs).find(Boolean) || '';
-    if (!slug) return c.html(renderLegalNotFound(lang), 404);
+    if (!slug) return c.html(renderLegalNotFound(lang, await legalFavicon(c, workspace.id)), 404);
     return c.redirect(`/legal/${slug}`, 302);
   });
 
@@ -234,7 +253,7 @@ export function registerLegalPublicRoutes(
     )
       .bind(workspace.id, slug)
       .first<{ doc_id: string; locale: string }>();
-    if (!slugRow) return c.html(renderLegalNotFound('es'), 404);
+    if (!slugRow) return c.html(renderLegalNotFound('es', await legalFavicon(c, workspace.id)), 404);
 
     const lang = c.req.query('lang') || slugRow.locale;
 
@@ -247,7 +266,7 @@ export function registerLegalPublicRoutes(
     )
       .bind(workspace.id, slugRow.doc_id)
       .first<LegalDocRow>();
-    if (!row) return c.html(renderLegalNotFound(lang), 404);
+    if (!row) return c.html(renderLegalNotFound(lang, await legalFavicon(c, workspace.id)), 404);
 
     // The ToC: all active docs, ordered.
     const { results: tocRows } = await c.env.DB.prepare(
@@ -279,6 +298,7 @@ export function registerLegalPublicRoutes(
       title: loc(doc.title, lang, slugRow.locale),
       lastUpdated: doc.lastUpdated,
       noticeHtml,
+      faviconHtml: await legalFavicon(c, workspace.id),
       contentHtml,
       slugs: doc.slugs,
       toc: (tocRows ?? []).map((r) => {
