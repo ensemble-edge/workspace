@@ -13,6 +13,7 @@ import { brandApp } from './brand';
 import { adminApp } from './admin';
 import { peopleApp } from './people';
 import { appsApp } from './apps';
+import { legalApp } from './legal';
 
 // v0.1.77: auditApp removed from the core-app registry. The audit
 // log viewer is now a tab in Settings (Settings → Audit Log), not a
@@ -26,6 +27,7 @@ export const coreApps: CoreAppDefinition[] = [
   adminApp,
   peopleApp,
   appsApp,
+  legalApp,
 ];
 
 /**

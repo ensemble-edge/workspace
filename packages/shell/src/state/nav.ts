@@ -118,6 +118,8 @@ function getDefaultSections(): NavSection[] {
         { id: 'people', label: 'People', icon: 'users', path: '/people' },
         // v0.1.84: brand admin moved to /brand-app
         { id: 'brand', label: 'Brand', icon: 'palette', path: '/brand-app' },
+        // core:legal CMS — bare /legal is the public pages, /legal-app is admin.
+        { id: 'legal', label: 'Legal', icon: 'scale', path: '/legal-app' },
         { id: 'settings', label: 'Settings', icon: 'settings', path: '/settings' },
       ],
     },

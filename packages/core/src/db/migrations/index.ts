@@ -19,6 +19,7 @@ import { migration as m011 } from './011_ai_tier_provider';
 import { migration as m012 } from './012_workspace_api_keys';
 import { migration as m013 } from './013_guest_secrets';
 import { migration as m014 } from './014_users_invite_pending';
+import { migration as m015 } from './015_legal_docs';
 
 /**
  * All migrations in order.
@@ -39,4 +40,5 @@ export const migrations: Migration[] = [
   m012,
   m013,
   m014,
+  m015,
 ];

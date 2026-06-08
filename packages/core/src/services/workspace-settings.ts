@@ -37,7 +37,25 @@ export type SettingKey =
   // an existing CF project that already binds R2 under a different
   // name (e.g. 'FILES', 'STORAGE') can change this so Ensemble reads
   // c.env[their-name] without forcing a rename or a duplicate binding.
-  | 'r2_binding_name';
+  | 'r2_binding_name'
+  // v0.1.99+: Legal Center (core:legal) placeholder values. These five
+  // keys are substituted into legal-doc markdown at render time by the
+  // legal-placeholders resolver. Operators edit them in the Legal app's
+  // "Legal copy" card. Empty string = the bracketed token is erased
+  // entirely from the rendered output (never shown to the visitor).
+  | 'legal.company_name'
+  | 'legal.business_address'
+  | 'legal.support_email'
+  | 'legal.support_phone'
+  | 'legal.notices_email'
+  // When 'true', the public legal surfaces — the crawlable /legal/*
+  // pages and the /api/legal/* read API — are reachable. When 'false'
+  // or unset, they 404. Off by default: an operator reviews the seeded
+  // (unreviewed) docs and publishes deliberately. The CMS surface
+  // (/legal-app, /_ensemble/core/legal/*) is unaffected — operators can
+  // always prepare docs before publishing. Mirrors
+  // public_brand_guide_enabled.
+  | 'legal_public_enabled';
 
 export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
   // 30 days — matches typical workspace expectations. Operators can
@@ -54,6 +72,16 @@ export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
   // project (where R2 may already be bound under another name) can
   // change this.
   r2_binding_name: 'R2',
+  // Legal Center placeholder defaults. Mirror the spec's §1.4 table.
+  // company_name/support_email/notices_email ship with Curalisto-shaped
+  // defaults; address + phone default empty (operator fills them in).
+  'legal.company_name': 'Curalisto',
+  'legal.business_address': '',
+  'legal.support_email': 'hello@curalisto.com',
+  'legal.support_phone': '',
+  'legal.notices_email': 'legal@curalisto.com',
+  // Public legal pages + read API off until the operator publishes.
+  legal_public_enabled: 'false',
 };
 
 /**

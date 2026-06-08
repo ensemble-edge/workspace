@@ -101,6 +101,12 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   // to live at /brand/* alongside the HTML guide. Same posture: cross-
   // origin embeds (consumer sites, partner pages) fetch with Origin: *.
   app.use('/brand/*', publicCors());
+  // Legal Center public surfaces: the JSON read API (/api/legal/*) is
+  // consumed cross-origin by landing pages + other guest apps, and the
+  // crawlable HTML pages (/legal/*) are public. Same posture as brand.
+  app.use('/api/legal/*', publicCors());
+  app.use('/legal', publicCors());
+  app.use('/legal/*', publicCors());
   app.use('/_ensemble/version', publicCors());
   app.use('/favicon.svg', publicCors());
   app.use('/favicon.ico', publicCors());
@@ -228,6 +234,11 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   // brand-guide consumers, so we attach auth as optional — passes
   // through when no cookie is present and only gates per-handler.
   app.use('/_ensemble/core/brand/*', auth({ required: false }));
+  // Legal Center CMS surface is operator-only (doc CRUD + the five
+  // legal.* placeholder settings) — require auth. The public read API
+  // and crawlable pages live on /api/legal/* and /legal/* and carry no
+  // auth guard.
+  app.use('/_ensemble/core/legal/*', auth());
   // v0.1.15: workspace policy (settings) and content locales.
   app.use('/_ensemble/settings/*', auth());
   app.use('/_ensemble/locales/*', auth());
@@ -481,6 +492,11 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
           // reserved for the public-facing brand guide (always-public,
           // shareable, doesn't 302 admins into the admin UI).
           { id: 'brand', label: 'Brand', icon: 'palette', path: '/brand-app' },
+          // core:legal — CMS at /legal-app (bare /legal is the public,
+          // server-rendered legal pages). Recomputed here each request,
+          // so existing workspaces get the entry the moment this ships —
+          // no nav_config backfill needed.
+          { id: 'legal', label: 'Legal', icon: 'scale', path: '/legal-app' },
           { id: 'apps-manage', label: 'Apps', icon: 'grid-3x3', path: '/apps' },
           { id: 'knowledge', label: 'Knowledge', icon: 'book-open', path: '/knowledge' },
           // v0.1.78: audit log moved into Settings → Audit Log tab; no

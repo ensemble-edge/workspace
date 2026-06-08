@@ -19,6 +19,7 @@ import {
 } from '../utils/cookies';
 import { signAccessToken, signRefreshToken, getJwtSecret } from '../utils/jwt';
 import { markBootstrapComplete } from '../middleware/bootstrap';
+import { buildLegalSeedStatements } from '../apps/core/legal/seed';
 
 /**
  * Bootstrap form data.
@@ -267,6 +268,11 @@ export function createBootstrapRoutes(config: ResolvedConfig) {
           `INSERT INTO audit_log (id, workspace_id, actor_id, actor_handle, action, resource_type, resource_id, details_json, created_at)
            VALUES (?, ?, ?, ?, 'workspace.bootstrapped', 'workspace', ?, '{}', ?)`
         ).bind(generateId('audit'), workspaceId, userId, handle, workspaceId, now),
+
+        // Seed the six starter legal docs (es + en) + their slug
+        // junction rows. Unreviewed placeholder copy operators rewrite
+        // in the Legal app. See apps/core/legal/seed.ts.
+        ...buildLegalSeedStatements(c.env.DB, workspaceId, now, userId),
       ]);
 
       // Mark bootstrap complete in KV
@@ -363,6 +369,7 @@ function getDefaultNavConfig() {
         items: [
           { id: 'people', label: 'People', icon: 'users', path: '/people' },
           { id: 'brand', label: 'Brand', icon: 'palette', path: '/brand' },
+          { id: 'legal', label: 'Legal', icon: 'scale', path: '/legal-app' },
           { id: 'settings', label: 'Settings', icon: 'settings', path: '/settings' },
         ],
       },
