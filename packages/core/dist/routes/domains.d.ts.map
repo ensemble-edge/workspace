@@ -1,0 +1,1 @@
+{"version":3,"file":"domains.d.ts","sourceRoot":"","sources":["../../src/routes/domains.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;;GAaG;AAEH,OAAO,EAAE,IAAI,EAAgB,MAAM,MAAM,CAAC;AAC1C,OAAO,KAAK,EAAE,GAAG,EAAE,gBAAgB,EAAE,MAAM,UAAU,CAAC;AAGtD,KAAK,MAAM,GAAG;IAAE,QAAQ,EAAE,GAAG,CAAC;IAAC,SAAS,EAAE,gBAAgB,CAAA;CAAE,CAAC;AAW7D,wBAAgB,mBAAmB,IAAI,IAAI,CAAC,MAAM,CAAC,CAyFlD"}
