@@ -312,6 +312,36 @@ Client (`shell/src/apps/core/apps/AppsPage.tsx` — today lists guest only):
 - Toggle migration: `legal_public_enabled` value carries into
   `settings.published`.
 
+### 7. SDK docs (REQUIRED — ships with the feature, not after)
+
+The App Manager changes the **guest-app developer contract**, so
+`docs/spec/05-guest-sdk.md` must be updated in the same change set — a
+guest author can't adopt mounts without docs. Update:
+
+- **New "App mounts & routing" section.** How a guest app declares where
+  it serves: it no longer assumes only the fixed gateway path
+  (`/_ensemble/apps/:id/*`); an operator can mount it at a public
+  `host + path` via the App Manager, and (Track B) the workspace dispatches
+  there by service binding. Document what the guest can rely on:
+  request path/prefix it receives, that the gateway still injects
+  workspace context + auth headers, and that mounts are operator-managed
+  (the guest declares a *suggested* mount in its manifest; the operator
+  confirms in the UI).
+- **The auth-boundary fact** (the only prose residue from §3a): the
+  gateway is for authenticated operator tools; anonymous consumer
+  surfaces need their own worker — link, don't re-explain.
+- **Enable/disable semantics** for guests: a disabled app 404s its mount
+  and drops from nav; reuse the publish vs. enabled distinction.
+- **Cross-link** the already-shipped `publicDomain` section (v0.1.108) —
+  mounts + brand domain compose (a guest mounted at `<brand>.com/foo`
+  should build shareable URLs via `publicDomain`).
+- Add a **manifest field** if the design introduces one (e.g.
+  `mount: { path, host? }` as a *suggestion* the operator accepts) — and
+  document it in the manifest reference within the same file.
+
+This step is a checklist gate on the feature being "done," same as the
+brand-domain release added the `publicDomain` SDK section.
+
 ---
 
 ## Surfaces touched (review checklist)
@@ -326,8 +356,9 @@ Client (`shell/src/apps/core/apps/AppsPage.tsx` — today lists guest only):
 | `apps/core/legal/public-routes.ts` | publish gate reads `settings.published` |
 | `apps/core/brand/routes.ts` | guide gate reads `settings.published` |
 | `routes/bootstrap.ts` | seed installed_apps for new workspaces |
-| `shell/src/apps/core/apps/AppsPage.tsx` | list all apps + mounts + domains UI |
+| `shell/src/apps/core/apps/AppsPage.tsx` | list all apps + mounts + routing-setup + domains UI |
 | `shell/src/apps/core/legal/LegalPage.tsx` | remove PublishCard (moves to App Manager) |
+| `docs/spec/05-guest-sdk.md` | **REQUIRED** — new "App mounts & routing" section + manifest field; ships WITH the feature (§7) |
 | — | `workspace_domains` table, `resolveByDomain`, CF route, `absoluteUrl`: see `docs/plan/brand-domain.md` (Layer A, ships first) |
 
 ---
@@ -375,3 +406,8 @@ Client (`shell/src/apps/core/apps/AppsPage.tsx` — today lists guest only):
 6. **Track B** gateway dispatch (claim `<brand>.com/*`, service-binding
    forward by mount map) — the "one place, period" payoff; do last, with
    the error-isolation + debug-header guards from the risks above.
+
+**SDK docs (§7) update with the step that introduces the contract change**
+they describe — mounts/manifest docs land with step 4 (mount config), not
+deferred to the end. A guest author shouldn't see the feature before its
+docs.
