@@ -1,14 +1,23 @@
 # App Manager — Implementation Plan (Phase 1 + Domain Mapping)
 
-> **Status:** plan, awaiting green light. No code yet.
-> **Scope (approved):** full — app registry + enable/disable (Phase 1)
-> AND mount/hostname mapping (Phase 2), in one effort.
+> **Status:** plan, awaiting green light for the App Manager itself.
+> **Layer A SHIPPED (v0.1.108):** `workspace_domains` table,
+> `resolveByDomain`, the `brandDomain` request context, `absoluteUrl`,
+> the Domains API (`/_ensemble/domains`) + Settings→Domains UI, and the
+> legal renderer's brand-domain canonical/hreflang/noindex. See
+> `docs/plan/brand-domain.md`. The App Manager (below) builds on it.
+> **Scope (approved):** app registry + enable/disable (Phase 1) AND
+> per-app mount config (Phase 2 / Layer B), in one effort.
 > **Design rationale:** see `docs/backlog/app-manager.md`. This doc is the
 > build-ready step list grounded in actual files/seams.
 > **Decision locked:** app-level `enabled` and `published` are DISTINCT
 > axes. `enabled` = installed + in nav (App Manager owns it). `published`
 > = public surface live (app-specific, e.g. `legal_public_enabled`). An
 > app can be enabled-but-unpublished.
+> **Folds in (this revision):** the "routing convention" concern — instead
+> of a prose convention doc tenants hand-copy, the App Manager owns the
+> per-app mount map + emits the recommended CF routes block (§3a). Only
+> the irreducible "gateway is auth-only" fact stays a short doc.
 
 ---
 
@@ -147,21 +156,137 @@ This single gate replaces the hand-rolled `legal_public_enabled` /
 `public_brand_guide_enabled` 404 checks for the *enabled* + *mounted*
 axes. (The *published* axis stays app-specific — see §5.)
 
+### 3a. Routing model — convention as DATA, not a doc
+
+> **Why this section exists:** a recurring tenant pain is "which surface
+> lives in which worker / what CF zone routes do I need," and the
+> tempting fix is a prose "routing convention" doc that tenants hand-copy
+> into wrangler.toml. That doc is *unenforced state* — it rots into the
+> "brittle zone-route configs" it was meant to prevent. The App Manager's
+> job is to make the convention **data the platform reads + emits**, so
+> the tenant doesn't reinvent the split. This folds in the routing-doc
+> proposal: most of it becomes mount config; only the irreducible facts
+> below stay documentation.
+
+**The surface taxonomy (the load-bearing distinction).** Every public
+path falls into one of three buckets, and the bucket determines the
+worker — this is what the App Manager encodes per app:
+
+| Surface | Auth | Where it runs | App Manager role |
+|---|---|---|---|
+| Operator tool (guest app) | workspace session / API key | guest worker, proxied via the gateway `/_ensemble/apps/:id/*` | lists it, enable/disable, but its mount is the FIXED gateway path |
+| CMS-authored public page (`/legal`, `/brand`) | anonymous + crawlers | tenant-host worker (SDK core apps) | owns the mount: host + path (Layer B) |
+| Consumer UI/API (quiz, signup, webhooks) | anonymous + third parties | a separate customer-facing worker | NOT App-Manager-managed — it's tenant code on its own worker |
+
+**Irreducible fact #1 — the gateway is auth-only (keep as a short doc).**
+`/_ensemble/apps/*` is fronted by `auth()`; it injects workspace session
++ context + audit. Anonymous consumer endpoints (a patient API, a Stripe/
+Twilio webhook) **cannot** proxy through it — they'd 401. This is by
+design, not a gap the App Manager closes. So consumer surfaces live on
+their own worker, full stop. This single fact is the only part of the
+routing-convention prompt that should remain prose — a ~1-page note,
+cross-linked, not a 1200-word convention bible.
+
+**Irreducible fact #2 — CF zone routes are deploy-time infra.** A worker
+only receives traffic Cloudflare routes to it (`wrangler.toml [[routes]]`).
+The platform can't fully generate these at runtime. BUT the set is small
+and stable — one `/*`-ish block per worker, not per-feature. So:
+
+- The App Manager owns the **intra-worker mount map**: which app answers
+  `/legal`, `/brand`, `/foo` *within the tenant-host worker* (the mount
+  gate in §3 enforces it).
+- It does NOT own the consumer worker's internal routes (that's tenant
+  code), but it can **emit the recommended zone-route block** a tenant
+  needs — turning "reinvent the split" into "the platform shows you the
+  exact `[[routes]]` to paste." A read-only, copyable artifact in the
+  App Manager UI / a `GET /_ensemble/core/apps/routes-hint` endpoint.
+
+**What this kills:** per-feature route sprawl and the hand-maintained
+convention table. An app declares its mount (host + path) once in the App
+Manager; the gate enforces it; the routes-hint tells the operator the one
+infra block to set. No tenant re-derives the taxonomy from a doc.
+
+### 3b. Making mounts real — "register an app, configure its routing in one place"
+
+> **The goal, in the operator's words:** *"register a guest app and
+> configure ALL routing in the UI. One place. Period."* The mount map
+> (§3a) is the **single route registry** — there is NO separate
+> `workspace_routes` table; an app's mount IS its route. This section is
+> only about *how a declared mount becomes a live route*. Two mechanisms;
+> we lead with the one that actually delivers "one place."
+
+**Track B — gateway dispatch (primary; the "one place" answer).**
+The workspace worker claims a broad zone route (`<brand>.com/*`) and, per
+request, dispatches to the right target based on the App Manager mount
+map in D1:
+- core-app paths (`/legal`, `/brand`) → handled in-process (already are).
+- guest-app mounts → forwarded to the guest worker via **service
+  binding** (CF Worker→Worker), the same privileged-proxy the gateway
+  (`/_ensemble/apps/:id/*`) already uses — just at an operator-chosen
+  public path instead of the fixed gateway path.
+- unmatched → fall through (404 or the catch-all SPA, as today).
+
+Why this is the right primary now, not a far-future option:
+- **The workspace is already on this path.** v0.1.108 made it the host
+  resolver for the whole tenant domain (`resolveByDomain` +
+  `brandDomain`), and it already serves `/legal/*`, `/brand/*`,
+  `/_ensemble/*`. Claiming `<brand>.com/*` and dispatching is the natural
+  extension — the "workspace becomes a hot path" cost is *already partly
+  paid*, not a new architectural burden.
+- **Route changes are instant** — edit a mount in the UI, it's live; no
+  redeploy, no CLI, no CI drift check. That is "one place, period."
+- Cost, named honestly: ~1–3ms per-request hop for dispatched guests, and
+  the workspace worker is now critical-path for matched public traffic.
+  Acceptable given it already resolves the domain; revisit if a tenant
+  has latency-critical anonymous volume.
+
+**Track A — codegen (fallback, for what Track B can't reach).**
+Service bindings are CF-Worker→Worker only — they can't dispatch to a
+Pages project, an external HTTP service, or a non-CF worker. For those
+*tenant-owned* surfaces, the App Manager can't be the runtime router. So
+for them it falls back to **emitting** the recommended `[[routes]]` block
+(the §3a routes-hint) the tenant pastes into that worker's wrangler.toml.
+Same registry (the mount map); different realization. This is the honest
+edge of "one place": the workspace runtime-routes everything it can
+service-bind to; for everything else it *tells you* the one routes block.
+
+**Migration story (existing tenants with hand-written routes).** A
+one-time `import-routes` step reads each worker's wrangler.toml, populates
+the App Manager mount map, and shows the operator a review before they
+delete the wrangler entries. Same "operator-managed in UI, code follows"
+philosophy as the brand-domain + gateway work this builds on.
+
+**Why this is NOT a separate RFC / table.** The routing-RFC proposal's
+`workspace_routes` table is the App Manager's `mounts` config under
+another name — building both would create two parallel route systems. The
+mount map is the registry; Track A/B are how it's realized. The only
+genuinely-prose residue is the "gateway is auth-only" fact (§3a).
+
 ### 4. App Manager API + UI
 Server (`apps/core/apps/routes.ts` — currently an empty stub):
 - `GET  /_ensemble/core/apps` → `listApps()` (built-in + guest).
 - `PATCH /_ensemble/core/apps/:id` → set `status`, edit `mounts`, edit
   app settings. Rejects disabling a `governable:false` app. Rejects a
-  mount whose host isn't a verified `workspace_domain`.
-- `GET  /_ensemble/core/domains` / `POST` (add) / `POST /:domain/verify`
-  → manage `workspace_domains`.
+  mount whose host isn't a registered `workspace_domain`.
+- `GET  /_ensemble/core/apps/routes-hint` → the recommended `[[routes]]`
+  wrangler blocks the tenant should set, derived from the app mount map +
+  the surface taxonomy (§3a). Read-only, copyable. This is the artifact
+  that replaces the hand-maintained routing-convention table.
+- Domains management already shipped in v0.1.108 at **`/_ensemble/domains`**
+  (`GET`/`POST`/`DELETE`) — the App Manager UI reuses it; no new domains
+  endpoint. (Verification, if added later, extends that route group.)
 
 Client (`shell/src/apps/core/apps/AppsPage.tsx` — today lists guest only):
-- List ALL apps (core + guest) with tier badge, status, base path.
+- List ALL apps (core + guest) with tier badge, status, base path, and
+  surface kind (operator tool / public page / consumer — §3a taxonomy).
 - Per-app row: **Enabled** switch (hidden when `governable:false`); a
-  **Mounts** editor (list of host+path, "Add domain" → dropdown of
-  verified domains); app-specific settings (e.g. legal's Publish toggle).
-- A **Domains** section to add + verify tenant domains.
+  **Mounts** editor (host+path; host dropdown = the workspace's
+  registered brand domains, already at `/_ensemble/domains`); app-specific
+  settings (e.g. legal's Publish toggle).
+- A **"Routing setup"** panel surfacing `routes-hint` — the copyable
+  `[[routes]]` block — so a tenant configures CF zone routes once from
+  what the platform tells them, instead of re-deriving a convention.
+- (Domains themselves are managed in Settings → Domains, shipped already.)
 
 ### 5. Migrate the scattered toggles in
 - **Legal:** move the publish toggle out of `LegalPage.tsx`'s PublishCard
@@ -220,12 +345,33 @@ Client (`shell/src/apps/core/apps/AppsPage.tsx` — today lists guest only):
 5. **`published` migration** — one-time copy of `legal_public_enabled` /
    `public_brand_guide_enabled` into `settings.published`, then retire
    the old keys (or keep as read-through shim for a release).
+6. **Gateway dispatch (Track B) blast radius** — claiming `<brand>.com/*`
+   makes the workspace worker critical-path for matched public traffic.
+   Acceptable (it already resolves the domain), but: error-isolation (a
+   guest worker down shouldn't 500 the whole zone), and a clear "which
+   worker served this" debug header.
+7. **Service-binding limit** — Track B dispatch only reaches CF
+   Worker→Worker targets. Pages projects / external HTTP / non-CF workers
+   fall to Track A (emitted routes-hint). The UI must make clear which
+   apps are runtime-routable vs. routes-hint-only.
+8. **Env-specific routes (prod vs preview)** — does a mount apply to all
+   envs, or per-env? (Track A codegen would need per-env blocks.)
+9. **Pre-existing external CF routes** — a tenant's Pages project already
+   on the zone must not be shadowed by the workspace's `<brand>.com/*`;
+   dispatch must fall through cleanly for paths no app claims.
 
 ## Suggested sequencing (when greenlit)
 
-1. Registry service + read-only App Manager list (no behavior change) —
-   safe, immediately shows all apps.
+> Layer A (`workspace_domains`, `resolveByDomain`, `absoluteUrl`, Domains
+> API + UI) **shipped in v0.1.108** — steps below are what remains.
+
+1. Registry service + read-only App Manager list (built-in + guest, with
+   status + surface kind) — no behavior change; immediately shows all apps.
 2. `installed_apps` seeding + enable/disable gate + nav reads registry.
-3. Migrate legal/brand toggles into the App Manager.
-4. `workspace_domains` + `resolveByDomain` + mount config + mount gate.
-5. CF route + domain verification (infra, last).
+3. Migrate legal/brand toggles (`published`) into the App Manager.
+4. Per-app **mount config** (host+path) + the mount gate (§3) reading it.
+5. **Track A** routes-hint (`/routes-hint` endpoint + "Routing setup" UI)
+   — safe, no runtime change; gives "the platform tells you the routes."
+6. **Track B** gateway dispatch (claim `<brand>.com/*`, service-binding
+   forward by mount map) — the "one place, period" payoff; do last, with
+   the error-isolation + debug-header guards from the risks above.
