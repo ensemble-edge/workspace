@@ -189,14 +189,27 @@ redirected (they keep working on `workspace.curalisto.com`), but the page
 they see still emits brand-domain canonicals. Three cheap conditions, no
 new machinery.
 
-### 6. Settings UI
-- A "Brand domain" field in the workspace Settings area (near
-  `legal_public_enabled`): list/add/remove `workspace_domains` rows.
-  Validate host format on write (no proto, no path, no trailing slash;
-  reject a domain already owned by another workspace — the PK does this,
-  surface it as a friendly 409).
-- An **"Allow search indexing"** switch for the Legal app (default off),
-  alongside the publish toggle. Off = noindex; on = crawlable + canonical.
+### 6. Settings UI — two homes, by scope (follows the existing convention)
+
+The shell already splits settings: **workspace-wide** settings live in the
+Admin/Settings page (`/settings` — tabs: General, Appearance, Connections,
+API Keys, Audit Log, Danger Zone), while **app-specific** settings live in
+that app's own Settings tab (e.g. legal's publish toggle is in the Legal
+app). Place the new controls accordingly:
+
+- **Workspace-wide → Settings page, NEW "Domains" tab** (`AdminPage.tsx`).
+  Brand domains serve *all* of a tenant's apps, so they're a workspace
+  concern, not a legal one. List/add/remove `workspace_domains` rows,
+  show verification status, include the DNS/CF custom-hostname setup
+  hint. Validate host format on write (no proto/path/trailing-slash;
+  reject a domain owned by another workspace — the PK enforces it,
+  surface a friendly 409). This tab is where the App Manager's domain
+  management later grows from.
+- **App-specific → the Legal app's Settings tab** (where the publish
+  toggle already is): the **"Allow search indexing"** switch (default
+  off; off = noindex, on = crawlable + canonical). An operator managing
+  legal pages sees publish + indexing together; domain setup is a
+  separate, workspace-level action.
 
 ### 7. Tests
 - Resolver: `resolveByDomain` resolves a row; unverified/unknown → null;
