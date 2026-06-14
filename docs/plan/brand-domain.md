@@ -96,6 +96,46 @@ ToC links, language switcher, `/brand/css`, asset paths — stays
 page. So the change surface is tiny: a handful of `<link>` tags, not
 every URL in the document.
 
+## Indexing control (noindex toggle)
+
+Most workspace public pages should NOT be indexed by search engines —
+operators want them reachable (linked from a footer, shared) without
+showing up in Google. Today the posture is hardcoded and inconsistent:
+the brand guide is noindex (both `<meta name="robots">` in
+`services/brand-guide.ts:152` AND an `X-Robots-Tag` header), while legal
+pages are deliberately crawlable. Replace the hardcoding with one
+operator toggle.
+
+**Granularity: per-app, default noindex.** One setting per public app
+(start with legal): `legal_allow_indexing` (workspace_settings, default
+`'false'`). When false → emit noindex; when true → crawlable. Default
+noindex means nothing gets indexed by accident; the operator opts the
+app in when they're ready (e.g. once Privacy/Terms are counsel-reviewed
+and final). Same shape as `legal_public_enabled`; in the App Manager
+model it becomes app-level config (`settings.allowIndexing`).
+
+**Enforcement: belt-and-suspenders, matching the brand guide.** When
+noindex:
+- `<meta name="robots" content="noindex, nofollow">` in the page `<head>`.
+- `X-Robots-Tag: noindex, nofollow` HTTP header (catches the JSON API +
+  any non-HTML response a crawler might reach; harder to miss than meta).
+
+**Interaction with canonical/hreflang (important — don't send mixed
+signals):** a noindex page should NOT also advertise canonical/hreflang
+that invite indexing of an alternate URL. Rule:
+- noindex (allowIndexing = false) → emit the robots noindex; **omit
+  canonical + hreflang** (or they contradict the noindex).
+- indexable (allowIndexing = true) → omit robots; **emit** the absolute
+  canonical + hreflang (the brand-domain work above).
+
+So `allowIndexing` is the switch that turns BOTH the noindex tags AND the
+SEO metadata on/off, inversely. One toggle, internally consistent.
+
+**Interaction with the 301 redirect (item 5):** unaffected — the redirect
+is about *which host* serves public traffic; noindex is about *whether
+the page is indexed at all*. They compose: a noindexed page that 301s to
+the brand domain simply isn't indexed under either host.
+
 ## Build steps
 
 ### 1. Migration `017_workspace_domains.ts`
@@ -124,15 +164,21 @@ their DNS/CF custom-hostname binding** — no workspace redeploy.
 *(This is the one external/infra step; document a tenant setup guide.)*
 
 ### 4. core:legal renderer (`render.ts` + `public-routes.ts`)
-- **Add** `<link rel="canonical" href="${absoluteUrl(c, '/legal/'+slug)}">`
-  (net-new — doesn't exist today).
-- **Qualify hreflang**: `href="${absoluteUrl(c, '/legal/'+localeSlug)}"`
-  instead of the bare path.
-- Leave ToC, language switcher, `/brand/css`, favicon **path-relative** —
-  they're correct as-is.
-- `renderLegalPage` is pure (takes `LegalPageData`); the route handler
-  computes the absolute URLs via `absoluteUrl(c, …)` and passes them in
-  (mirrors how `faviconHtml` is already threaded). Keeps render pure.
+Driven by `allowIndexing` (read once in the handler, passed into the pure
+renderer like `faviconHtml`):
+- **If indexable:** add `<link rel="canonical" href="${absoluteUrl(c,
+  '/legal/'+slug)}">` (net-new — doesn't exist today) and **qualify
+  hreflang** to absolute URLs.
+- **If noindex (default):** emit `<meta name="robots" content="noindex,
+  nofollow">` and OMIT canonical + hreflang (no mixed signals). Set the
+  `X-Robots-Tag: noindex, nofollow` response header in the handler too.
+- Leave ToC, language switcher, `/brand/css`, favicon **path-relative**
+  regardless — they're correct as-is.
+- `renderLegalPage` stays pure: add `allowIndexing: boolean` +
+  `canonicalUrl`/`hreflang` (already-absolute) to `LegalPageData`; the
+  handler computes them via `absoluteUrl(c, …)` and the setting.
+- Remove the hardcoded "deliberately crawlable / no noindex" comments —
+  posture is now operator-controlled.
 
 ### 5. Optional 301: workspace host → brand domain (SEO)
 In the `/legal/*` (and `/brand` guide) handlers: if the request Host is
@@ -144,18 +190,24 @@ they see still emits brand-domain canonicals. Three cheap conditions, no
 new machinery.
 
 ### 6. Settings UI
-A "Brand domain" field in the workspace Settings area (near
-`legal_public_enabled`): list/add/remove `workspace_domains` rows.
-Validate host format on write (no proto, no path, no trailing slash;
-reject a domain already owned by another workspace — the PK does this,
-surface it as a friendly 409).
+- A "Brand domain" field in the workspace Settings area (near
+  `legal_public_enabled`): list/add/remove `workspace_domains` rows.
+  Validate host format on write (no proto, no path, no trailing slash;
+  reject a domain already owned by another workspace — the PK does this,
+  surface it as a friendly 409).
+- An **"Allow search indexing"** switch for the Legal app (default off),
+  alongside the publish toggle. Off = noindex; on = crawlable + canonical.
 
 ### 7. Tests
 - Resolver: `resolveByDomain` resolves a row; unverified/unknown → null;
   duplicate-domain insert rejected by PK.
 - `absoluteUrl`: brand set → brand origin; unset → request host.
-- Renderer: canonical present + absolute; hreflang absolute; ToC/css
-  still relative.
+- Renderer (indexable): canonical present + absolute; hreflang absolute;
+  no robots meta; ToC/css still relative.
+- Renderer (noindex, default): robots meta + `X-Robots-Tag` header
+  present; canonical + hreflang ABSENT.
+- Toggle: `legal_allow_indexing` flips the renderer between the two
+  states.
 - Redirect: public + workspace-host + brand-set → 301; with session
   cookie → no redirect; brand-host → no redirect.
 - Existing tenant (no domain row) → zero behavior change (canonical
