@@ -1,0 +1,97 @@
+import { getR2Bucket } from '../r2-binding.js';
+import { googleFontR2Key } from './fonts.js';
+const inFlight = new Map();
+/**
+ * Ensure the (family, weight) Google Font is in R2. If already
+ * present, no-op. If missing, fetch TTF from Google Fonts and put.
+ *
+ * Idempotent. Cheap to call on every save. The R2 head-check is
+ * the only cost when the font is already installed.
+ */
+export async function installFontIfMissing(env, workspaceId, family, weight) {
+    const key = googleFontR2Key(family, weight);
+    // Already in-flight in this isolate — piggy-back.
+    const existing = inFlight.get(key);
+    if (existing)
+        return existing;
+    const promise = installFontInner(env, workspaceId, family, weight, key);
+    inFlight.set(key, promise);
+    try {
+        await promise;
+    }
+    finally {
+        inFlight.delete(key);
+    }
+}
+async function installFontInner(env, workspaceId, family, weight, r2Key) {
+    const r2 = await getR2Bucket(env, workspaceId);
+    if (!r2)
+        throw new Error('R2 bucket not configured for workspace');
+    // Head check — already installed? Done.
+    const head = await r2.head(r2Key);
+    if (head)
+        return;
+    // Get the TTF URL from Google Fonts CSS API (TTF, not WOFF2 —
+    // see file header for why).
+    const ttfUrl = await resolveGoogleFontTtfUrl(family, weight);
+    if (!ttfUrl) {
+        throw new Error(`No TTF URL found for ${family} ${weight} from Google Fonts. Family may not exist in the catalog.`);
+    }
+    const res = await fetch(ttfUrl);
+    if (!res.ok) {
+        throw new Error(`TTF fetch failed: ${res.status} for ${family} ${weight}`);
+    }
+    const ttfBytes = new Uint8Array(await res.arrayBuffer());
+    await r2.put(r2Key, ttfBytes, {
+        httpMetadata: { contentType: 'font/ttf' },
+        customMetadata: {
+            source: 'google-fonts',
+            family,
+            weight: String(weight),
+            installedAt: new Date().toISOString(),
+        },
+    });
+}
+/**
+ * Ask Google Fonts CSS API for the TTF URL of a (family, weight)
+ * combination. Returns null when Google can't serve this family +
+ * weight combination (typo, missing weight, etc.).
+ *
+ * The Android 2.3 User-Agent is what gets us raw TTF. Verified
+ * against the Google Fonts CSS API directly — UA negotiation matrix:
+ *   Modern Chrome/Safari/Firefox  → WOFF2 (compressed, Brotli)
+ *   Old Safari / Opera Mobile     → WOFF  (compressed, zlib)
+ *   IE 6 / 8                      → EOT   (Microsoft proprietary)
+ *   Android 2.3 browser           → TTF   (uncompressed) ✓
+ *
+ * The Android 2.3 UA returns a CSS @font-face block like:
+ *   src: url(https://fonts.gstatic.com/s/.../something.ttf) format('truetype');
+ *
+ * We parse the .ttf URL with a regex. If Google ever changes the
+ * format-negotiation logic we'll need to update this — but the API
+ * has been stable since 2011 and changing it would break the long
+ * tail of legacy mobile browsers Google still supports.
+ */
+async function resolveGoogleFontTtfUrl(family, weight) {
+    const familyParam = encodeURIComponent(family).replace(/%20/g, '+');
+    // css API (not css2) — the older API has a simpler response shape
+    // that's easier to parse with a single regex. Both APIs cover the
+    // same ~1900-family catalog.
+    const url = `https://fonts.googleapis.com/css?family=${familyParam}:${weight}`;
+    const res = await fetch(url, {
+        headers: {
+            // Android 2.3 — Google serves TTF to this UA. See file header
+            // for the UA negotiation matrix. Don't change without testing
+            // every output format.
+            'User-Agent': 'Mozilla/5.0 (Linux; U; Android 2.3; en-us) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1',
+        },
+    });
+    if (!res.ok)
+        return null;
+    const css = await res.text();
+    // Find the first .ttf url. Google returns one @font-face block
+    // for the requested (family, weight) under the Android UA.
+    const match = /url\((https:\/\/[^)]+\.ttf)\)/i.exec(css);
+    return match ? match[1] : null;
+}
+//# sourceMappingURL=install-font.js.map
