@@ -26,11 +26,16 @@ import type { Migration } from '../migrate';
 
 const CORE_APP_IDS = ['core:brand', 'core:people', 'core:admin', 'core:apps', 'core:legal'];
 
+// IMPORTANT: D1/SQLite rejects `INSERT ... SELECT ... ON CONFLICT (...)
+// DO NOTHING` with a syntax error ("near DO") — the ON CONFLICT upsert
+// clause is only valid with the VALUES form, not SELECT. Use
+// `INSERT OR IGNORE ... SELECT`, which is semantically identical against
+// the PK and IS valid on D1. (Regression: this shipped broken in v0.1.109
+// and wedged tenant boots; fixed in v0.1.111.)
 const inserts = CORE_APP_IDS.map(
   (id) =>
-    `INSERT INTO installed_apps (workspace_id, app_id, manifest_json, settings_json, status)
-       SELECT id, '${id}', '{}', '{}', 'active' FROM workspaces
-     ON CONFLICT (workspace_id, app_id) DO NOTHING;`,
+    `INSERT OR IGNORE INTO installed_apps (workspace_id, app_id, manifest_json, settings_json, status)
+       SELECT id, '${id}', '{}', '{}', 'active' FROM workspaces;`,
 ).join('\n');
 
 export const migration: Migration = {
