@@ -21,6 +21,7 @@ import type { Hono, Context } from 'hono';
 import type { Env, ContextVariables } from '../../../types';
 import { ID_RE, loc, parseDocRow, renderMarkdown, type LegalDocRow } from './shared';
 import { renderLegalPage, renderLegalNotFound } from './render';
+import { absoluteUrl } from '../../../services/brand-domain';
 
 type Ctx = Context<{ Bindings: Env; Variables: ContextVariables }>;
 
@@ -64,6 +65,63 @@ async function legalFavicon(c: Ctx, workspaceId: string): Promise<string> {
   } catch {
     return '';
   }
+}
+
+/** Whether the operator has opted the legal app into search indexing. */
+async function isLegalIndexable(c: Ctx, workspaceId: string): Promise<boolean> {
+  const { getSetting } = await import('../../../services/workspace-settings');
+  return (await getSetting(c.env, workspaceId, 'legal_allow_indexing')) === 'true';
+}
+
+/**
+ * For SEO cleanliness: when a tenant has a brand domain and a public
+ * (unauthenticated) request lands on a DIFFERENT host (the workspace
+ * subdomain), 301 it to the brand-domain equivalent so search engines
+ * index the brand URL, not the workspace one. Returns a redirect Response
+ * to return, or null to proceed.
+ *
+ * Skipped for authenticated requests (a workspace admin viewing from
+ * inside the app keeps working on the workspace host) — detected by the
+ * presence of the access-token cookie.
+ */
+async function brandRedirect(c: Ctx, path: string): Promise<Response | null> {
+  const brand = c.get('brandDomain');
+  if (!brand?.domain) return null;
+  const url = new URL(c.req.url);
+  if (url.host.split(':')[0]!.toLowerCase() === brand.domain) return null; // already on brand host
+  const { getAuthCookies } = await import('../../../utils/cookies');
+  if (getAuthCookies(c.req.header('Cookie')).accessToken) return null; // authed admin — no redirect
+  return c.redirect(`${brand.proto}://${brand.domain}${path}${url.search}`, 301);
+}
+
+/**
+ * Build the SEO <head> block for a legal page. The two forms are mutually
+ * exclusive so the page never sends mixed signals:
+ *   • indexable → absolute <link rel=canonical> + per-locale hreflang
+ *     (qualified against the brand domain via absoluteUrl).
+ *   • noindex   → <meta name=robots content="noindex,nofollow">, no
+ *     canonical/hreflang. (The handler also sets the X-Robots-Tag header.)
+ */
+function buildSeoHead(
+  c: Ctx,
+  indexable: boolean,
+  currentSlug: string,
+  slugs: Record<string, string | null | undefined>,
+): string {
+  if (!indexable) {
+    return '<meta name="robots" content="noindex, nofollow">';
+  }
+  const esc = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const canonical = `<link rel="canonical" href="${esc(absoluteUrl(c, `/legal/${currentSlug}`))}">`;
+  const hreflangs = Object.entries(slugs)
+    .filter(([, s]) => s)
+    .map(
+      ([locale, slug]) =>
+        `<link rel="alternate" hreflang="${esc(locale)}" href="${esc(absoluteUrl(c, `/legal/${slug as string}`))}">`,
+    )
+    .join('\n');
+  return `${canonical}\n${hreflangs}`;
 }
 
 export function registerLegalPublicRoutes(
@@ -246,6 +304,9 @@ export function registerLegalPublicRoutes(
     if (!(await isLegalPublicEnabled(c, workspace.id))) return c.notFound();
 
     const slug = c.req.param('slug');
+    // SEO: send public traffic on the workspace host to the brand domain.
+    const redir = await brandRedirect(c, `/legal/${slug}`);
+    if (redir) return redir;
 
     const slugRow = await c.env.DB.prepare(
       `SELECT doc_id, locale FROM legal_doc_slugs
@@ -292,6 +353,7 @@ export function registerLegalPublicRoutes(
       ? renderMarkdown(await resolveLegalPlaceholders(c.env, workspace.id, noticeRaw, doc.lastUpdated, lang))
       : '';
 
+    const indexable = await isLegalIndexable(c, workspace.id);
     const html = renderLegalPage({
       lang,
       activeId: doc.id,
@@ -299,6 +361,7 @@ export function registerLegalPublicRoutes(
       lastUpdated: doc.lastUpdated,
       noticeHtml,
       faviconHtml: await legalFavicon(c, workspace.id),
+      seoHead: buildSeoHead(c, indexable, slug, doc.slugs),
       contentHtml,
       slugs: doc.slugs,
       toc: (tocRows ?? []).map((r) => {
@@ -307,13 +370,15 @@ export function registerLegalPublicRoutes(
       }),
     });
 
-    return new Response(html, {
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-        // CRAWLABLE — deliberately no X-Robots-Tag noindex (spec §6.1).
-        'Cache-Control': CACHE_300,
-      },
-    });
+    const headers: Record<string, string> = {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': CACHE_300,
+    };
+    // Belt-and-suspenders: when not indexable, the header backs up the
+    // <meta robots> tag (and covers non-HTML crawler fetches).
+    if (!indexable) headers['X-Robots-Tag'] = 'noindex, nofollow';
+
+    return new Response(html, { headers });
   });
 }
 

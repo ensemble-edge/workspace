@@ -364,7 +364,8 @@ export function registerLegalRoutes(
       LEGAL_SETTING_KEYS.map(async (key) => [key, await getSetting(c.env, workspace.id, key)] as const),
     );
     const publicEnabled = (await getSetting(c.env, workspace.id, 'legal_public_enabled')) === 'true';
-    return c.json({ settings: Object.fromEntries(entries), publicEnabled });
+    const allowIndexing = (await getSetting(c.env, workspace.id, 'legal_allow_indexing')) === 'true';
+    return c.json({ settings: Object.fromEntries(entries), publicEnabled, allowIndexing });
   });
 
   /** PUT /_ensemble/core/legal/settings — patch one or more legal.* values. */
@@ -402,6 +403,15 @@ export function registerLegalRoutes(
       }
       await setSetting(c.env, workspace.id, 'legal_public_enabled', body.publicEnabled ? 'true' : 'false', who);
       updated.push('legal_public_enabled');
+    }
+
+    // The search-indexing toggle. Boolean `allowIndexing`; off = noindex.
+    if ('allowIndexing' in body) {
+      if (typeof body.allowIndexing !== 'boolean') {
+        return c.json({ error: 'allowIndexing must be a boolean' }, 400);
+      }
+      await setSetting(c.env, workspace.id, 'legal_allow_indexing', body.allowIndexing ? 'true' : 'false', who);
+      updated.push('legal_allow_indexing');
     }
 
     return c.json({ ok: true, updated });

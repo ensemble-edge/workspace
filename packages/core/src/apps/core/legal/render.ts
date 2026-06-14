@@ -131,6 +131,14 @@ export interface LegalPageData {
   /** Favicon <link> suite from the workspace brand (built by the route
    *  handler via buildFaviconHeadSnippet). Empty string = none. */
   faviconHtml: string;
+  /**
+   * SEO head block built by the route handler (it has request context +
+   * the indexing setting). Either the crawlable form — absolute
+   * <link rel=canonical> + hreflang against the brand domain — OR the
+   * noindex form — <meta name=robots content="noindex,nofollow">. The
+   * two are mutually exclusive so the page never sends mixed signals.
+   */
+  seoHead: string;
   contentHtml: string;
   /** The active doc's slugs by locale — drives the language switcher + hreflang. */
   slugs: Record<string, string | null | undefined>;
@@ -140,16 +148,15 @@ export interface LegalPageData {
 export function renderLegalPage(data: LegalPageData): string {
   const t = dict(data.lang);
 
-  // Language switcher + hreflang: every locale this doc has a slug for.
+  // Language switcher: path-relative is correct — it resolves under
+  // whatever host served the page. (Canonical/hreflang, which DO need to
+  // be absolute, are built by the handler and arrive via data.seoHead.)
   const localeSlugs = Object.entries(data.slugs).filter(([, s]) => s);
   const langOptions = localeSlugs
     .map(
       ([locale, slug]) =>
         `<option value="/legal/${esc(slug as string)}"${locale === data.lang ? ' selected' : ''}>${esc(locale.toUpperCase())}</option>`,
     )
-    .join('');
-  const hreflangs = localeSlugs
-    .map(([locale, slug]) => `<link rel="alternate" hreflang="${esc(locale)}" href="/legal/${esc(slug as string)}">`)
     .join('');
 
   const toc = data.toc
@@ -171,7 +178,7 @@ export function renderLegalPage(data: LegalPageData): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(data.title)}</title>
-${hreflangs}
+${data.seoHead}
 ${data.faviconHtml}
 <style>${STYLE}</style>
 <!-- Dogfood the workspace brand: load the same tokens the shell + brand
@@ -203,7 +210,7 @@ export function renderLegalNotFound(lang: string, faviconHtml = ''): string {
   const t = dict(lang);
   return `<!DOCTYPE html>
 <html lang="${esc(lang)}">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(t.notFound)}</title>${faviconHtml}<style>${STYLE}</style><link rel="stylesheet" href="/brand/css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex, nofollow"><title>${esc(t.notFound)}</title>${faviconHtml}<style>${STYLE}</style><link rel="stylesheet" href="/brand/css"></head>
 <body><main class="legal-main" style="max-width:48rem;margin:0 auto;"><h1>${esc(t.notFound)}</h1></main></body>
 </html>`;
 }

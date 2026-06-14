@@ -87,8 +87,32 @@ export function workspaceResolver(config: ResolvedConfig) {
     // Attach workspace to context
     c.set('workspace', workspace);
 
+    // Brand domain: set regardless of which strategy resolved the
+    // workspace. If the request came in ON a brand domain, we know it
+    // from that host; otherwise look up the workspace's primary brand
+    // domain so canonical/hreflang still point at it (and the redirect
+    // can fire) even when an admin views the page on the workspace host.
+    try {
+      const { workspaceIdForDomain, primaryDomainForWorkspace } = await import(
+        '../services/brand-domain'
+      );
+      const onBrand = await workspaceIdForDomain(c.env, host);
+      if (onBrand && onBrand.workspaceId === workspace.id) {
+        c.set('brandDomain', { domain: normalizeHostForCtx(host), proto: onBrand.proto });
+      } else {
+        c.set('brandDomain', await primaryDomainForWorkspace(c.env, workspace.id));
+      }
+    } catch {
+      c.set('brandDomain', null);
+    }
+
     await next();
   });
+}
+
+/** Host-only, lowercased (mirror of the service's normalizeHost). */
+function normalizeHostForCtx(host: string): string {
+  return host.split(':')[0]!.trim().toLowerCase();
 }
 
 /**
@@ -174,9 +198,36 @@ async function resolveByDomain(
   domain: string
 ): Promise<Workspace | null> {
   try {
-    // Look up domain in workspace_domains table (future feature)
-    // For now, return null
-    return null;
+    // Reverse lookup host → workspace_id via workspace_domains (PK hit,
+    // cached per isolate), then load that workspace. See
+    // services/brand-domain.ts.
+    const { workspaceIdForDomain } = await import('../services/brand-domain');
+    const match = await workspaceIdForDomain({ DB: db }, domain);
+    if (!match) return null;
+
+    const result = await db
+      .prepare('SELECT * FROM workspaces WHERE id = ?')
+      .bind(match.workspaceId)
+      .first<{
+        id: string;
+        slug: string;
+        name: string;
+        type: string;
+        settings_json: string;
+        created_at: string;
+        updated_at: string;
+      }>();
+    if (!result) return null;
+
+    return {
+      id: result.id,
+      slug: result.slug,
+      name: result.name,
+      type: result.type as Workspace['type'],
+      settings: JSON.parse(result.settings_json || '{}'),
+      createdAt: result.created_at,
+      updatedAt: result.updated_at,
+    };
   } catch {
     return null;
   }

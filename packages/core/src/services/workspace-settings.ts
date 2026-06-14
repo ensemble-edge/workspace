@@ -55,7 +55,15 @@ export type SettingKey =
   // (/legal-app, /_ensemble/core/legal/*) is unaffected — operators can
   // always prepare docs before publishing. Mirrors
   // public_brand_guide_enabled.
-  | 'legal_public_enabled';
+  | 'legal_public_enabled'
+  // When 'true', the public legal pages are crawlable: they emit
+  // <link rel=canonical> + hreflang (absolute, against the brand domain)
+  // and NO robots noindex. When 'false' or unset (default), they emit
+  // <meta name=robots content="noindex,nofollow"> + an X-Robots-Tag
+  // header and OMIT canonical/hreflang (no mixed signals). Default
+  // noindex so nothing is indexed by accident; operators opt the app in
+  // once the docs are final. See docs/plan/brand-domain.md.
+  | 'legal_allow_indexing';
 
 export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
   // 30 days — matches typical workspace expectations. Operators can
@@ -82,6 +90,8 @@ export const DEFAULT_SETTINGS: Record<SettingKey, string> = {
   'legal.notices_email': 'legal@curalisto.com',
   // Public legal pages + read API off until the operator publishes.
   legal_public_enabled: 'false',
+  // Default noindex — operators opt the legal app into search indexing.
+  legal_allow_indexing: 'false',
 };
 
 /**

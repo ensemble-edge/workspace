@@ -220,36 +220,49 @@ function EmptyDocs({ onSeeded }: { onSeeded: (docs: LegalDoc[]) => void }) {
 
 function PublishCard() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [indexing, setIndexing] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     (async () => {
       const r = await authedFetch('/_ensemble/core/legal/settings').catch(() => null);
       if (r?.ok) {
-        const body = (await r.json()) as { publicEnabled?: boolean };
+        const body = (await r.json()) as { publicEnabled?: boolean; allowIndexing?: boolean };
         setEnabled(Boolean(body.publicEnabled));
+        setIndexing(Boolean(body.allowIndexing));
       }
     })();
   }, []);
 
-  const toggle = useCallback(async (next: boolean) => {
-    setEnabled(next); // optimistic
-    setSaving(true);
-    try {
-      const r = await authedFetch('/_ensemble/core/legal/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ publicEnabled: next }),
-      });
-      if (!r.ok) throw new Error(`save failed: ${r.status}`);
-      toast.success(next ? 'Legal pages published' : 'Legal pages unpublished');
-    } catch {
-      setEnabled(!next); // revert
-      toast.error('Failed to update publish state');
-    } finally {
-      setSaving(false);
-    }
-  }, []);
+  // One PUT helper for either boolean setting; the switches call it with
+  // their own key + optimistic setter. Not a hook — a plain async fn — so
+  // it's safe to define once and reuse.
+  const save = useCallback(
+    async (
+      key: 'publicEnabled' | 'allowIndexing',
+      next: boolean,
+      set: (v: boolean) => void,
+      okMsg: string,
+    ) => {
+      set(next); // optimistic
+      setSaving(true);
+      try {
+        const r = await authedFetch('/_ensemble/core/legal/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [key]: next }),
+        });
+        if (!r.ok) throw new Error(`save failed: ${r.status}`);
+        toast.success(okMsg);
+      } catch {
+        set(!next); // revert
+        toast.error('Failed to update setting');
+      } finally {
+        setSaving(false);
+      }
+    },
+    [],
+  );
 
   return (
     <Card>
@@ -267,12 +280,36 @@ function PublishCard() {
             <Switch
               checked={enabled ?? false}
               disabled={enabled === null || saving}
-              onCheckedChange={(v) => void toggle(v)}
+              onCheckedChange={(v) =>
+                void save('publicEnabled', v, setEnabled, v ? 'Legal pages published' : 'Legal pages unpublished')
+              }
             />
             {enabled ? 'Published' : 'Unpublished'}
           </label>
         </div>
       </CardHeader>
+      <CardContent>
+        <div className="flex items-center justify-between border-t pt-4">
+          <div>
+            <p className="text-sm font-medium">Allow search indexing</p>
+            <p className="text-sm text-muted-foreground">
+              When off (default), pages emit <code>noindex</code> and search engines skip them.
+              When on, pages are crawlable and emit a canonical URL (using your brand domain if
+              one is set).
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <Switch
+              checked={indexing ?? false}
+              disabled={indexing === null || saving}
+              onCheckedChange={(v) =>
+                void save('allowIndexing', v, setIndexing, v ? 'Search indexing enabled' : 'Search indexing disabled (noindex)')
+              }
+            />
+            {indexing ? 'Indexable' : 'noindex'}
+          </label>
+        </div>
+      </CardContent>
     </Card>
   );
 }

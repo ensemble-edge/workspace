@@ -32,6 +32,7 @@ import { generateBrandCss, getSavedThemeMode } from './apps/core/brand/css';
 import { SHELL_JS, SHELL_CSS } from '@ensemble-edge/shell/assets';
 import { RUNTIME_JS, RUNTIME_CSS, RUNTIME_VERSION } from '@ensemble-edge/guest-runtime/assets';
 import { createCredentialsRoutes } from './routes/credentials';
+import { createDomainsRoutes } from './routes/domains';
 
 /**
  * Cloudflare Worker instance returned by createWorkspace.
@@ -244,6 +245,13 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   app.use('/_ensemble/locales/*', auth());
   app.use('/_ensemble/locales', auth());
   app.route('/', createCredentialsRoutes());
+
+  // Brand domains: tenant hostnames for public surfaces. Admin-gated
+  // (the route module enforces requireAdmin on mutations); read needs a
+  // session. See routes/domains.ts + services/brand-domain.ts.
+  app.use('/_ensemble/domains', auth());
+  app.use('/_ensemble/domains/*', auth());
+  app.route('/', createDomainsRoutes());
 
   // v0.1.40 — unified workspace context for the SDK + guest apps.
   // Single source of truth for workspace identity, current user,

@@ -244,6 +244,14 @@ export interface ContextVariables {
   /** Request ID for logging */
   requestId: string;
   /**
+   * The tenant's brand domain ({ domain, proto }) when configured — set
+   * by the resolver regardless of which host the request arrived on.
+   * Drives fully-qualified canonical/hreflang URLs and the workspace-
+   * host→brand-domain redirect. Null when the tenant has no brand domain
+   * (URLs fall back to the request host). See services/brand-domain.ts.
+   */
+  brandDomain?: { domain: string; proto: string } | null;
+  /**
    * Present when the request was authenticated via a workspace API key
    * (Authorization: Bearer wks_...). Null/undefined for cookie-auth.
    * The user/membership context still gets populated from the key's

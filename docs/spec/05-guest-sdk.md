@@ -1518,3 +1518,87 @@ function LanguagePicker({ value, onChange }) {
 
 ---
 
+### Brand Domains & `publicDomain` (v0.1.108)
+
+Operators can give a workspace its own **brand domain** — a tenant
+hostname (e.g. `curalisto.com`) that workspace public surfaces serve
+under instead of the workspace subdomain (`workspace.curalisto.com`).
+They configure it under **Settings → Domains**. Once set, the workspace
+resolves requests on that host to the tenant, and core public pages
+(legal, brand guide) emit canonical URLs + hreflang against it.
+
+Guest apps that emit **public or shareable URLs** — a footer of links, a
+link in an email or PDF, an `og:url`, a "copy link" button — should build
+those URLs against the brand domain when the tenant has one, so the URL
+the end user sees and shares is the tenant's domain, not the workspace
+subdomain. Internal, same-page links don't need this: a path-relative
+`/foo` already resolves under whatever host served the page.
+
+#### Reading it from workspace context
+
+The brand domain is part of the unified workspace context
+(`/_ensemble/workspace/context`), exposed as `publicDomain`:
+
+```ts
+const ctx = await fetch('/_ensemble/workspace/context', { credentials: 'include' })
+  .then((r) => r.json());
+// ctx.publicDomain is either null (no brand domain) or:
+//   { domain: 'curalisto.com', proto: 'https', origin: 'https://curalisto.com' }
+```
+
+- `publicDomain` is **null** when the tenant hasn't configured one — fall
+  back to the guest's own request origin.
+- `origin` is the ready-to-use `proto://host` prefix; concatenate a
+  root-relative path onto it.
+
+#### Worked example: a shareable URL helper
+
+```ts
+/** Build an absolute, brand-aware URL for a public path. */
+function publicUrl(ctx, path /* e.g. '/legal/privacy' */) {
+  const origin = ctx.publicDomain?.origin ?? window.location.origin;
+  return `${origin}${path}`;
+}
+
+// Footer link a patient can share:
+const privacyUrl = publicUrl(ctx, '/legal/privacy');
+// → https://curalisto.com/legal/privacy   (brand domain set)
+// → https://workspace.curalisto.com/legal/privacy   (no brand domain)
+```
+
+The same rule the core legal pages follow: **only fully-qualified,
+outward-facing URLs use `publicDomain`** (canonical, hreflang, emails,
+share links). Everything that stays on the current page stays
+path-relative and Just Works under either host.
+
+#### Linking to the legal read API
+
+The legal app's read API is path-relative and host-independent, so a
+guest fetching legal copy uses a plain path — it resolves under whichever
+host the guest is served on:
+
+```ts
+const r = await fetch('/api/legal/active?lang=' + ctx.locale.default);
+const { docs } = await r.json();
+// Render share links with the brand-aware helper:
+const links = docs.map((d) => `<a href="${publicUrl(ctx, '/legal/' + d.slug)}">${d.title}</a>`);
+```
+
+#### Managing domains (operator surface, not guest-facing)
+
+Adding/removing brand domains is an **operator** action via the admin API
+(`GET/POST/DELETE /_ensemble/domains`, admin-gated) and the **Settings →
+Domains** UI — not something a guest app does. Guests only *read*
+`publicDomain` from context. If your guest needs a domain configured, ask
+the operator to add it in Settings; don't try to register one
+programmatically.
+
+#### What this does NOT do
+
+- It doesn't rewrite your guest's internal routing or asset paths — those
+  stay path-relative and resolve under whatever host serves your guest.
+- It doesn't give a guest its *own* subdomain. `publicDomain` is the
+  *workspace's* brand domain, shared by all of that tenant's public
+  surfaces.
+- It doesn't push real-time updates. Brand domains change rarely; a
+  remount / context refetch picks up a new one.

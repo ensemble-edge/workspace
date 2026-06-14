@@ -21,6 +21,7 @@ import { migration as m013 } from './013_guest_secrets';
 import { migration as m014 } from './014_users_invite_pending';
 import { migration as m015 } from './015_legal_docs';
 import { migration as m016 } from './016_legal_notice';
+import { migration as m017 } from './017_workspace_domains';
 
 /**
  * All migrations in order.
@@ -43,4 +44,5 @@ export const migrations: Migration[] = [
   m014,
   m015,
   m016,
+  m017,
 ];

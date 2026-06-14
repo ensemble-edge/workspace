@@ -44,6 +44,17 @@ export interface WorkspaceContextV1 {
     displayName: string;
   };
 
+  /**
+   * The tenant's public brand domain when configured (e.g.
+   * `{ domain: 'curalisto.com', proto: 'https', origin:
+   * 'https://curalisto.com' }`), else null. Guest apps that emit
+   * public/shareable URLs (footer links, emails, og:url) should build
+   * them against `publicDomain.origin` when present, falling back to
+   * their own host otherwise — mirroring how core surfaces use it. See
+   * docs/spec/05-guest-sdk.md "Brand domains".
+   */
+  publicDomain: { domain: string; proto: string; origin: string } | null;
+
   /** null when the request is unauthenticated. */
   user: {
     id: string;
@@ -111,17 +122,19 @@ export async function resolveWorkspaceContext(
   // gracefully degrading on error (returns sensible defaults rather
   // than throwing) so one slow/broken domain doesn't take the whole
   // context down.
-  const [workspace, user, locale, theme, brand] = await Promise.all([
+  const [workspace, user, locale, theme, brand, publicDomain] = await Promise.all([
     resolveWorkspaceIdentity(input),
     resolveUserIdentity(input),
     resolveLocale(input),
     resolveTheme(input),
     resolveBrand(input),
+    resolvePublicDomain(input),
   ]);
 
   return {
     version: 1,
     workspace,
+    publicDomain,
     user,
     locale,
     theme,
@@ -129,6 +142,20 @@ export async function resolveWorkspaceContext(
     capabilities: {},     // future: populated by guest-app permission gate
     featureFlags: {},     // future: populated by feature-flag service
   };
+}
+
+/** The tenant's primary brand domain, or null. Degrades to null on error. */
+async function resolvePublicDomain(
+  { env, workspaceId }: ResolverInput,
+): Promise<WorkspaceContextV1['publicDomain']> {
+  try {
+    const { primaryDomainForWorkspace } = await import('./brand-domain');
+    const d = await primaryDomainForWorkspace(env, workspaceId);
+    if (!d) return null;
+    return { domain: d.domain, proto: d.proto, origin: `${d.proto}://${d.domain}` };
+  } catch {
+    return null;
+  }
 }
 
 async function resolveWorkspaceIdentity(
