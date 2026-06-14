@@ -44,6 +44,11 @@ async function defaultLocale(c: Ctx, workspaceId: string): Promise<string> {
  * they don't exist), while the CMS surface stays fully available.
  */
 async function isLegalPublicEnabled(c: Ctx, workspaceId: string): Promise<boolean> {
+  // Two gates compose: the App Manager enable/disable (is the legal app
+  // active at all?) AND the publish toggle (are public pages live?).
+  // Either off → public surfaces 404.
+  const { isAppActive } = await import('../../../services/app-registry');
+  if (!(await isAppActive(c.env, workspaceId, 'core:legal'))) return false;
   const { getSetting } = await import('../../../services/workspace-settings');
   return (await getSetting(c.env, workspaceId, 'legal_public_enabled')) === 'true';
 }

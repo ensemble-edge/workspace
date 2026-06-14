@@ -20,6 +20,7 @@ import {
 import { signAccessToken, signRefreshToken, getJwtSecret } from '../utils/jwt';
 import { markBootstrapComplete } from '../middleware/bootstrap';
 import { buildLegalSeedStatements } from '../apps/core/legal/seed';
+import { buildInstalledAppsSeed } from '../services/app-registry';
 
 /**
  * Bootstrap form data.
@@ -273,6 +274,10 @@ export function createBootstrapRoutes(config: ResolvedConfig) {
         // junction rows. Unreviewed placeholder copy operators rewrite
         // in the Legal app. See apps/core/legal/seed.ts.
         ...buildLegalSeedStatements(c.env.DB, workspaceId, now, userId),
+
+        // Seed installed_apps rows for the core apps so the App Manager
+        // can govern them (status/mounts). See services/app-registry.ts.
+        ...buildInstalledAppsSeed(c.env.DB, workspaceId),
       ]);
 
       // Mark bootstrap complete in KV

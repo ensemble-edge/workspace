@@ -1,11 +1,12 @@
 import type { CoreAppDefinition } from '../../types';
+import { registerAppsRoutes } from './routes';
 
 export const appsApp: CoreAppDefinition = {
   manifest: {
     id: 'core:apps',
     name: 'App Manager',
     icon: 'grid-3x3',
-    description: 'Install, configure, and manage guest apps and connectors.',
+    description: 'Manage every app — built-in and guest: enable/disable, routing, and config.',
     tier: 'core',
     nav: {
       label: 'Apps',
@@ -14,8 +15,6 @@ export const appsApp: CoreAppDefinition = {
       path: '/apps',
     },
   },
-  registerRoutes: () => {
-    // Guest app management routes already exist at /_ensemble/apps/*
-    // Phase 2 will add /_ensemble/core/apps/* for install/uninstall admin UI
-  },
+  // App Manager API: list all apps, enable/disable, mounts, routes-hint.
+  registerRoutes: registerAppsRoutes,
 };

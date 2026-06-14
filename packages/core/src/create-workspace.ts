@@ -240,6 +240,9 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
   // and crawlable pages live on /api/legal/* and /legal/* and carry no
   // auth guard.
   app.use('/_ensemble/core/legal/*', auth());
+  // App Manager (core:apps) is operator-only — require a session; the
+  // handlers enforce requireAdmin on mutations.
+  app.use('/_ensemble/core/apps/*', auth());
   // v0.1.15: workspace policy (settings) and content locales.
   app.use('/_ensemble/settings/*', auth());
   app.use('/_ensemble/locales/*', auth());
@@ -515,6 +518,29 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
         ],
       },
     ];
+
+    // Drop nav entries for core apps an operator has disabled in the App
+    // Manager. The registry's status (installed_apps) is the source of
+    // truth; map the sidebar item id → core app id and filter inactive.
+    if (workspace?.id) {
+      try {
+        const { listApps } = await import('./services/app-registry');
+        const apps = await listApps(c.env, workspace.id);
+        const inactive = new Set(
+          apps.filter((a) => a.status !== 'active').map((a) => a.id),
+        );
+        // Sidebar item id → core app id (only governable, public-facing ones).
+        const navIdToApp: Record<string, string> = { legal: 'core:legal' };
+        for (const section of sections) {
+          section.items = section.items.filter((it) => {
+            const appId = navIdToApp[it.id];
+            return !appId || !inactive.has(appId);
+          });
+        }
+      } catch {
+        // registry unavailable (pre-migration) — show everything.
+      }
+    }
 
     // Filter based on user role if needed
     // (for now, show all sections)

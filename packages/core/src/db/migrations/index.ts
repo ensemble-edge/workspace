@@ -22,6 +22,7 @@ import { migration as m014 } from './014_users_invite_pending';
 import { migration as m015 } from './015_legal_docs';
 import { migration as m016 } from './016_legal_notice';
 import { migration as m017 } from './017_workspace_domains';
+import { migration as m018 } from './018_seed_installed_apps';
 
 /**
  * All migrations in order.
@@ -45,4 +46,5 @@ export const migrations: Migration[] = [
   m015,
   m016,
   m017,
+  m018,
 ];

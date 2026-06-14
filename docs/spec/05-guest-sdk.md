@@ -1602,3 +1602,80 @@ programmatically.
   surfaces.
 - It doesn't push real-time updates. Brand domains change rarely; a
   remount / context refetch picks up a new one.
+
+### App Manager: enable/disable & mounts (v0.1.109)
+
+Every app in a workspace — built-in (core) and guest — is now governed
+from one place: the **App Manager** (Settings sidebar → **Apps**). An
+operator can see every app, enable/disable the governable ones, and (as
+the mount model rolls out) control where each app serves. This replaces
+the old per-app, scattered toggles and the hand-maintained routing
+conventions. As a guest-app author, here's what it means for you.
+
+#### Your app appears in the registry automatically
+
+Once a guest app is installed (`guest_apps` row), it shows up in the App
+Manager alongside core apps, tagged as a **guest** app and an **operator
+tool** surface. You don't register it anywhere new — the registry
+(`GET /_ensemble/core/apps`) unifies core manifests + installed guest
+apps + per-workspace governance state.
+
+#### Enable / disable
+
+An operator can disable a guest app. When disabled:
+
+- it drops from the workspace sidebar, and
+- its gateway surface (`/_ensemble/apps/:id/*`) is treated as inactive.
+
+Disable is distinct from uninstall — the app's data and config are
+retained; flipping it back on restores it. Design your guest app to
+tolerate being dark for a while (no assumption that it's always
+reachable).
+
+#### Mounts — where your app serves
+
+Today a guest app is reached through the gateway at the fixed path
+`/_ensemble/apps/:id/*`, which injects workspace auth + context. The App
+Manager introduces a **mount** concept: an operator can additionally
+expose an app at a chosen `host + path` (e.g. on the tenant's brand
+domain). Two rules for guest authors:
+
+- **Don't hardcode your base path.** Read the path your request arrives
+  on; treat the prefix as opaque. If you build internal links, make them
+  relative to your received base path, not a literal `/_ensemble/apps/...`.
+- **The gateway still fronts authenticated traffic.** A mount that the
+  workspace dispatches to your guest worker still carries the injected
+  workspace context + session — same contract as the fixed gateway path.
+
+#### The auth boundary (important, and permanent)
+
+The gateway (`/_ensemble/apps/:id/*`) is for **authenticated operator
+tools only** — it requires a workspace session or API key. **Anonymous,
+public-facing surfaces cannot go through the gateway** (they'd 401).
+That's by design: the gateway exists to give trusted operator tools
+uniform auth, context injection, and audit. If your product needs an
+anonymous public surface — a customer signup page, a patient API, an
+inbound webhook from Stripe/Twilio/etc. — it belongs on its **own
+worker** with its own routes, not behind the gateway. This boundary does
+not change with mounts; mounts move *where an authenticated app serves*,
+not *whether anonymous traffic can reach it*.
+
+#### Routing setup is operator-managed, not hand-authored
+
+The App Manager derives the recommended Cloudflare `[[routes]]` blocks
+from the app mount map and shows them in a **Routing setup** panel
+(`GET /_ensemble/core/apps/routes-hint`). Operators copy that into the
+relevant worker's `wrangler.toml` rather than re-deriving a routing
+convention per tenant. As a guest author you don't manage zone routes;
+you declare what your app needs (its mount) and the platform tells the
+operator the one infra block to set.
+
+#### What this does NOT do
+
+- It doesn't let a guest app enable/disable or re-mount itself — that's
+  an **operator** action in the UI. Guests are governed, not
+  self-governing.
+- It doesn't make the gateway work for anonymous traffic (see the auth
+  boundary above).
+- It doesn't replace `wrangler.toml` — Cloudflare zone routes are still
+  declared there; the App Manager just tells the operator what to write.

@@ -1,0 +1,177 @@
+/**
+ * core:apps — App Manager server routes.
+ *
+ * The single surface that governs every app (core + guest): list them,
+ * enable/disable, edit mounts, and emit the recommended CF routes block.
+ * Reads/writes installed_apps via the app-registry service.
+ *
+ *   GET   /_ensemble/core/apps              list all apps + governance state
+ *   PATCH /_ensemble/core/apps/:id          set status / mounts / settings
+ *   GET   /_ensemble/core/apps/routes-hint  recommended wrangler [[routes]]
+ *
+ * Mutations are admin-gated. See docs/plan/app-manager-implementation.md.
+ */
+
+import type { Hono, Context } from 'hono';
+import type { Env, ContextVariables } from '../../../types';
+import { listApps, getApp, type AppMount, type AppStatus } from '../../../services/app-registry';
+
+type Ctx = Context<{ Bindings: Env; Variables: ContextVariables }>;
+
+function requireAdmin(c: Ctx): { ok: true } | Response {
+  const m = c.get('membership');
+  if (!m || (m.role !== 'admin' && m.role !== 'owner')) {
+    return c.json({ error: 'admin role required' }, 403);
+  }
+  return { ok: true };
+}
+
+/** Validate a mounts array from a PATCH body. Returns error string or null. */
+function validateMounts(mounts: unknown): string | null {
+  if (!Array.isArray(mounts)) return 'mounts must be an array';
+  for (const m of mounts) {
+    if (!m || typeof m !== 'object') return 'each mount must be an object';
+    const mm = m as Record<string, unknown>;
+    if (typeof mm.host !== 'string' || !mm.host) return 'mount.host must be a non-empty string';
+    if (typeof mm.path !== 'string' || !mm.path.startsWith('/')) return 'mount.path must start with /';
+  }
+  return null;
+}
+
+export function registerAppsRoutes(
+  app: Hono<{ Bindings: Env; Variables: ContextVariables }>,
+): void {
+  /** GET /_ensemble/core/apps — every app + governance state. */
+  app.get('/_ensemble/core/apps', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const apps = await listApps(c.env, workspace.id);
+    return c.json({ apps });
+  });
+
+  /**
+   * GET /_ensemble/core/apps/routes-hint — the recommended CF zone-route
+   * blocks a tenant should set, derived from the mount map + surface
+   * taxonomy. Read-only, copyable. Replaces the hand-maintained routing
+   * convention (§3a/§3b of the plan).
+   *
+   * Registered BEFORE /:id so "routes-hint" isn't matched as an app id.
+   */
+  app.get('/_ensemble/core/apps/routes-hint', async (c) => {
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+    const apps = await listApps(c.env, workspace.id);
+
+    // Collect the distinct hosts apps mount on (excluding '*', the
+    // workspace's own host which needs no extra route).
+    const hosts = new Set<string>();
+    for (const a of apps) {
+      if (a.status !== 'active') continue;
+      for (const m of a.mounts) if (m.host && m.host !== '*') hosts.add(m.host);
+    }
+
+    // One [[routes]] block per brand host → the tenant-host worker serves
+    // the workspace's public app paths under it. (Consumer surfaces on
+    // their own workers are the tenant's responsibility — noted in hint.)
+    const blocks = [...hosts].map(
+      (host) =>
+        `[[routes]]\npattern = "${host}/*"\nzone_name = "${host.split('.').slice(-2).join('.')}"`,
+    );
+
+    return c.json({
+      hosts: [...hosts],
+      wrangler: blocks.join('\n\n'),
+      note:
+        'Point each brand host at the workspace worker (CNAME / CF custom hostname). ' +
+        'Anonymous consumer surfaces (your own quiz/API workers) are NOT served by ' +
+        'the workspace gateway — give them their own [[routes]]. See the App mounts ' +
+        '& routing section of the guest SDK docs.',
+    });
+  });
+
+  /**
+   * PATCH /_ensemble/core/apps/:id — set status / mounts / settings.
+   * Admin only. Rejects disabling a non-governable app and mounts whose
+   * host isn't one of the workspace's registered brand domains.
+   */
+  app.patch('/_ensemble/core/apps/:id', async (c) => {
+    const check = requireAdmin(c);
+    if (check instanceof Response) return check;
+    const workspace = c.get('workspace');
+    if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
+
+    const id = c.req.param('id');
+    const current = await getApp(c.env, workspace.id, id);
+    if (!current) return c.json({ error: 'not_found', id }, 404);
+
+    let body: { status?: string; mounts?: unknown; settings?: Record<string, unknown> };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'invalid_json' }, 400);
+    }
+
+    // Status change.
+    let nextStatus: AppStatus = current.status;
+    if (body.status !== undefined) {
+      if (body.status !== 'active' && body.status !== 'inactive' && body.status !== 'needs_config') {
+        return c.json({ error: 'status must be active | inactive | needs_config' }, 400);
+      }
+      if (body.status !== 'active' && !current.governable) {
+        return c.json({ error: `${id} cannot be disabled` }, 409);
+      }
+      nextStatus = body.status;
+    }
+
+    // Mounts change — every non-'*' host must be a registered brand domain.
+    let nextMounts: AppMount[] = current.mounts;
+    if (body.mounts !== undefined) {
+      const err = validateMounts(body.mounts);
+      if (err) return c.json({ error: err }, 400);
+      const mounts = body.mounts as AppMount[];
+      const customHosts = mounts.map((m) => m.host).filter((h) => h !== '*');
+      if (customHosts.length) {
+        let known = new Set<string>();
+        try {
+          const { results } = await c.env.DB.prepare(
+            `SELECT domain FROM workspace_domains WHERE workspace_id = ?`,
+          )
+            .bind(workspace.id)
+            .all<{ domain: string }>();
+          known = new Set((results ?? []).map((r) => r.domain));
+        } catch {
+          known = new Set(); // table missing → no registered domains
+        }
+        const bad = customHosts.find((h) => !known.has(h));
+        if (bad) {
+          return c.json({ error: `host "${bad}" is not a registered brand domain`, host: bad }, 400);
+        }
+      }
+      nextMounts = mounts;
+    }
+
+    // Settings merge (shallow).
+    const nextSettings =
+      body.settings && typeof body.settings === 'object'
+        ? { ...current.settings, ...body.settings }
+        : current.settings;
+
+    // Persist as an installed_apps upsert. mounts live inside
+    // settings_json alongside the app settings (the registry reads them
+    // back out). manifest_json kept minimal for core apps.
+    const settingsJson = JSON.stringify({ ...nextSettings, mounts: nextMounts });
+    const user = c.get('user');
+    await c.env.DB.prepare(
+      `INSERT INTO installed_apps (workspace_id, app_id, manifest_json, settings_json, status, installed_by)
+       VALUES (?, ?, '{}', ?, ?, ?)
+       ON CONFLICT (workspace_id, app_id) DO UPDATE SET
+         settings_json = excluded.settings_json,
+         status = excluded.status`,
+    )
+      .bind(workspace.id, id, settingsJson, nextStatus, user?.id ?? null)
+      .run();
+
+    const updated = await getApp(c.env, workspace.id, id);
+    return c.json({ ok: true, app: updated });
+  });
+}
