@@ -64,24 +64,20 @@ Proposed `settings_json` shape:
 behavior (serve on `workspace.curalisto.com`) needs no config and nothing
 breaks for existing workspaces.
 
-### `workspace_domains` (NEW — Layer A)
+### `workspace_domains` (Layer A) — **owned by `docs/plan/brand-domain.md`**
 
-```sql
-CREATE TABLE workspace_domains (
-  workspace_id TEXT NOT NULL,
-  domain       TEXT NOT NULL,          -- 'curalisto.com'
-  verified     INTEGER NOT NULL DEFAULT 0,
-  verify_token TEXT,                   -- for DNS TXT / ACME verification
-  created_at   TEXT DEFAULT (datetime('now')),
-  created_by   TEXT,
-  PRIMARY KEY (domain),                -- a domain maps to exactly one workspace
-  FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-);
-CREATE INDEX idx_workspace_domains_ws ON workspace_domains(workspace_id);
-```
+> **Reconciled:** the `workspace_domains` table + `resolveByDomain()` +
+> render-time host awareness are specified and shipped by the standalone
+> **Tenant Brand Domains** plan (`docs/plan/brand-domain.md`), which is
+> Layer A and lands first. The App Manager does NOT re-create this table
+> or the resolver work — it **builds on** it. See that plan for the
+> canonical schema (`PRIMARY KEY (domain)`, `verified` defaulting to
+> trusted-on-write, per-isolate cache, the `absoluteUrl` helper).
 
-A mount may only reference a `verified` domain — prevents a tenant
-claiming someone else's hostname.
+What the App Manager adds on top of Layer A: a mount may only reference a
+domain that exists in `workspace_domains` for this workspace — the
+brand-domain plan guarantees the domain is real + tenant-owned; the App
+Manager decides *which apps* serve on it (Layer B mount config).
 
 ---
 
@@ -112,20 +108,21 @@ default mounts `[{host:'*', path: basePath}]`).
 ## Build steps
 
 ### 1. Migrations
-- `017_workspace_domains.ts` — the table above.
-- `018_seed_installed_apps` — backfill an `installed_apps` row for each
-  core app in every existing workspace (`INSERT … SELECT id FROM
-  workspaces`, `ON CONFLICT DO NOTHING`, status `active`, default mounts).
-  Mirrors the migration-003 per-workspace backfill pattern.
+- `installed_apps` backfill — an `installed_apps` row for each core app
+  in every existing workspace (`INSERT … SELECT id FROM workspaces`,
+  `ON CONFLICT DO NOTHING`, status `active`, default mounts). Mirrors the
+  migration-003 per-workspace backfill pattern.
 - Bootstrap (`routes/bootstrap.ts`) seeds the same rows for new workspaces.
+- *(The `workspace_domains` table + its migration are NOT here — they
+  ship in `docs/plan/brand-domain.md` (Layer A), which lands first. The
+  App Manager reuses that table.)*
 
 ### 2. Layer A — resolver
-- Implement `resolveByDomain()` (`middleware/workspace-resolver.ts:172`,
-  currently `return null`): `SELECT workspace_id FROM workspace_domains
-  WHERE domain=? AND verified=1`. (Strategy 3 already calls it.)
-- CF route: add `curalisto.com/*` (or scoped `…/legal/*`, `…/brand/*`) to
-  the workspace worker's `wrangler.toml`. **Infra step — needs DNS/zone
-  coordination; document, don't assume.**
+- **Done by `docs/plan/brand-domain.md`**: `resolveByDomain()`
+  implementation, the per-isolate host cache, the `absoluteUrl` helper,
+  and the CF route are all in the brand-domain plan. The App Manager
+  depends on that work being in place; it adds no resolver code of its
+  own. Layer B (below) reads the `brandDomain` context the resolver sets.
 
 ### 3. Layer B — the mount gate (the core new mechanism)
 New middleware `middleware/app-mount.ts`, registered AFTER
@@ -196,9 +193,7 @@ Client (`shell/src/apps/core/apps/AppsPage.tsx` — today lists guest only):
 
 | File | Change |
 |------|--------|
-| `db/migrations/017_workspace_domains.ts` | new table |
-| `db/migrations/018_seed_installed_apps.ts` | backfill core-app rows |
-| `middleware/workspace-resolver.ts` | implement `resolveByDomain` |
+| `db/migrations/*_seed_installed_apps.ts` | backfill core-app rows |
 | `middleware/app-mount.ts` | NEW — the per-request mount/enable gate |
 | `create-workspace.ts` | register gate (after resolver, before core apps); nav handler reads registry |
 | `services/app-registry.ts` | NEW — unify core+guest+installed_apps |
@@ -208,7 +203,7 @@ Client (`shell/src/apps/core/apps/AppsPage.tsx` — today lists guest only):
 | `routes/bootstrap.ts` | seed installed_apps for new workspaces |
 | `shell/src/apps/core/apps/AppsPage.tsx` | list all apps + mounts + domains UI |
 | `shell/src/apps/core/legal/LegalPage.tsx` | remove PublishCard (moves to App Manager) |
-| `wrangler.toml` (tenant) | CF route for brand domain — infra |
+| — | `workspace_domains` table, `resolveByDomain`, CF route, `absoluteUrl`: see `docs/plan/brand-domain.md` (Layer A, ships first) |
 
 ---
 
