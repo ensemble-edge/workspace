@@ -23,7 +23,7 @@ import type {
   WorkspaceConfig,
   ResolvedConfig,
 } from './types';
-import { cors, publicCors, workspaceResolver, bootstrapCheck, auth } from './middleware';
+import { cors, publicCors, workspaceResolver, bootstrapCheck, auth, appDispatch } from './middleware';
 import { runMigrations, hasMigrations, migrations } from './db';
 import { createAuthRoutes, createBootstrapRoutes, createGuestGatewayRoutes, createGuestSecretsRoutes, createWorkspaceContextRoutes } from './routes';
 import { registerCoreApps } from './apps';
@@ -134,6 +134,12 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
 
   // 4. Resolve workspace from hostname/path
   app.use('*', workspaceResolver(resolvedConfig));
+
+  // 4a. App dispatch (Track B): if a guest app is mounted at a public
+  // path on a brand host, forward to its worker. Core mounts + unclaimed
+  // paths fall through. Runs after the resolver (needs workspace) and
+  // before the route table. No-op unless a guest has a non-'*' mount.
+  app.use('*', appDispatch());
 
   // ============================================================================
   // Static Routes (no auth required)
@@ -636,8 +642,10 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
 
-    const { getSetting } = await import('./services/workspace-settings');
-    const enabled = (await getSetting(c.env, workspace.id, 'public_brand_guide_enabled')) === 'true';
+    // Publish flag via the App Manager (settings.published) with a
+    // read-through shim to the legacy public_brand_guide_enabled.
+    const { isAppPublished } = await import('./services/app-registry');
+    const enabled = await isAppPublished(c.env, workspace.id, 'core:brand', 'public_brand_guide_enabled');
     if (!enabled) return c.notFound();
 
     const { renderBrandGuide } = await import('./services/brand-guide');

@@ -46,11 +46,12 @@ async function defaultLocale(c: Ctx, workspaceId: string): Promise<string> {
 async function isLegalPublicEnabled(c: Ctx, workspaceId: string): Promise<boolean> {
   // Two gates compose: the App Manager enable/disable (is the legal app
   // active at all?) AND the publish toggle (are public pages live?).
-  // Either off → public surfaces 404.
-  const { isAppActive } = await import('../../../services/app-registry');
+  // Either off → public surfaces 404. The publish flag now lives on the
+  // App Manager (settings.published) with a read-through shim to the
+  // legacy legal_public_enabled setting for existing workspaces.
+  const { isAppActive, isAppPublished } = await import('../../../services/app-registry');
   if (!(await isAppActive(c.env, workspaceId, 'core:legal'))) return false;
-  const { getSetting } = await import('../../../services/workspace-settings');
-  return (await getSetting(c.env, workspaceId, 'legal_public_enabled')) === 'true';
+  return isAppPublished(c.env, workspaceId, 'core:legal', 'legal_public_enabled');
 }
 
 /**

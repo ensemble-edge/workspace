@@ -196,6 +196,50 @@ export async function isAppActive(env: Env_, workspaceId: string, appId: string)
   }
 }
 
+/**
+ * Whether an app's PUBLIC surface is published, read through the App
+ * Manager. This consolidates the publish toggle into the app's
+ * installed_apps settings (`settings.published`), but with a READ-THROUGH
+ * SHIM to a legacy workspace setting so existing workspaces keep their
+ * state without a data migration:
+ *
+ *   1. If installed_apps.settings_json has an explicit `published`
+ *      boolean → use it (the App Manager wrote it; new source of truth).
+ *   2. Else fall back to `legacyKey` in workspace_settings (e.g.
+ *      legal_public_enabled / public_brand_guide_enabled).
+ *
+ * New writes go to settings.published (via the App Manager PATCH); the
+ * legacy key is only ever read as a fallback. No backfill needed.
+ */
+export async function isAppPublished(
+  env: Env_,
+  workspaceId: string,
+  appId: string,
+  legacyKey: string,
+): Promise<boolean> {
+  // 1. explicit settings.published on the installed_apps row.
+  try {
+    const row = await env.DB.prepare(
+      `SELECT settings_json FROM installed_apps WHERE workspace_id = ? AND app_id = ?`,
+    )
+      .bind(workspaceId, appId)
+      .first<{ settings_json: string | null }>();
+    if (row?.settings_json) {
+      const parsed = JSON.parse(row.settings_json) as Record<string, unknown>;
+      if (typeof parsed.published === 'boolean') return parsed.published;
+    }
+  } catch {
+    // installed_apps missing → fall through to legacy.
+  }
+  // 2. legacy workspace setting fallback.
+  try {
+    const { getSetting } = await import('./workspace-settings');
+    return (await getSetting(env as never, workspaceId, legacyKey as never)) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 /** Core app ids that get an installed_apps row. Mirrors migration 018. */
 export const SEEDED_CORE_APP_IDS = ['core:brand', 'core:people', 'core:admin', 'core:apps', 'core:legal'];
 

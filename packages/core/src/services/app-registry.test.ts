@@ -8,7 +8,9 @@ import { Miniflare } from 'miniflare';
 import { Hono } from 'hono';
 import { migration as m001 } from '../db/migrations/001_initial';
 import { migration as m002 } from '../db/migrations/002_guest_apps';
-import { listApps, isAppActive, buildInstalledAppsSeed } from './app-registry';
+import { listApps, isAppActive, isAppPublished, buildInstalledAppsSeed } from './app-registry';
+import { migration as m010 } from '../db/migrations/010_workspace_settings';
+import { setSetting } from './workspace-settings';
 import { registerAppsRoutes } from '../apps/core/apps/routes';
 
 let mf: Miniflare;
@@ -54,9 +56,10 @@ beforeAll(async () => {
   });
   db = (await mf.getD1Database('DB')) as unknown as D1Database;
 
-  // 001 creates workspaces + installed_apps; 002 creates guest_apps.
+  // 001 creates workspaces + installed_apps; 002 guest_apps; 010 settings.
   await applyMigration(m001);
   await applyMigration(m002);
+  await applyMigration(m010);
   await db.prepare('INSERT INTO workspaces (id, slug, name) VALUES (?,?,?)').bind(WS, 'am', 'AM').run();
   // Seed core-app rows (what bootstrap/migration 018 do).
   await db.batch(buildInstalledAppsSeed(db, WS));
@@ -160,5 +163,28 @@ describe('App Manager API', () => {
       body: JSON.stringify({ status: 'inactive' }),
     });
     expect(r.status).toBe(403);
+  });
+});
+
+describe('isAppPublished read-through shim', () => {
+  const WS2 = 'ws_pub';
+  it('falls back to the legacy setting when no settings.published', async () => {
+    await db.prepare('INSERT INTO workspaces (id, slug, name) VALUES (?,?,?)').bind(WS2, 'pub', 'Pub').run();
+    await db.batch(buildInstalledAppsSeed(db, WS2));
+    // No settings.published yet → reads legacy legal_public_enabled.
+    await setSetting({ DB: db } as never, WS2, 'legal_public_enabled', 'true', 'u1');
+    expect(await isAppPublished({ DB: db }, WS2, 'core:legal', 'legal_public_enabled')).toBe(true);
+    await setSetting({ DB: db } as never, WS2, 'legal_public_enabled', 'false', 'u1');
+    expect(await isAppPublished({ DB: db }, WS2, 'core:legal', 'legal_public_enabled')).toBe(false);
+  });
+
+  it('explicit settings.published wins over the legacy setting', async () => {
+    // legacy says false, but the App Manager wrote published:true.
+    await setSetting({ DB: db } as never, WS2, 'legal_public_enabled', 'false', 'u1');
+    await db
+      .prepare(`UPDATE installed_apps SET settings_json = ? WHERE workspace_id = ? AND app_id = 'core:legal'`)
+      .bind(JSON.stringify({ published: true }), WS2)
+      .run();
+    expect(await isAppPublished({ DB: db }, WS2, 'core:legal', 'legal_public_enabled')).toBe(true);
   });
 });

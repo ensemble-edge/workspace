@@ -29,8 +29,10 @@ export function registerBrandRoutes(
   // dual-path (admin /_ensemble/brand/spec + public /brand/spec) which
   // was confusing and required keeping two registrations in sync.
   async function isPublicBrandEnabled(env: Env, workspaceId: string): Promise<boolean> {
-    const { getSetting } = await import('../../../services/workspace-settings');
-    return (await getSetting(env, workspaceId, 'public_brand_guide_enabled')) === 'true';
+    // Publish flag now lives on the App Manager (settings.published) with
+    // a read-through shim to the legacy public_brand_guide_enabled.
+    const { isAppPublished } = await import('../../../services/app-registry');
+    return isAppPublished(env, workspaceId, 'core:brand', 'public_brand_guide_enabled');
   }
 
   /**

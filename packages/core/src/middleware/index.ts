@@ -21,6 +21,7 @@
 // Common middleware
 export { cors, publicCors } from './cors';
 export { workspaceResolver } from './workspace-resolver';
+export { appDispatch } from './app-dispatch';
 
 // Standalone mode middleware
 export { bootstrapCheck, markBootstrapComplete, clearBootstrapCache } from './bootstrap';
