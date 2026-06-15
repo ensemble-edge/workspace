@@ -62,30 +62,77 @@ export function registerAppsRoutes(
     if (!workspace?.id) return c.json({ error: 'workspace not resolved' }, 400);
     const apps = await listApps(c.env, workspace.id);
 
-    // Collect the distinct hosts apps mount on (excluding '*', the
-    // workspace's own host which needs no extra route).
+    // Hosts that need a zone route come from TWO sources, not just mounts:
+    //   1. Every REGISTERED brand domain — because the workspace already
+    //      serves its domain-level public surfaces there the moment the
+    //      domain is registered: the /brand guide, /legal/* pages, AND
+    //      their assets under /_ensemble/brand/* (logos, favicons, CSS).
+    //      These are NOT "app mounts" — they come for free with the
+    //      domain — so a mount-only hint under-reported them and left the
+    //      brand guide's logos (/_ensemble/brand/render/*) un-routed → 404.
+    //   2. Any explicit non-'*' app mount host (guest apps on a brand path).
     const hosts = new Set<string>();
+    try {
+      const { results } = await c.env.DB.prepare(
+        `SELECT domain FROM workspace_domains WHERE workspace_id = ?`,
+      )
+        .bind(workspace.id)
+        .all<{ domain: string }>();
+      for (const r of results ?? []) hosts.add(r.domain);
+    } catch {
+      // workspace_domains missing → fall back to mount-derived hosts only.
+    }
     for (const a of apps) {
       if (a.status !== 'active') continue;
       for (const m of a.mounts) if (m.host && m.host !== '*') hosts.add(m.host);
     }
 
-    // One [[routes]] block per brand host → the tenant-host worker serves
-    // the workspace's public app paths under it. (Consumer surfaces on
-    // their own workers are the tenant's responsibility — noted in hint.)
+    // For each brand host, gather the COMPLETE set of path prefixes the
+    // active apps serving there need routed (declared per-app via
+    // routePrefixes — basePath + asset/sub-resource deps). This is the
+    // scalable model: every built-in or guest app contributes its
+    // prefixes, so the hint is correct as more apps mount on the domain.
+    const zone = (host: string) => host.split('.').slice(-2).join('.');
+    const hostPrefixes: Record<string, string[]> = {};
+    for (const host of hosts) {
+      const prefixes = new Set<string>();
+      for (const a of apps) {
+        if (a.status !== 'active') continue;
+        // A core public page serves on any registered brand host; a guest
+        // contributes only if it has a mount on THIS host.
+        const onHost =
+          a.tier === 'core'
+            ? a.surfaceKind === 'public'
+            : a.mounts.some((m) => m.host === host);
+        if (!onHost) continue;
+        for (const p of a.routePrefixes) prefixes.add(p);
+      }
+      hostPrefixes[host] = [...prefixes].sort();
+    }
+
+    // RECOMMENDED: a single `host/*` route per host — the complete,
+    // opinionated answer that covers every prefix above (pages AND their
+    // assets) in one line. `prefixes` is provided for transparency /
+    // debugging and for operators who insist on narrowing (they must
+    // include ALL listed prefixes, or assets 404).
     const blocks = [...hosts].map(
-      (host) =>
-        `[[routes]]\npattern = "${host}/*"\nzone_name = "${host.split('.').slice(-2).join('.')}"`,
+      (host) => `[[routes]]\npattern = "${host}/*"\nzone_name = "${zone(host)}"`,
     );
 
     return c.json({
       hosts: [...hosts],
       wrangler: blocks.join('\n\n'),
+      // Per-host prefix breakdown: what host/* expands to. Generic across
+      // all apps — no brand-specific special-casing.
+      prefixes: hostPrefixes,
       note:
-        'Point each brand host at the workspace worker (CNAME / CF custom hostname). ' +
-        'Anonymous consumer surfaces (your own quiz/API workers) are NOT served by ' +
-        'the workspace gateway — give them their own [[routes]]. See the App mounts ' +
-        '& routing section of the guest SDK docs.',
+        'Use the host/* route as-is — one line per host covers every app ' +
+        'serving there AND its assets (e.g. logos at /_ensemble/brand/render/*, ' +
+        '/brand/css). The `prefixes` map shows exactly what host/* expands to. ' +
+        'If you narrow the route you MUST include every listed prefix or assets ' +
+        '404. Point each host at the workspace worker (CNAME / CF custom ' +
+        'hostname). Anonymous consumer surfaces (your own quiz/API workers) ' +
+        'need their OWN routes — see the guest SDK docs.',
     });
   });
 

@@ -162,12 +162,17 @@ export function AppsPage() {
 // ─────────────────────── Routing setup ───────────────────────
 
 function RoutingSetupCard() {
-  const [hint, setHint] = useState<{ hosts: string[]; wrangler: string; note: string } | null>(null);
+  const [hint, setHint] = useState<{
+    hosts: string[];
+    wrangler: string;
+    note: string;
+    prefixes?: Record<string, string[]>;
+  } | null>(null);
 
   useEffect(() => {
     (async () => {
       const r = await authedFetch('/_ensemble/core/apps/routes-hint').catch(() => null);
-      if (r?.ok) setHint((await r.json()) as { hosts: string[]; wrangler: string; note: string });
+      if (r?.ok) setHint(await r.json());
     })();
   }, []);
 
@@ -178,20 +183,33 @@ function RoutingSetupCard() {
       <CardHeader>
         <CardTitle>Routing setup</CardTitle>
         <CardDescription>
-          The Cloudflare zone routes this workspace's public surfaces need. The platform derives
-          these from each app's mounts — you don't hand-author them. Paste into the worker's
-          <code> wrangler.toml</code>.
+          The Cloudflare zone routes your public surfaces need. The platform derives these from
+          each app — you don't hand-author them. Paste into the worker's <code>wrangler.toml</code>.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {hint.hosts.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No brand-domain mounts configured — public pages serve on the workspace host, which
-            needs no extra zone routes. Add a brand domain in Settings → Domains, then mount an
-            app on it.
+            No brand domains registered — public pages serve on the workspace host, which needs no
+            extra zone routes. Add a brand domain in Settings → Domains to serve under it.
           </p>
         ) : (
-          <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">{hint.wrangler}</pre>
+          <>
+            <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">{hint.wrangler}</pre>
+            {hint.prefixes &&
+              Object.entries(hint.prefixes).map(([host, prefixes]) => (
+                <div key={host} className="text-xs">
+                  <span className="font-medium">{host}/*</span>
+                  <span className="text-muted-foreground"> covers: </span>
+                  <span className="font-mono text-muted-foreground">{prefixes.join('  ')}</span>
+                </div>
+              ))}
+            <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-muted-foreground">
+              ⚠ Use the <code>host/*</code> route as-is. If you narrow it, you must include every
+              prefix above — otherwise assets like logos (<code>/_ensemble/brand/render/*</code>)
+              and <code>/brand/css</code> will 404.
+            </p>
+          </>
         )}
         <p className="text-xs text-muted-foreground">{hint.note}</p>
       </CardContent>

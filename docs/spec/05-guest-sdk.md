@@ -1663,12 +1663,26 @@ not *whether anonymous traffic can reach it*.
 #### Routing setup is operator-managed, not hand-authored
 
 The App Manager derives the recommended Cloudflare `[[routes]]` blocks
-from the app mount map and shows them in a **Routing setup** panel
+and shows them in a **Routing setup** panel
 (`GET /_ensemble/core/apps/routes-hint`). Operators copy that into the
 relevant worker's `wrangler.toml` rather than re-deriving a routing
 convention per tenant. As a guest author you don't manage zone routes;
-you declare what your app needs (its mount) and the platform tells the
-operator the one infra block to set.
+you declare what your app needs and the platform tells the operator the
+one infra block to set.
+
+**A route must cover an app's assets, not just its page** — this is the
+scalable rule. A page at `/brand` loads logos from
+`/_ensemble/brand/render/*`; legal pages pull `/brand/css`; an iframe
+guest loads `/_ensemble/runtime/*`. Each app therefore declares a
+**`routePrefixes`** set — *every* path prefix it serves or depends on —
+and the routes-hint composes these across all active apps per host. The
+recommended `host/*` route covers them all in one line; the hint's
+`prefixes` map shows exactly what that expands to. **Narrowing the route
+to just the page path (e.g. `/brand/*`) will 404 the assets** — a real
+bug we hit and fixed by making the model asset-aware. If your guest
+serves assets under its own sub-paths, they're covered by the guest's
+mount prefix automatically; if it pulls workspace branding, the brand
+prefixes are included for you.
 
 #### What this does NOT do
 

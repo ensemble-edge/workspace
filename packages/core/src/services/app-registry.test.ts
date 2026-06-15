@@ -8,6 +8,7 @@ import { Miniflare } from 'miniflare';
 import { Hono } from 'hono';
 import { migration as m001 } from '../db/migrations/001_initial';
 import { migration as m002 } from '../db/migrations/002_guest_apps';
+import { migration as m017 } from '../db/migrations/017_workspace_domains';
 import { listApps, isAppActive, isAppPublished, buildInstalledAppsSeed } from './app-registry';
 import { migration as m010 } from '../db/migrations/010_workspace_settings';
 import { setSetting } from './workspace-settings';
@@ -60,6 +61,7 @@ beforeAll(async () => {
   await applyMigration(m001);
   await applyMigration(m002);
   await applyMigration(m010);
+  await applyMigration(m017);
   await db.prepare('INSERT INTO workspaces (id, slug, name) VALUES (?,?,?)').bind(WS, 'am', 'AM').run();
   // Seed core-app rows (what bootstrap/migration 018 do).
   await db.batch(buildInstalledAppsSeed(db, WS));
@@ -186,5 +188,42 @@ describe('isAppPublished read-through shim', () => {
       .bind(JSON.stringify({ published: true }), WS2)
       .run();
     expect(await isAppPublished({ DB: db }, WS2, 'core:legal', 'legal_public_enabled')).toBe(true);
+  });
+});
+
+describe('scalable routing (routePrefixes + routes-hint)', () => {
+  it('every app declares routePrefixes covering its assets', async () => {
+    const apps = await listApps({ DB: db }, WS);
+    const byId = new Map(apps.map((a) => [a.id, a]));
+    // Brand must include its asset prefix (the logos-404 bug).
+    expect(byId.get('core:brand')?.routePrefixes).toContain('/_ensemble/brand');
+    expect(byId.get('core:brand')?.routePrefixes).toContain('/brand');
+    // Legal pages pull /brand/css + favicon, so they need the brand prefix too.
+    expect(byId.get('core:legal')?.routePrefixes).toContain('/_ensemble/brand');
+    expect(byId.get('core:legal')?.routePrefixes).toContain('/legal');
+  });
+
+  it('routes-hint emits a host/* route + a complete prefix breakdown for a registered domain (even with no mounts)', async () => {
+    // Register a brand domain but mount NOTHING on it — the brand guide +
+    // legal still serve there, so the hint must still cover them.
+    await db
+      .prepare(`INSERT OR IGNORE INTO workspace_domains (domain, workspace_id, proto) VALUES ('brandco.com', ?, 'https')`)
+      .bind(WS)
+      .run();
+
+    const r = await adminApp().request('http://x/_ensemble/core/apps/routes-hint');
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      hosts: string[];
+      wrangler: string;
+      prefixes: Record<string, string[]>;
+    };
+    // The registered domain is present even though nothing is mounted on it.
+    expect(body.hosts).toContain('brandco.com');
+    expect(body.wrangler).toContain('pattern = "brandco.com/*"');
+    // The prefix breakdown includes the brand asset prefix — the thing the
+    // old mount-only hint missed, causing logos to 404.
+    expect(body.prefixes['brandco.com']).toContain('/_ensemble/brand');
+    expect(body.prefixes['brandco.com']).toContain('/legal');
   });
 });

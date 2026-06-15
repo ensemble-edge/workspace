@@ -43,6 +43,16 @@ export interface AppEntry {
   status: AppStatus;
   /** Mounts from installed_apps.settings_json; defaults to [{host:'*', path: basePath}]. */
   mounts: AppMount[];
+  /**
+   * EVERY path prefix this app serves or depends on when routed on a
+   * host — not just its headline path. This is what makes routing
+   * scalable + correct: a CF zone route for the host must cover ALL of
+   * these, or the app's assets/sub-resources 404 (the brand-guide-logos
+   * bug: the page is at /brand but its logos load from
+   * /_ensemble/brand/render/*). The routes-hint composes these across all
+   * active apps. See routePrefixesFor().
+   */
+  routePrefixes: string[];
   /** Can the operator disable it? Load-bearing apps are NOT governable. */
   governable: boolean;
   /** App-specific settings blob (e.g. legal's `published`). */
@@ -62,6 +72,53 @@ const NON_GOVERNABLE = new Set(['core:brand', 'core:people', 'core:admin', 'core
 
 /** Core apps whose public pages are crawlable surfaces (not operator tools). */
 const PUBLIC_CORE = new Set(['core:legal', 'core:brand']);
+
+/**
+ * Shared brand asset prefix every public page depends on — logos,
+ * favicons, and the /brand/css stylesheet all live (or alias) under the
+ * brand namespace. Any app rendered on a brand host that shows the
+ * workspace's branding needs these routed too.
+ */
+const BRAND_ASSET_PREFIXES = ['/_ensemble/brand', '/brand'];
+
+/**
+ * The COMPLETE set of path prefixes an app serves/depends on when routed
+ * on a host. The routes-hint composes these so a CF zone route covers
+ * everything the app needs — not just its headline path. Scalable: a new
+ * core or guest app declares its prefixes here (or gets the sensible
+ * default) and routing Just Works on the primary domain.
+ *
+ * @param basePath the app's mount/base path (e.g. '/legal', or a guest's
+ *                 public mount path).
+ */
+function routePrefixesFor(appId: string, tier: 'core' | 'guest', basePath: string): string[] {
+  const set = new Set<string>([basePath]);
+  switch (appId) {
+    case 'core:brand':
+      // The /brand guide page + every brand asset (logos via
+      // /_ensemble/brand/render/*, favicons, /brand/css).
+      set.add('/brand');
+      for (const p of BRAND_ASSET_PREFIXES) set.add(p);
+      break;
+    case 'core:legal':
+      // /legal pages + /api/legal/* read API; legal pages pull /brand/css
+      // and the brand favicon, so they need the brand asset prefixes too.
+      set.add('/legal');
+      set.add('/api/legal');
+      for (const p of BRAND_ASSET_PREFIXES) set.add(p);
+      break;
+    default:
+      if (tier === 'guest') {
+        // A guest mounted on a brand path: its mount + the guest runtime
+        // assets it loads (the workspace serves these for iframe guests).
+        set.add('/_ensemble/runtime');
+        // Guests that render workspace branding also want the brand CSS.
+        set.add('/brand');
+      }
+      break;
+  }
+  return [...set];
+}
 
 interface InstalledRow {
   app_id: string;
@@ -130,6 +187,7 @@ export async function listApps(env: Env_, workspaceId: string): Promise<AppEntry
       surfaceKind: PUBLIC_CORE.has(m.id) ? 'public' : 'operator',
       status: ov?.status ?? 'active',
       mounts: ov?.mounts ?? [{ host: '*', path: basePath }],
+      routePrefixes: routePrefixesFor(m.id, 'core', basePath),
       governable: !NON_GOVERNABLE.has(m.id),
       settings: ov?.settings ?? {},
     });
@@ -149,6 +207,11 @@ export async function listApps(env: Env_, workspaceId: string): Promise<AppEntry
       // guest_apps.enabled is the legacy flag; installed_apps.status wins
       // when present, else fall back to the legacy flag.
       const status: AppStatus = ov?.status ?? (g.enabled === 0 ? 'inactive' : 'active');
+      const mounts = ov?.mounts ?? [{ host: '*', path: basePath }];
+      // Route prefixes anchor on the guest's PUBLIC mount path (where it
+      // serves on a brand host), not the internal gateway path — so the
+      // emitted routes cover where it actually answers.
+      const publicMount = mounts.find((m) => m.host !== '*')?.path ?? basePath;
       entries.push({
         id: appId,
         tier: 'guest',
@@ -158,7 +221,8 @@ export async function listApps(env: Env_, workspaceId: string): Promise<AppEntry
         basePath,
         surfaceKind: 'operator', // guest apps proxy through the auth-gated gateway
         status,
-        mounts: ov?.mounts ?? [{ host: '*', path: basePath }],
+        mounts,
+        routePrefixes: routePrefixesFor(appId, 'guest', publicMount),
         governable: true,
         settings: ov?.settings ?? {},
       });
