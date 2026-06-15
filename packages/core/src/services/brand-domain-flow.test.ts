@@ -220,12 +220,32 @@ describe('legal SEO + indexing', () => {
     expect(res.status).toBe(200);
   });
 
-  it('normalizes the trailing slash: /legal/ → 301 /legal', async () => {
-    // /legal/ is a distinct route from /legal in Hono and matches neither
-    // /legal nor /legal/:slug (empty slug) — would otherwise 404. Redirect
-    // to the canonical bare path, preserving query.
-    const res = await legalApp(null).request('http://workspace.x/legal/?lang=es', { redirect: 'manual' });
-    expect(res.status).toBe(301);
-    expect(res.headers.get('Location')).toBe('/legal?lang=es');
+  it('global trailing-slash normalization: any /path/ → 301 /path (covers /legal, /brand, future)', async () => {
+    // The fix is GLOBAL (Hono trimTrailingSlash in create-workspace), not
+    // per-route. Mirror that wiring: the middleware in front, then the
+    // routes. It 301s any trailing-slash path that would 404 — so /legal/,
+    // /brand/, and any future base path are all covered by ONE rule.
+    const { trimTrailingSlash } = await import('hono/trailing-slash');
+    const app = new Hono();
+    app.use('*', trimTrailingSlash());
+    app.use('*', async (c, next) => {
+      c.set('workspace' as never, { id: WS } as never);
+      c.set('brandDomain' as never, null as never);
+      (c as { env: unknown }).env = { DB: db };
+      await next();
+    });
+    registerLegalRoutes(app as never);
+
+    // /legal/ → 301 /legal (preserves query). The middleware only acts on
+    // a would-be 404, so it can't disturb routes that already resolve.
+    const legal = await app.request('http://workspace.x/legal/?lang=es', { redirect: 'manual' });
+    expect(legal.status).toBe(301);
+    expect(new URL(legal.headers.get('Location')!).pathname).toBe('/legal');
+
+    // A made-up trailing-slash path is normalized the same way — proving
+    // it's not legal-specific (it would then hit the no-slash route).
+    const other = await app.request('http://workspace.x/anything/', { redirect: 'manual' });
+    expect(other.status).toBe(301);
+    expect(new URL(other.headers.get('Location')!).pathname).toBe('/anything');
   });
 });

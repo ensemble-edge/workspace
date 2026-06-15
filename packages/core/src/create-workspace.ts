@@ -17,6 +17,7 @@
  */
 
 import { Hono } from 'hono';
+import { trimTrailingSlash } from 'hono/trailing-slash';
 import type {
   Env,
   ContextVariables,
@@ -24,7 +25,7 @@ import type {
   ResolvedConfig,
 } from './types';
 import { cors, publicCors, workspaceResolver, bootstrapCheck, auth, appDispatch } from './middleware';
-import { runMigrations, hasMigrations, migrations } from './db';
+import { runMigrations, migrations } from './db';
 import { createAuthRoutes, createBootstrapRoutes, createGuestGatewayRoutes, createGuestSecretsRoutes, createWorkspaceContextRoutes } from './routes';
 import { registerCoreApps } from './apps';
 import { generateBrandCss, getSavedThemeMode } from './apps/core/brand/css';
@@ -128,6 +129,16 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
     await migrationsPromise;
     await next();
   });
+
+  // 2b. Trailing-slash normalization (global, Vercel-style). Canonical
+  // form is NO trailing slash — matches how every route is written
+  // (/legal, /brand, /brand-app). Default mode (no alwaysRedirect) is
+  // non-invasive: it only 301s a trailing-slash path AFTER it would 404,
+  // so it can never break a route that already resolves, and it covers
+  // every public base path (/legal/, /brand/, and any future one) with
+  // one rule instead of per-route redirects. Registered early so its
+  // post-next() recovery wraps all downstream routing.
+  app.use('*', trimTrailingSlash());
 
   // 3. Bootstrap check - redirect to setup if no users exist
   app.use('*', bootstrapCheck());
