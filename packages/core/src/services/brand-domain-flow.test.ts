@@ -220,14 +220,26 @@ describe('legal SEO + indexing', () => {
     expect(res.status).toBe(200);
   });
 
-  it('global trailing-slash normalization: any /path/ → 301 /path (covers /legal, /brand, future)', async () => {
-    // The fix is GLOBAL (Hono trimTrailingSlash in create-workspace), not
-    // per-route. Mirror that wiring: the middleware in front, then the
-    // routes. It 301s any trailing-slash path that would 404 — so /legal/,
-    // /brand/, and any future base path are all covered by ONE rule.
-    const { trimTrailingSlash } = await import('hono/trailing-slash');
+  it('global trailing-slash normalization runs BEFORE the SPA catch-all (the real bug)', async () => {
+    // Production has a catch-all (app.get('*')) that returns 200 (the SPA
+    // shell) for unmatched paths. So a 404-triggered normalizer never
+    // fires — /brand/ would silently serve the blank shell. The fix
+    // redirects BEFORE routing. This test mirrors that wiring: the
+    // pre-routing normalizer, then routes, then a 200 catch-all.
     const app = new Hono();
-    app.use('*', trimTrailingSlash());
+    // The exact normalizer from create-workspace.
+    app.use('*', async (c, next) => {
+      const method = c.req.method;
+      if (method === 'GET' || method === 'HEAD') {
+        const url = new URL(c.req.url);
+        const p = url.pathname;
+        if (p.length > 1 && p.endsWith('/') && !p.startsWith('/_ensemble/')) {
+          url.pathname = p.replace(/\/+$/, '') || '/';
+          return c.redirect(url.toString(), 301);
+        }
+      }
+      return next();
+    });
     app.use('*', async (c, next) => {
       c.set('workspace' as never, { id: WS } as never);
       c.set('brandDomain' as never, null as never);
@@ -235,17 +247,24 @@ describe('legal SEO + indexing', () => {
       await next();
     });
     registerLegalRoutes(app as never);
+    // The SPA catch-all that returns 200 for everything (the masking bug).
+    app.get('*', (c) => c.html('<!DOCTYPE html><html lang="en"><body>SPA shell</body></html>'));
 
-    // /legal/ → 301 /legal (preserves query). The middleware only acts on
-    // a would-be 404, so it can't disturb routes that already resolve.
-    const legal = await app.request('http://workspace.x/legal/?lang=es', { redirect: 'manual' });
-    expect(legal.status).toBe(301);
-    expect(new URL(legal.headers.get('Location')!).pathname).toBe('/legal');
+    // /legal/ and /brand/ → 301 to no-slash, NOT the 200 shell.
+    for (const path of ['/legal/?lang=es', '/brand/']) {
+      const res = await app.request(`http://workspace.x${path}`, { redirect: 'manual' });
+      expect(res.status).toBe(301);
+      expect(new URL(res.headers.get('Location')!).pathname).toBe(path.split('?')[0].replace(/\/$/, ''));
+    }
 
-    // A made-up trailing-slash path is normalized the same way — proving
-    // it's not legal-specific (it would then hit the no-slash route).
-    const other = await app.request('http://workspace.x/anything/', { redirect: 'manual' });
-    expect(other.status).toBe(301);
-    expect(new URL(other.headers.get('Location')!).pathname).toBe('/anything');
+    // /_ensemble/* is NEVER touched (API/asset surface) — a trailing
+    // slash there falls through to the catch-all (200), not a redirect.
+    const api = await app.request('http://workspace.x/_ensemble/something/', { redirect: 'manual' });
+    expect(api.status).toBe(200);
+
+    // The bare no-slash /legal still resolves normally (not redirected).
+    // (publish gate off in this app → 404, but importantly NOT a 301.)
+    const bare = await app.request('http://workspace.x/legal', { redirect: 'manual' });
+    expect(bare.status).not.toBe(301);
   });
 });

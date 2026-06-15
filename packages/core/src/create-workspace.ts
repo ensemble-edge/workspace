@@ -17,7 +17,6 @@
  */
 
 import { Hono } from 'hono';
-import { trimTrailingSlash } from 'hono/trailing-slash';
 import type {
   Env,
   ContextVariables,
@@ -130,15 +129,29 @@ export function createWorkspace(config: WorkspaceConfig): WorkspaceInstance {
     await next();
   });
 
-  // 2b. Trailing-slash normalization (global, Vercel-style). Canonical
-  // form is NO trailing slash — matches how every route is written
-  // (/legal, /brand, /brand-app). Default mode (no alwaysRedirect) is
-  // non-invasive: it only 301s a trailing-slash path AFTER it would 404,
-  // so it can never break a route that already resolves, and it covers
-  // every public base path (/legal/, /brand/, and any future one) with
-  // one rule instead of per-route redirects. Registered early so its
-  // post-next() recovery wraps all downstream routing.
-  app.use('*', trimTrailingSlash());
+  // 2b. Trailing-slash normalization (global, Vercel-style), canonical
+  // form = NO trailing slash. This MUST run BEFORE routing: Hono's
+  // built-in trimTrailingSlash only fires on a 404, but our SPA catch-all
+  // (app.get('*')) returns 200 for everything unmatched — so a
+  // trailing-slash path like /brand/ would silently get the blank app
+  // shell (200) instead of a 301 to /brand. So we redirect up front.
+  //
+  // Scoped to avoid blast radius: only GET/HEAD, never the root '/', and
+  // NEVER /_ensemble/* (the API + asset surface, which the SPA-asset
+  // rewrite and bindings rely on). Everything else — /brand/, /legal/,
+  // app mounts, any future public path — 301s to the no-slash form.
+  app.use('*', async (c, next) => {
+    const method = c.req.method;
+    if (method === 'GET' || method === 'HEAD') {
+      const url = new URL(c.req.url);
+      const p = url.pathname;
+      if (p.length > 1 && p.endsWith('/') && !p.startsWith('/_ensemble/')) {
+        url.pathname = p.replace(/\/+$/, '') || '/';
+        return c.redirect(url.toString(), 301);
+      }
+    }
+    return next();
+  });
 
   // 3. Bootstrap check - redirect to setup if no users exist
   app.use('*', bootstrapCheck());
