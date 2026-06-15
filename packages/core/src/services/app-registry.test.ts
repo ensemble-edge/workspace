@@ -217,6 +217,7 @@ describe('scalable routing (routePrefixes + routes-hint)', () => {
       hosts: string[];
       wrangler: string;
       prefixes: Record<string, string[]>;
+      assetPrefixes: string[];
     };
     // The registered domain is present even though nothing is mounted on it.
     expect(body.hosts).toContain('brandco.com');
@@ -225,5 +226,20 @@ describe('scalable routing (routePrefixes + routes-hint)', () => {
     // old mount-only hint missed, causing logos to 404.
     expect(body.prefixes['brandco.com']).toContain('/_ensemble/brand');
     expect(body.prefixes['brandco.com']).toContain('/legal');
+    // assetPrefixes lists the SDK-served prefixes that MUST route to the
+    // workspace — /_ensemble/* always, and the alias path when set.
+    expect(body.assetPrefixes).toContain('/_ensemble/*');
+    expect(body.prefixes['brandco.com']).toContain('/_ensemble/*');
+  });
+
+  it('assetPrefixes includes the asset alias path when the operator set one', async () => {
+    const { setSetting } = await import('./workspace-settings');
+    await setSetting({ DB: db } as never, WS, 'asset_public_alias_path', 'assets', 'u1');
+    const r = await adminApp().request('http://x/_ensemble/core/apps/routes-hint');
+    const body = (await r.json()) as { assetPrefixes: string[] };
+    expect(body.assetPrefixes).toContain('/_ensemble/*');
+    expect(body.assetPrefixes).toContain('/assets/*');
+    // reset so it doesn't leak into other tests
+    await setSetting({ DB: db } as never, WS, 'asset_public_alias_path', '', 'u1');
   });
 });

@@ -219,4 +219,13 @@ describe('legal SEO + indexing', () => {
     );
     expect(res.status).toBe(200);
   });
+
+  it('normalizes the trailing slash: /legal/ → 301 /legal', async () => {
+    // /legal/ is a distinct route from /legal in Hono and matches neither
+    // /legal nor /legal/:slug (empty slug) — would otherwise 404. Redirect
+    // to the canonical bare path, preserving query.
+    const res = await legalApp(null).request('http://workspace.x/legal/?lang=es', { redirect: 'manual' });
+    expect(res.status).toBe(301);
+    expect(res.headers.get('Location')).toBe('/legal?lang=es');
+  });
 });

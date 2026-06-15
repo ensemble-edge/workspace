@@ -87,15 +87,34 @@ export function registerAppsRoutes(
       for (const m of a.mounts) if (m.host && m.host !== '*') hosts.add(m.host);
     }
 
+    // SDK-served asset prefixes that MUST route to the workspace worker
+    // on any host that serves a workspace page — independent of which
+    // apps are mounted. This is the prefix set tenants miss when they
+    // narrow routes to "page" paths: the SDK serves all assets (logos,
+    // favicons, CSS, the guest runtime, brand renders) under /_ensemble/*,
+    // and — when the operator set a pretty asset alias — ALSO under
+    // /<alias>/*. If these aren't routed to the worker, the requests fall
+    // through to whatever else owns the host (e.g. a landing-site SPA
+    // catch-all), which famously returns 200 text/html instead of the
+    // asset — a broken image with NO 404 to flag it.
+    let aliasPath = '';
+    try {
+      const { getSetting } = await import('../../../services/workspace-settings');
+      aliasPath = (await getSetting(c.env, workspace.id, 'asset_public_alias_path')).trim();
+    } catch {
+      aliasPath = '';
+    }
+    const assetPrefixes = ['/_ensemble/*'];
+    if (aliasPath) assetPrefixes.push(`/${aliasPath}/*`);
+
     // For each brand host, gather the COMPLETE set of path prefixes the
-    // active apps serving there need routed (declared per-app via
-    // routePrefixes — basePath + asset/sub-resource deps). This is the
-    // scalable model: every built-in or guest app contributes its
-    // prefixes, so the hint is correct as more apps mount on the domain.
+    // active apps serving there need routed (per-app routePrefixes) PLUS
+    // the SDK asset prefixes above. Scalable: every built-in or guest app
+    // contributes its prefixes, so the hint stays correct as apps grow.
     const zone = (host: string) => host.split('.').slice(-2).join('.');
     const hostPrefixes: Record<string, string[]> = {};
     for (const host of hosts) {
-      const prefixes = new Set<string>();
+      const prefixes = new Set<string>(assetPrefixes); // assets always required
       for (const a of apps) {
         if (a.status !== 'active') continue;
         // A core public page serves on any registered brand host; a guest
@@ -125,12 +144,22 @@ export function registerAppsRoutes(
       // Per-host prefix breakdown: what host/* expands to. Generic across
       // all apps — no brand-specific special-casing.
       prefixes: hostPrefixes,
+      // The SDK-served asset prefixes (subset of the above) that MUST
+      // route to the workspace worker even if you narrow everything else.
+      // Surfaced explicitly so a tenant who narrows routes to protect
+      // another surface (e.g. a landing site) doesn't strand the assets.
+      assetPrefixes,
       note:
         'Use the host/* route as-is — one line per host covers every app ' +
         'serving there AND its assets (e.g. logos at /_ensemble/brand/render/*, ' +
-        '/brand/css). The `prefixes` map shows exactly what host/* expands to. ' +
-        'If you narrow the route you MUST include every listed prefix or assets ' +
-        '404. Point each host at the workspace worker (CNAME / CF custom ' +
+        '/brand/css). The `prefixes` map shows what host/* expands to; ' +
+        '`assetPrefixes` are the SDK-served prefixes (/_ensemble/* plus your ' +
+        'asset alias path if set) that MUST point at the workspace worker. ' +
+        'If you narrow the route — e.g. to protect a landing site — route ' +
+        'EVERY assetPrefix to the workspace too, or asset requests fall ' +
+        'through to whatever else owns the host and return 200 text/html ' +
+        '(a broken image with NO 404 — check Content-Type, not status). ' +
+        'Point each host at the workspace worker (CNAME / CF custom ' +
         'hostname). Anonymous consumer surfaces (your own quiz/API workers) ' +
         'need their OWN routes — see the guest SDK docs.',
     });

@@ -1677,12 +1677,23 @@ guest loads `/_ensemble/runtime/*`. Each app therefore declares a
 **`routePrefixes`** set — *every* path prefix it serves or depends on —
 and the routes-hint composes these across all active apps per host. The
 recommended `host/*` route covers them all in one line; the hint's
-`prefixes` map shows exactly what that expands to. **Narrowing the route
-to just the page path (e.g. `/brand/*`) will 404 the assets** — a real
-bug we hit and fixed by making the model asset-aware. If your guest
-serves assets under its own sub-paths, they're covered by the guest's
-mount prefix automatically; if it pulls workspace branding, the brand
-prefixes are included for you.
+`prefixes` map shows exactly what that expands to, and a dedicated
+`assetPrefixes` field lists the SDK-served prefixes — `/_ensemble/*` plus
+the operator's asset alias path (`/<alias>/*`) when set — that MUST route
+to the workspace worker no matter what.
+
+**The narrowing trap (check `Content-Type`, not status).** If a tenant
+narrows the route to just the page path (e.g. `/brand/*`) to protect
+another surface on the same host (a landing site), the asset requests
+(`/_ensemble/brand/render/*`, `/brand/css`) fall through to whatever else
+owns the host. A landing-site SPA catch-all typically answers them with
+**`200 text/html`** (its shell) — so you get broken images with **no
+404** to flag it; the status is 200 and only the `Content-Type` reveals
+the problem. The fix: route every `assetPrefix` to the workspace worker
+too (or just use `host/*`). The routes-hint surfaces these explicitly so
+no tenant has to rediscover this. If your guest serves assets under its
+own sub-paths, they're covered by its mount prefix automatically; if it
+pulls workspace branding, the brand prefixes are included for you.
 
 #### What this does NOT do
 

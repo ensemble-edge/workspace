@@ -167,6 +167,7 @@ function RoutingSetupCard() {
     wrangler: string;
     note: string;
     prefixes?: Record<string, string[]>;
+    assetPrefixes?: string[];
   } | null>(null);
 
   useEffect(() => {
@@ -204,10 +205,19 @@ function RoutingSetupCard() {
                   <span className="font-mono text-muted-foreground">{prefixes.join('  ')}</span>
                 </div>
               ))}
+            {hint.assetPrefixes && hint.assetPrefixes.length > 0 && (
+              <div className="text-xs">
+                <span className="text-muted-foreground">Assets that must route to the workspace: </span>
+                <span className="font-mono">{hint.assetPrefixes.join('  ')}</span>
+              </div>
+            )}
             <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-muted-foreground">
-              ⚠ Use the <code>host/*</code> route as-is. If you narrow it, you must include every
-              prefix above — otherwise assets like logos (<code>/_ensemble/brand/render/*</code>)
-              and <code>/brand/css</code> will 404.
+              ⚠ Use the <code>host/*</code> route as-is. If you narrow it (e.g. to protect a
+              landing site), you must <strong>also</strong> route every asset prefix above to the
+              workspace. Otherwise asset requests (logos at <code>/_ensemble/brand/render/*</code>,
+              <code> /brand/css</code>) fall through to whatever else owns the host and come back
+              as <strong>200 <code>text/html</code></strong> — a broken image with no 404. Check
+              the <code>Content-Type</code>, not the status code.
             </p>
           </>
         )}

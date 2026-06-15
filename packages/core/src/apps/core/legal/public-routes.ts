@@ -280,6 +280,17 @@ export function registerLegalPublicRoutes(
   // ───────────────────── Public HTML pages ─────────────────────
 
   /** GET /legal — redirect to the default-locale first active doc. */
+  // Trailing-slash normalization: /legal/ is a different route from
+  // /legal in Hono (strict slashes), and /legal/:slug requires a
+  // non-empty slug — so /legal/ would otherwise fall through to the SPA
+  // catch-all (or the tenant's landing site) and 404. Redirect it to the
+  // canonical bare path. Registered before /:slug so the empty-slug case
+  // is caught here.
+  app.get('/legal/', (c) => {
+    const url = new URL(c.req.url);
+    return c.redirect(`/legal${url.search}`, 301);
+  });
+
   app.get('/legal', async (c) => {
     const workspace = c.get('workspace');
     if (!workspace?.id) return c.notFound();
