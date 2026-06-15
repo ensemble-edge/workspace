@@ -1,0 +1,1 @@
+{"version":3,"file":"app-dispatch.d.ts","sourceRoot":"","sources":["../../src/middleware/app-dispatch.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;;;;;;;;;;GAqBG;AAEH,OAAO,KAAK,EAAiB,iBAAiB,EAAE,MAAM,MAAM,CAAC;AAC7D,OAAO,KAAK,EAAE,GAAG,EAAE,gBAAgB,EAAE,MAAM,UAAU,CAAC;AAqBtD,wBAAgB,WAAW,IAAI,iBAAiB,CAAC;IAAE,QAAQ,EAAE,GAAG,CAAC;IAAC,SAAS,EAAE,gBAAgB,CAAA;CAAE,CAAC,CA2F/F"}
