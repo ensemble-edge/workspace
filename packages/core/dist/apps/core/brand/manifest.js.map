@@ -1,0 +1,1 @@
+{"version":3,"file":"manifest.js","sourceRoot":"","sources":["../../../../src/apps/core/brand/manifest.ts"],"names":[],"mappings":"AAEA,MAAM,CAAC,MAAM,aAAa,GAAoB;IAC5C,EAAE,EAAE,YAAY;IAChB,IAAI,EAAE,eAAe;IACrB,IAAI,EAAE,SAAS;IACf,WAAW,EAAE,+EAA+E;IAC5F,IAAI,EAAE,MAAM;IACZ,GAAG,EAAE;QACH,KAAK,EAAE,OAAO;QACd,IAAI,EAAE,SAAS;QACf,OAAO,EAAE,WAAW;QACpB,IAAI,EAAE,QAAQ;KACf;CACF,CAAC"}
